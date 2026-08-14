@@ -8,7 +8,9 @@
 启动：streamlit run app.py
 多用户：配置 .streamlit/secrets.toml 的 [connections.gsheets] 后自动启用云端存储 + 名字/PIN 门闸
 """
+
 import argparse as _argparse
+import contextlib
 import csv
 import json
 import subprocess
@@ -17,6 +19,7 @@ from datetime import date
 from pathlib import Path
 
 import pandas as pd
+import storage  # 存储层：Google Sheets 优先，本地 CSV 回退
 import streamlit as st
 
 # ---- 路径：代码 vs 数据分离 ----
@@ -30,20 +33,28 @@ BASE = Path(_args.base_dir).resolve() if _args.base_dir else CODE_DIR
 DATA_DIR = BASE / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-import storage  # 存储层：Google Sheets 优先，本地 CSV 回退
+
 storage.init(DATA_DIR)
 
 TX_CSV = DATA_DIR / "transactions.csv"
 OBS_CSV = DATA_DIR / "observations.csv"
-CONFIG = json.loads((DATA_DIR / "config.json").read_text(encoding="utf-8"))
+try:
+    CONFIG = json.loads((DATA_DIR / "config.json").read_text(encoding="utf-8"))
+except (json.JSONDecodeError, OSError) as _e:
+    raise SystemExit(f"缺少或损坏的 data/config.json：{_e}") from None
 ASSETS = CONFIG["assets"]
-BACKTEST_DIR = Path(_args.base_dir + "/backtest") if _args.base_dir and Path(_args.base_dir + "/backtest").exists() else CODE_DIR.parent.parent.parent / "backtest-dca-5y"
+BACKTEST_DIR = (
+    Path(_args.base_dir + "/backtest")
+    if _args.base_dir and Path(_args.base_dir + "/backtest").exists()
+    else CODE_DIR.parent.parent.parent / "backtest-dca-5y"
+)
 
 st.set_page_config(page_title="模拟定投决策台", layout="wide", page_icon="📈")
 
 
 # ---- 全局样式与加载组件 ----
-st.markdown("""
+st.markdown(
+    """
 <style>
 /* 运行时不压暗页面（去掉白色大蒙版感） */
 [data-testid="stElementContainer"][data-stale="true"] { opacity: 1 !important; transition: none !important; }
@@ -181,8 +192,34 @@ body { background: #f7f8fa; }
     animation: dca-spin .8s linear infinite; }
 .dca-sync-msg { font-size: 16px; font-weight: 600; color: #22315e; letter-spacing: 1px; }
 .dca-sync-sub { font-size: 13px; color: #8490ae; }
+
+/* ===== 登录中整屏遮罩：延续登录页科技风，玻璃拟态状态卡 + 分步进度 ===== */
+.dca-auth-mask { position: fixed; inset: 0; z-index: 999999;
+    display: flex; align-items: center; justify-content: center; }
+.dca-auth-card { display: flex; flex-direction: column; align-items: center; gap: 15px;
+    width: 320px; padding: 36px 32px 30px; border-radius: 20px;
+    background: rgba(13,24,52,.62); border: 1px solid rgba(148,180,255,.22);
+    -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+    box-shadow: 0 30px 80px rgba(2,8,26,.55), inset 0 1px 0 rgba(255,255,255,.08);
+    animation: dca-auth-in .3s cubic-bezier(.2,.9,.3,1.15); }
+@keyframes dca-auth-in { 0% { opacity: 0; transform: translateY(12px) scale(.96); } 100% { opacity: 1; transform: none; } }
+.dca-auth-ring { width: 40px; height: 40px; border-radius: 50%;
+    border: 3.5px solid rgba(120,160,255,.16); border-top-color: #6b9bff;
+    animation: dca-spin .8s linear infinite; }
+.dca-auth-title { font-size: 16.5px; font-weight: 600; color: #ffffff; letter-spacing: 3px; }
+.dca-auth-steps { display: flex; flex-direction: column; gap: 8px; margin-top: 2px; min-height: 46px; }
+.dca-auth-step { display: flex; align-items: center; gap: 9px; font-size: 12.5px;
+    color: rgba(178,198,234,.5); letter-spacing: 1px; transition: color .25s ease; }
+.dca-auth-step .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
+.dca-auth-step.on { color: rgba(232,240,255,.95); }
+.dca-auth-step.on .dot { background: #6b9bff; box-shadow: 0 0 8px #6b9bff; animation: dca-pulse 1s ease-in-out infinite; }
+.dca-auth-step.done { color: rgba(94,214,164,.9); }
+.dca-auth-step.done .dot { background: #3ecf8e; }
+@keyframes dca-pulse { 0%,100% { opacity: .35; } 50% { opacity: 1; } }
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 
 def show_loading(msg: str, sub: str = ""):
@@ -212,21 +249,158 @@ def show_sync_mask(msg: str, sub: str = ""):
     return ph
 
 
+def show_auth_mask(title: str, steps: list, ph=None):
+    """登录中整屏遮罩：延续登录页科技风背景，玻璃拟态状态卡 + 分步进度。
+    steps: [(文案, 状态)]，状态 on=进行中 / done=完成 / off=待办。
+    传入 ph（st.empty 占位）则原地更新卡片，用于推进分步进度。"""
+    if ph is None:
+        st.markdown(
+            "<div class='fz-bg'><div class='fz-grid'></div><div class='fz-stars'></div>"
+            "<div class='fz-stars s2'></div><div class='fz-orb o1'></div><div class='fz-orb o2'></div></div>",
+            unsafe_allow_html=True,
+        )
+        ph = st.empty()
+    rows = "".join(
+        f"<div class='dca-auth-step {state}'><span class='dot'></span>{label}</div>"
+        for label, state in steps
+    )
+    ph.markdown(
+        "<div class='dca-auth-mask'><div class='dca-auth-card'>"
+        "<div class='dca-auth-ring'></div>"
+        f"<div class='dca-auth-title'>{title}</div>"
+        f"<div class='dca-auth-steps'>{rows}</div>"
+        "</div></div>",
+        unsafe_allow_html=True,
+    )
+    return ph
+
+
 # ---- 用户门闸：Sheets 云端模式必须 名字+PIN 登录；本地 CSV 模式直进 ----
 CURRENT_USER = "local"
 if storage.sheets_enabled():
     if "user" not in st.session_state:
-        names = storage.list_users()
+        _auth = st.session_state.get("_auth")
+        if _auth is not None:
+            # —— 第二阶段（点击后的下一趟运行）：先挂整屏「登录中」遮罩，再做一切网络校验/同步。
+            # 点击那一趟零网络请求（用户名单走会话缓存），遮罩因此能在点击后立即出现。——
+            _stage = _auth.get("stage")
+            if _stage == "login":
+                _m = show_auth_mask(
+                    "正在登录", [("验证账号", "on"), ("同步云端数据", "off")]
+                )
+                try:
+                    _status, _canon, _fresh = storage.authenticate(
+                        _auth["name"], _auth["pin"]
+                    )
+                except Exception:
+                    _status, _canon, _fresh = "error", None, None
+                if _fresh is not None:
+                    st.session_state["_names"] = _fresh  # 顺手刷新会话名单缓存
+                st.session_state.pop("_auth", None)
+                if _status == "ok" and _canon:
+                    st.session_state["user"] = _canon
+                    show_auth_mask(
+                        "正在登录",
+                        [("验证账号", "done"), ("同步云端数据", "on")],
+                        ph=_m,
+                    )
+                    with contextlib.suppress(
+                        Exception
+                    ):  # 同步失败不阻塞进入，侧栏🔄可重同步
+                        storage.sync_local(_canon)
+                    st.session_state["synced"] = True
+                elif _status == "pending":
+                    st.session_state["activating"] = _canon
+                elif _status == "no_user":
+                    st.session_state["_login_err"] = "账号不存在，请联系管理员开通"
+                elif _status == "bad_pin":
+                    st.session_state["_login_err"] = "账号或密码不对"
+                else:
+                    st.session_state["_login_err"] = "网络异常，请稍后重试"
+                st.rerun()
+            elif _stage == "activate":
+                _m = show_auth_mask(
+                    "正在设置 PIN", [("写入云端", "on"), ("同步云端数据", "off")]
+                )
+                try:
+                    _ok, _msg = storage.set_pin(
+                        _auth["who"], _auth["pin"], _auth["pin2"]
+                    )
+                except Exception:
+                    _ok, _msg = False, "网络异常，请稍后重试"
+                st.session_state.pop("_auth", None)
+                if _ok:
+                    st.session_state.pop("activating", None)
+                    st.session_state["user"] = _auth["who"]
+                    show_auth_mask(
+                        "正在设置 PIN",
+                        [("写入云端", "done"), ("同步云端数据", "on")],
+                        ph=_m,
+                    )
+                    with contextlib.suppress(Exception):  # 同步失败不阻塞进入
+                        storage.sync_local(_auth["who"])
+                    st.session_state["synced"] = True
+                else:
+                    st.session_state["_act_err"] = (
+                        _msg  # activating 保留，回设置 PIN 页报错
+                    )
+                st.rerun()
+            elif _stage == "bootstrap":
+                _m = show_auth_mask(
+                    "正在创建账号", [("创建管理员账号", "on"), ("同步云端数据", "off")]
+                )
+                try:
+                    _fresh = storage.list_users_fresh()
+                    if _fresh:  # 防呆：自举页是会话缓存名单渲染的，可能已过期
+                        st.session_state["_names"] = _fresh
+                        _ok, _msg = False, "系统已有账号，请直接登录"
+                    else:
+                        _ok, _msg = storage.create_user(
+                            _auth["name"], _auth["pin"], _auth["pin2"], role="admin"
+                        )
+                except Exception:
+                    _ok, _msg = False, "网络异常，请稍后重试"
+                st.session_state.pop("_auth", None)
+                if _ok:
+                    st.session_state["_names"] = [_auth["name"]]
+                    st.session_state["user"] = _auth["name"]
+                    show_auth_mask(
+                        "正在创建账号",
+                        [("创建管理员账号", "done"), ("同步云端数据", "on")],
+                        ph=_m,
+                    )
+                    with contextlib.suppress(Exception):  # 同步失败不阻塞进入
+                        storage.sync_local(_auth["name"])
+                    st.session_state["synced"] = True
+                elif _msg == "系统已有账号，请直接登录":
+                    st.session_state["_login_err"] = (
+                        _msg  # 名单已刷新，下一趟进登录页报错
+                    )
+                else:
+                    st.session_state["_boot_err"] = _msg
+                st.rerun()
+            else:
+                st.session_state.pop("_auth", None)  # 未知阶段：丢弃，回登录页
+                st.rerun()
+        # —— 登录页渲染：名单走会话缓存，本页运行零网络请求 ——
+        names = st.session_state.get("_names")
+        if names is None:
+            names = storage.list_users()  # 仅每会话首次加载触网一次
+            st.session_state["_names"] = names
         # 科技风背景层（fixed 定位铺全屏；登录成功后本分支不再渲染，背景自动消失）
         st.markdown(
             "<div class='fz-bg'><div class='fz-grid'></div><div class='fz-stars'></div>"
             "<div class='fz-stars s2'></div><div class='fz-orb o1'></div><div class='fz-orb o2'></div></div>",
             unsafe_allow_html=True,
         )
-        st.markdown("<div style='height:12vh'></div>", unsafe_allow_html=True)  # 顶部留白（在卡片外，控制整体下移）
+        st.markdown(
+            "<div style='height:12vh'></div>", unsafe_allow_html=True
+        )  # 顶部留白（在卡片外，控制整体下移）
         _pad_l, _mid, _pad_r = st.columns([1, 1, 1])
         with _mid:
-            st.markdown("<div class='fz-scope'></div>", unsafe_allow_html=True)  # 卡片样式标记（CSS 据此限定作用域）
+            st.markdown(
+                "<div class='fz-scope'></div>", unsafe_allow_html=True
+            )  # 卡片样式标记（CSS 据此限定作用域）
             st.markdown(
                 "<div class='fz-badge'>📈</div>"
                 "<div class='fz-brand'>模拟定投决策台<span class='fz-pill'>试用版</span></div>"
@@ -235,56 +409,115 @@ if storage.sheets_enabled():
             )
             if not names:
                 # 自举：系统还没有任何用户时，首个注册者自动成为管理员
-                st.markdown("<div class='fz-hint'>首次使用：创建管理员账号</div>", unsafe_allow_html=True)
+                st.markdown(
+                    "<div class='fz-hint'>首次使用：创建管理员账号</div>",
+                    unsafe_allow_html=True,
+                )
+                _berr = st.session_state.pop("_boot_err", None)
+                if _berr:
+                    st.error(_berr)
                 with st.form("bootstrap_form"):
-                    reg_name = st.text_input("账号", placeholder="请输入管理员名字", label_visibility="collapsed")
-                    reg_pin = st.text_input("密码", type="password", placeholder="请设置 PIN（4-8 位，记牢）", label_visibility="collapsed")
-                    reg_pin2 = st.text_input("确认密码", type="password", placeholder="请再次输入 PIN", label_visibility="collapsed")
+                    reg_name = st.text_input(
+                        "账号",
+                        placeholder="请输入管理员名字",
+                        label_visibility="collapsed",
+                    )
+                    reg_pin = st.text_input(
+                        "密码",
+                        type="password",
+                        placeholder="请设置 PIN（4-8 位，记牢）",
+                        label_visibility="collapsed",
+                    )
+                    reg_pin2 = st.text_input(
+                        "确认密码",
+                        type="password",
+                        placeholder="请再次输入 PIN",
+                        label_visibility="collapsed",
+                    )
                     if st.form_submit_button("创建并进入", use_container_width=True):
-                        ok, msg = storage.create_user(reg_name, reg_pin, reg_pin2, role="admin")
-                        if ok:
-                            st.session_state["user"] = reg_name
-                            st.rerun()
+                        if not reg_name.strip():
+                            st.error("名字不能为空")
+                        elif reg_pin != reg_pin2:
+                            st.error("两次输入的 PIN 不一致")
+                        elif not (4 <= len(reg_pin or "") <= 8):
+                            st.error("PIN 需要 4-8 位")
                         else:
-                            st.error(msg)
+                            st.session_state["_auth"] = {
+                                "stage": "bootstrap",
+                                "name": reg_name.strip(),
+                                "pin": reg_pin,
+                                "pin2": reg_pin2,
+                            }
+                            st.rerun()
             elif st.session_state.get("activating"):
                 who = st.session_state["activating"]
                 st.markdown(
                     f"<div class='fz-hint'>👋 你好，{who}！首次登录请设置你的 PIN<br><span>只有你自己知道，管理员也看不到</span></div>",
                     unsafe_allow_html=True,
                 )
+                _aerr = st.session_state.pop("_act_err", None)
+                if _aerr:
+                    st.error(_aerr)
                 with st.form("activate_form"):
-                    act_pin = st.text_input("密码", type="password", placeholder="请设置 PIN（4-8 位，记牢）", label_visibility="collapsed")
-                    act_pin2 = st.text_input("确认密码", type="password", placeholder="请再次输入 PIN", label_visibility="collapsed")
-                    if st.form_submit_button("设置 PIN 并进入", use_container_width=True):
-                        ok, msg = storage.set_pin(who, act_pin, act_pin2)
-                        if ok:
-                            st.session_state.pop("activating", None)
-                            st.session_state["user"] = who
-                            st.rerun()
+                    act_pin = st.text_input(
+                        "密码",
+                        type="password",
+                        placeholder="请设置 PIN（4-8 位，记牢）",
+                        label_visibility="collapsed",
+                    )
+                    act_pin2 = st.text_input(
+                        "确认密码",
+                        type="password",
+                        placeholder="请再次输入 PIN",
+                        label_visibility="collapsed",
+                    )
+                    if st.form_submit_button(
+                        "设置 PIN 并进入", use_container_width=True
+                    ):
+                        if act_pin != act_pin2:
+                            st.error("两次输入的 PIN 不一致")
+                        elif not (4 <= len(act_pin or "") <= 8):
+                            st.error("PIN 需要 4-8 位")
                         else:
-                            st.error(msg)
+                            st.session_state["_auth"] = {
+                                "stage": "activate",
+                                "who": who,
+                                "pin": act_pin,
+                                "pin2": act_pin2,
+                            }
+                            st.rerun()
                 if st.button("← 返回登录", key="back_login"):
                     st.session_state.pop("activating", None)
                     st.rerun()
             else:
+                _lerr = st.session_state.pop("_login_err", None)
+                if _lerr:
+                    st.error(_lerr)
                 with st.form("login_form"):
-                    login_name = st.text_input("账号", placeholder="请输入用户名", label_visibility="collapsed")
-                    login_pin = st.text_input("密码", type="password", placeholder="请输入密码", label_visibility="collapsed")
+                    login_name = st.text_input(
+                        "账号", placeholder="请输入用户名", label_visibility="collapsed"
+                    )
+                    login_pin = st.text_input(
+                        "密码",
+                        type="password",
+                        placeholder="请输入密码",
+                        label_visibility="collapsed",
+                    )
                     if st.form_submit_button("登 录", use_container_width=True):
                         nm = login_name.strip()
-                        canon = next((n for n in names if str(n).strip().casefold() == nm.casefold()), None)
-                        if canon is None:
-                            st.error("账号不存在，请联系管理员开通")
-                        elif not storage.is_activated(canon):
-                            st.session_state["activating"] = canon
-                            st.rerun()
-                        elif storage.verify_user(canon, login_pin):
-                            st.session_state["user"] = canon
-                            st.rerun()
+                        if not nm or not login_pin:
+                            st.error("请输入账号和密码")
                         else:
-                            st.error("账号或密码不对")
-            st.markdown("<div class='dca-login-foot'>忘记 PIN？联系管理员重置 · 每人数据互相隔离</div>", unsafe_allow_html=True)
+                            st.session_state["_auth"] = {
+                                "stage": "login",
+                                "name": nm,
+                                "pin": login_pin,
+                            }
+                            st.rerun()
+            st.markdown(
+                "<div class='dca-login-foot'>忘记 PIN？联系管理员重置 · 每人数据互相隔离</div>",
+                unsafe_allow_html=True,
+            )
         st.stop()
     CURRENT_USER = st.session_state["user"]
     if not st.session_state.get("synced"):
@@ -296,18 +529,28 @@ if storage.sheets_enabled():
 
 @st.cache_data(ttl=900, show_spinner=False)  # 加载提示由下方自定义浮动组件负责
 def run_model(amount: float | None) -> dict:
-    cmd = [sys.executable, str(CODE_DIR / "scripts" / "dca_calculator.py"), "--base-dir", str(BASE)]
+    cmd = [
+        sys.executable,
+        str(CODE_DIR / "scripts" / "dca_calculator.py"),
+        "--base-dir",
+        str(BASE),
+    ]
     if amount:
         cmd += ["--amount", str(amount)]
-    out = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", timeout=180)
+    out = subprocess.run(
+        cmd, capture_output=True, text=True, encoding="utf-8", timeout=180
+    )
     if out.returncode != 0:
         raise RuntimeError(out.stderr or "calculator failed")
-    return json.loads(out.stdout)
+    try:
+        return json.loads(out.stdout)
+    except json.JSONDecodeError as _e:
+        raise RuntimeError(f"计算器输出解析失败：{_e}") from None
 
 
 def parse_wide_table(md: str) -> pd.DataFrame:
-    lines = [l for l in md.splitlines() if l.startswith("|")]
-    rows = [[c.strip() for c in l.strip("|").split("|")] for l in lines]
+    lines = [ln for ln in md.splitlines() if ln.startswith("|")]
+    rows = [[c.strip() for c in ln.strip("|").split("|")] for ln in lines]
     return pd.DataFrame(rows[2:], columns=rows[0])
 
 
@@ -320,6 +563,14 @@ def append_csv(path: Path, fieldnames: list, row: dict) -> None:
         w.writerow(row)
 
 
+def _load_json(path: Path):
+    """读取 JSON 文件；损坏/读取失败返回 None，由调用方决定跳过展示。"""
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+        return None
+
+
 @st.cache_data(ttl=900, show_spinner=False)
 def fetch_xau_spot():
     """黄金/美元现货（东财 122.XAU）。东财对 urllib 断连且偶发限流：
@@ -328,17 +579,31 @@ def fetch_xau_spot():
     for _ in range(3):
         try:
             out = subprocess.run(
-                ["curl", "-s", "--max-time", "8",
-                 "-H", "User-Agent: Mozilla/5.0",
-                 "-H", "Referer: https://quote.eastmoney.com/", url],
-                capture_output=True, timeout=12)
+                [
+                    "curl",
+                    "-s",
+                    "--max-time",
+                    "8",
+                    "-H",
+                    "User-Agent: Mozilla/5.0",
+                    "-H",
+                    "Referer: https://quote.eastmoney.com/",
+                    url,
+                ],
+                capture_output=True,
+                timeout=12,
+            )
             d = json.loads(out.stdout.decode("utf-8")).get("data") or {}
             if d.get("f43"):
-                rec = {"price": d["f43"] / 100, "chg_pct": d.get("f170", 0) / 10000, "ts": d.get("f86")}
-                try:
-                    (DATA_DIR / "xau_spot_last.json").write_text(json.dumps(rec), encoding="utf-8")
-                except Exception:
-                    pass
+                rec = {
+                    "price": d["f43"] / 100,
+                    "chg_pct": d.get("f170", 0) / 10000,
+                    "ts": d.get("f86"),
+                }
+                with contextlib.suppress(Exception):
+                    (DATA_DIR / "xau_spot_last.json").write_text(
+                        json.dumps(rec), encoding="utf-8"
+                    )
                 return rec
         except Exception:
             pass
@@ -354,6 +619,7 @@ def fetch_xau_spot():
 def fetch_btc():
     """比特币实时行情（Yahoo BTC-USD）。失败返回 None。"""
     import urllib.request
+
     try:
         url = "https://query1.finance.yahoo.com/v8/finance/chart/BTC-USD?range=5d&interval=1d&includePrePost=false"
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
@@ -367,7 +633,11 @@ def fetch_btc():
         if not price:
             return None
         prev = meta.get("chartPreviousClose") or price
-        return {"price": float(price), "chg_pct": float(price) / float(prev) - 1, "ts": meta.get("regularMarketTime")}
+        return {
+            "price": float(price),
+            "chg_pct": float(price) / float(prev) - 1,
+            "ts": meta.get("regularMarketTime"),
+        }
     except Exception:
         return None
 
@@ -378,7 +648,8 @@ def load_price_series():
     scripts_dir = str(CODE_DIR / "scripts")
     if scripts_dir not in sys.path:
         sys.path.insert(0, scripts_dir)
-    import dca_calculator as dca
+    import dca_calculator as dca  # type: ignore[import-not-found]  # scripts/ 运行时才加入 sys.path，静态分析解析不到
+
     cache_dir = DATA_DIR / "market_history"
     series = {}
     for sym in ["SPY", "QQQ", "XAUT-USD"]:
@@ -397,8 +668,12 @@ def portfolio_curve(result: dict):
         return None
     series = load_price_series()
     asset_sym = {"sp500": "SPY", "nasdaq100": "QQQ", "gold": "XAUT-USD"}
-    fx_map = {"sp500": result["usdcny"], "nasdaq100": result["usdcny"], "gold": result.get("usdtcny", result["usdcny"])}
-    days = sorted({d for s in series.values() for d in s.keys()})
+    fx_map = {
+        "sp500": result["usdcny"],
+        "nasdaq100": result["usdcny"],
+        "gold": result.get("usdtcny", result["usdcny"]),
+    }
+    days = sorted({d for s in series.values() for d in s})
     first = min(r["date"] for r in rows)
     days = [d for d in days if d >= first]
     out = []
@@ -411,15 +686,20 @@ def portfolio_curve(result: dict):
         for r in tx_by_date.get(d, []):
             a = r["asset"]
             sign = -1.0 if r["action"] == "sell" else 1.0
-            shares[a] = shares.get(a, 0.0) + sign * float(r["shares"] or 0)
-            invested += sign * float(r["amount_rmb"] or 0)
+            try:
+                shares[a] = shares.get(a, 0.0) + sign * float(r["shares"] or 0)
+                invested += sign * float(r["amount_rmb"] or 0)
+            except (TypeError, ValueError):
+                continue  # 单笔坏行跳过，不拖垮整条曲线
         value = 0.0
         for a, sym in asset_sym.items():
             s = series.get(sym, {})
-            eligible = [x for x in s.keys() if x <= d]
+            eligible = [x for x in s if x <= d]
             if eligible and shares.get(a):
                 value += shares[a] * s[max(eligible)] * fx_map[a]
-        out.append({"日期": d, "累计投入": round(invested, 0), "组合市值": round(value, 0)})
+        out.append(
+            {"日期": d, "累计投入": round(invested, 0), "组合市值": round(value, 0)}
+        )
     return pd.DataFrame(out).set_index("日期")
 
 
@@ -437,9 +717,15 @@ if CURRENT_USER != "local":
             for _u in storage.list_users():
                 _r1, _r2, _r3 = st.columns([3, 1, 1])
                 _status = "已激活" if storage.is_activated(_u) else "待激活"
-                _r1.caption(("👑 " if storage.is_admin(_u) else "👤 ") + f"{_u}（{_status}）")
+                _r1.caption(
+                    ("👑 " if storage.is_admin(_u) else "👤 ") + f"{_u}（{_status}）"
+                )
                 if _u != CURRENT_USER:
-                    if _r2.button("重置", key=f"btn_rst_{_u}", help="清空 PIN，对方下次登录重新自己设置"):
+                    if _r2.button(
+                        "重置",
+                        key=f"btn_rst_{_u}",
+                        help="清空 PIN，对方下次登录重新自己设置",
+                    ):
                         storage.reset_pin(_u)
                         st.rerun()
                     if _r3.button("删除", key=f"btn_del_{_u}"):
@@ -493,24 +779,33 @@ def _quote_html(name, price, chg, stale=False):
     else:
         color, arrow, txt = "#dc2626", "▼", f"{chg * 100:.2f}%"
     warn = ' <span style="color:#d97706">⚠️缓存</span>' if stale else ""
-    return (f'<div style="margin:3px 0"><span style="color:#888888">{name}</span><br>'
-            f'<b style="font-size:1.05em">{price:,.2f}</b> '
-            f'<span style="color:{color}">{arrow} {txt}</span>{warn}</div>')
+    return (
+        f'<div style="margin:3px 0"><span style="color:#888888">{name}</span><br>'
+        f'<b style="font-size:1.05em">{price:,.2f}</b> '
+        f'<span style="color:{color}">{arrow} {txt}</span>{warn}</div>'
+    )
 
 
 def _fail_html(name):
     return f'<div style="margin:3px 0"><span style="color:#888888">{name}</span><br><span style="color:#d97706">获取失败，需复核实时价格</span></div>'
 
 
-all_ok = all(str(mk.get("data_source", "")).startswith(("cache+", "yahoo_chart")) for mk in result["markets"].values())
-st.sidebar.markdown("**📡 实时行情**" + ("（全部正常）" if all_ok else "（⚠️ 部分异常）"))
+all_ok = all(
+    str(mk.get("data_source", "")).startswith(("cache+", "yahoo_chart"))
+    for mk in result["markets"].values()
+)
+st.sidebar.markdown(
+    "**📡 实时行情**" + ("（全部正常）" if all_ok else "（⚠️ 部分异常）")
+)
 quote_times = []
 xau = fetch_xau_spot()
 btc = fetch_btc()
 for name, sym in QUOTE_ROWS:
     if sym == "BTC":
         if btc:
-            st.sidebar.markdown(_quote_html(name, btc["price"], btc["chg_pct"]), unsafe_allow_html=True)
+            st.sidebar.markdown(
+                _quote_html(name, btc["price"], btc["chg_pct"]), unsafe_allow_html=True
+            )
             if btc.get("ts"):
                 quote_times.append(btc["ts"])
         else:
@@ -518,13 +813,26 @@ for name, sym in QUOTE_ROWS:
         continue
     if sym == "XAU_SPOT":
         if xau:
-            st.sidebar.markdown(_quote_html(name, xau["price"], xau["chg_pct"], xau.get("stale", False)), unsafe_allow_html=True)
+            st.sidebar.markdown(
+                _quote_html(
+                    name, xau["price"], xau["chg_pct"], xau.get("stale", False)
+                ),
+                unsafe_allow_html=True,
+            )
             if xau.get("ts"):
                 quote_times.append(xau["ts"])
         else:
             mk = result["markets"].get("GC=F", {})
             if mk.get("latest_price") is not None:
-                st.sidebar.markdown(_quote_html("黄金 XAU 美元（期货估算）", mk["latest_price"], mk.get("day_change"), bool(mk.get("cache_warning"))), unsafe_allow_html=True)
+                st.sidebar.markdown(
+                    _quote_html(
+                        "黄金 XAU 美元（期货估算）",
+                        mk["latest_price"],
+                        mk.get("day_change"),
+                        bool(mk.get("cache_warning")),
+                    ),
+                    unsafe_allow_html=True,
+                )
                 if mk.get("quote_time"):
                     quote_times.append(mk["quote_time"])
             else:
@@ -534,22 +842,43 @@ for name, sym in QUOTE_ROWS:
     if mk.get("error") or mk.get("latest_price") is None:
         st.sidebar.markdown(_fail_html(name), unsafe_allow_html=True)
         continue
-    st.sidebar.markdown(_quote_html(name, mk["latest_price"], mk.get("day_change"), bool(mk.get("cache_warning"))), unsafe_allow_html=True)
+    st.sidebar.markdown(
+        _quote_html(
+            name,
+            mk["latest_price"],
+            mk.get("day_change"),
+            bool(mk.get("cache_warning")),
+        ),
+        unsafe_allow_html=True,
+    )
     if mk.get("quote_time"):
         quote_times.append(mk["quote_time"])
 if quote_times:
     from datetime import datetime as _dt
-    st.sidebar.caption(f"截至 {_dt.fromtimestamp(max(quote_times)).strftime('%m-%d %H:%M')}")
+
+    st.sidebar.caption(
+        f"截至 {_dt.fromtimestamp(max(quote_times)).strftime('%m-%d %H:%M')}"
+    )
 else:
-    latest_dates = {mk.get("history_end") for mk in result["markets"].values() if mk.get("history_end")}
+    latest_dates = {
+        mk.get("history_end")
+        for mk in result["markets"].values()
+        if mk.get("history_end")
+    }
     st.sidebar.caption(f"截至 {max(latest_dates) if latest_dates else '?'}")
 
 # ---- ② 基准金额 + 刷新按钮（同一行）----
 st.sidebar.markdown("---")
 _col_a, _col_r = st.sidebar.columns([3, 1])
 with _col_a:
-    amount_in = st.number_input("基准金额（0=自动）", min_value=0.0, value=0.0, step=500.0,
-                                key="amt_base", label_visibility="collapsed")
+    amount_in = st.number_input(
+        "基准金额（0=自动）",
+        min_value=0.0,
+        value=0.0,
+        step=500.0,
+        key="amt_base",
+        label_visibility="collapsed",
+    )
 with _col_r:
     if st.button("🔄 刷新", use_container_width=True, key="btn_refresh"):
         st.cache_data.clear()
@@ -578,59 +907,120 @@ def current_budget_display():
             return float(overrides[max(keys)])
     except Exception:
         pass
-    return float(CONFIG.get("monthly_budget_rmb", 30000))
+    try:
+        return float(CONFIG.get("monthly_budget_rmb", 30000))
+    except (TypeError, ValueError):
+        return 30000.0
 
 
 _col_b, _col_s = st.sidebar.columns([3, 1])
 with _col_b:
-    budget_in = st.number_input("💰 每月预算", min_value=0.0, value=current_budget_display(),
-                                step=1000.0, key="budget_in", label_visibility="collapsed")
+    budget_in = st.number_input(
+        "💰 每月预算",
+        min_value=0.0,
+        value=current_budget_display(),
+        step=1000.0,
+        key="budget_in",
+        label_visibility="collapsed",
+    )
 with _col_s:
     if st.button("💾 保存", use_container_width=True, key="btn_save_budget"):
-        storage.set_override(CURRENT_USER, date.today().strftime("%Y-%m"), float(budget_in))
-        st.cache_data.clear()
-        st.rerun()
+        try:
+            _bval = float(budget_in)
+        except (TypeError, ValueError):
+            st.error("预算金额无效，未保存")
+        else:
+            storage.set_override(CURRENT_USER, date.today().strftime("%Y-%m"), _bval)
+            st.cache_data.clear()
+            st.rerun()
 
 src = ms.get("budget_source", "default")
-src_txt = "自定义，自 " + src.split(":")[-1] + " 起生效" if src.startswith("override:") else "默认值"
-st.sidebar.caption(f"生效：¥{float(ms['monthly_budget_rmb']):,.0f}（{src_txt}）")
+src_txt = (
+    "自定义，自 " + src.split(":")[-1] + " 起生效"
+    if src.startswith("override:")
+    else "默认值"
+)
+try:
+    _ms_budget = f"¥{float(ms['monthly_budget_rmb']):,.0f}"
+except (TypeError, ValueError, KeyError):
+    _ms_budget = "¥—"
+st.sidebar.caption(f"生效：{_ms_budget}（{src_txt}）")
 
 # ---- 免责声明（始终显示）----
 st.sidebar.markdown("---")
-st.sidebar.caption("⚠️ 本工具仅为模拟测算与回测工具，不构成任何投资建议。投资有风险，策略无法保证不亏损，请根据自身情况独立决策。")
+st.sidebar.caption(
+    "⚠️ 本工具仅为模拟测算与回测工具，不构成任何投资建议。投资有风险，策略无法保证不亏损，请根据自身情况独立决策。"
+)
 
 # ---- 本地历史 → 云端一次性迁移（仅 Sheets 模式可见）----
 if CURRENT_USER != "local":
     with st.sidebar.expander("📥 本地历史数据迁移"):
-        st.caption("把这台电脑 data/ 里的历史记录上传到云端你的名下，只需做一次（上传后本地文件会备份为 .localbak）。")
+        st.caption(
+            "把这台电脑 data/ 里的历史记录上传到云端你的名下，只需做一次（上传后本地文件会备份为 .localbak）。"
+        )
         if st.button("开始上传", key="btn_import"):
             counts = storage.import_local_to_sheets(CURRENT_USER)
             st.session_state["synced"] = True
-            st.success(f"已上传：成交 {counts['transactions']} 条｜观察 {counts['observations']} 条｜预算 {counts['budget_overrides']} 项")
+            st.success(
+                f"已上传：成交 {counts['transactions']} 条｜观察 {counts['observations']} 条｜预算 {counts['budget_overrides']} 项"
+            )
 
 # ---------------- 主界面 ----------------
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["🎯 今日模拟", "📊 持仓与曲线", "✍️ 记账", "📜 历史记录", "🧪 回测结果", "📖 策略说明"])
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
+    [
+        "🎯 今日模拟",
+        "📊 持仓与曲线",
+        "✍️ 记账",
+        "📜 历史记录",
+        "🧪 回测结果",
+        "📖 策略说明",
+    ]
+)
 
 with tab1:
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("今日建议", f"¥{dec['suggested_amount_rmb']:,.0f}", dec["level_label"])
-    c2.metric("部署系数", f"{dec['deploy_multiplier']:.2f}", f"基准 ¥{dec['base_amount_rmb']:,.0f}")
-    c3.metric("本月可用池", f"¥{ms['available_pool_rmb']:,.0f}", f"剩余 {ms['remaining_trading_days']} 个交易日")
-    c4.metric("每日基准", f"¥{ms['daily_reference_rmb']:,.0f}", "月末释放" + ("已触发" if ms["month_end_release_active"] else "未触发"))
-    st.caption("⚠️ 以上均为模拟测算，不构成投资建议。策略无法保证不亏损，只能通过分批、分散和动态调仓降低永久亏损概率。请根据自身情况独立决策。")
+    c2.metric(
+        "部署系数",
+        f"{dec['deploy_multiplier']:.2f}",
+        f"基准 ¥{dec['base_amount_rmb']:,.0f}",
+    )
+    c3.metric(
+        "本月可用池",
+        f"¥{ms['available_pool_rmb']:,.0f}",
+        f"剩余 {ms['remaining_trading_days']} 个交易日",
+    )
+    c4.metric(
+        "每日基准",
+        f"¥{ms['daily_reference_rmb']:,.0f}",
+        "月末释放" + ("已触发" if ms["month_end_release_active"] else "未触发"),
+    )
+    st.caption(
+        "⚠️ 以上均为模拟测算，不构成投资建议。策略无法保证不亏损，只能通过分批、分散和动态调仓降低永久亏损概率。请根据自身情况独立决策。"
+    )
 
     st.subheader("上一条记录复盘")
     if result["last_records"]:
         st.json(result["last_records"], expanded=False)
         if result.get("since_last_record"):
             cols = st.columns(len(result["since_last_record"]))
-            for col, (name, v) in zip(cols, result["since_last_record"].items()):
-                col.metric(f"{name}（自 {v['last_record_date']}）", f"{v['change_pct'] * 100:+.2f}%", f"{v['price_then']:,.1f} → {v['latest_price']:,.1f}")
+            for col, (name, v) in zip(
+                cols, result["since_last_record"].items(), strict=False
+            ):
+                col.metric(
+                    f"{name}（自 {v['last_record_date']}）",
+                    f"{v['change_pct'] * 100:+.2f}%",
+                    f"{v['price_then']:,.1f} → {v['latest_price']:,.1f}",
+                )
     else:
         st.info("上一条记录：暂无，本次为第一期测算。")
 
     st.subheader("累计持仓结果完整表格")
-    st.dataframe(parse_wide_table(result["wide_table_markdown"]), use_container_width=True, hide_index=True)
+    st.dataframe(
+        parse_wide_table(result["wide_table_markdown"]),
+        use_container_width=True,
+        hide_index=True,
+    )
 
     st.subheader("今日行情与评分")
     rows = []
@@ -638,15 +1028,32 @@ with tab1:
         sym = info.get("index_symbol")
         mk = result["markets"].get(sym, {})
         sc = dec["scores"].get(key, {})
-        rows.append({
-            "资产": info["name_cn"], "最新价": mk.get("latest_price"), "日涨跌%": round((mk.get("day_change") or 0) * 100, 2),
-            "RSI14": round(mk.get("rsi_14") or 0, 1), "距252日高点%": round((mk.get("drawdown_from_252d_high") or 0) * 100, 1),
-            "252日区间位置%": round((mk.get("position_in_252d_range") or 0) * 100, 1),
-            "评分": sc.get("score"), "回撤价值": sc.get("value"), "趋势": sc.get("trend"),
-            "动量": sc.get("momentum"), "过热": sc.get("heat"), "波动惩罚": sc.get("vol_penalty"),
-            "建议比例%": round(result["suggested_weights"].get(key, 0) * 100, 1),
-            "建议金额¥": round(dec["suggested_amount_rmb"] * result["suggested_weights"].get(key, 0), 2),
-        })
+        rows.append(
+            {
+                "资产": info["name_cn"],
+                "最新价": mk.get("latest_price"),
+                "日涨跌%": round((mk.get("day_change") or 0) * 100, 2),
+                "RSI14": round(mk.get("rsi_14") or 0, 1),
+                "距252日高点%": round(
+                    (mk.get("drawdown_from_252d_high") or 0) * 100, 1
+                ),
+                "252日区间位置%": round(
+                    (mk.get("position_in_252d_range") or 0) * 100, 1
+                ),
+                "评分": sc.get("score"),
+                "回撤价值": sc.get("value"),
+                "趋势": sc.get("trend"),
+                "动量": sc.get("momentum"),
+                "过热": sc.get("heat"),
+                "波动惩罚": sc.get("vol_penalty"),
+                "建议比例%": round(result["suggested_weights"].get(key, 0) * 100, 1),
+                "建议金额¥": round(
+                    dec["suggested_amount_rmb"]
+                    * result["suggested_weights"].get(key, 0),
+                    2,
+                ),
+            }
+        )
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
     st.caption("决策依据：" + dec["reason"])
 
@@ -660,18 +1067,36 @@ with tab2:
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("累计投入", f"¥{pf['total_invested_rmb']:,.0f}")
         c2.metric("当前市值", f"¥{(pf['current_value_rmb'] or 0):,.0f}")
-        c3.metric("未实现盈亏", f"¥{(pf['unrealized_pnl_rmb'] or 0):,.0f}", f"{(pf['return_rate'] or 0) * 100:+.2f}%")
+        c3.metric(
+            "未实现盈亏",
+            f"¥{(pf['unrealized_pnl_rmb'] or 0):,.0f}",
+            f"{(pf['return_rate'] or 0) * 100:+.2f}%",
+        )
         xirr_days = pf.get("xirr_period_days")
-        c4.metric("年化 XIRR", "期短不年化" if (xirr_days is not None and xirr_days < 30) else (f"{(pf.get('xirr') or 0) * 100:.2f}%" if pf.get("xirr") is not None else "暂无"))
+        c4.metric(
+            "年化 XIRR",
+            "期短不年化"
+            if (xirr_days is not None and xirr_days < 30)
+            else (
+                f"{(pf.get('xirr') or 0) * 100:.2f}%"
+                if pf.get("xirr") is not None
+                else "暂无"
+            ),
+        )
 
     st.subheader("建议权重 vs 当前持仓权重")
     wrows = []
     pos_by_asset = {p["asset"]: p for p in pf.get("positions", [])}
     for key, info in ASSETS.items():
         cur_w = (pos_by_asset.get(key) or {}).get("portfolio_weight")
-        wrows.append({"资产": info["name_cn"], "建议权重%": round(result["suggested_weights"].get(key, 0) * 100, 1),
-                      "当前权重%": None if cur_w is None else round(cur_w * 100, 1),
-                      "中性权重%": round(info["neutral_weight"] * 100, 1)})
+        wrows.append(
+            {
+                "资产": info["name_cn"],
+                "建议权重%": round(result["suggested_weights"].get(key, 0) * 100, 1),
+                "当前权重%": None if cur_w is None else round(cur_w * 100, 1),
+                "中性权重%": round(info["neutral_weight"] * 100, 1),
+            }
+        )
     st.dataframe(pd.DataFrame(wrows), use_container_width=True, hide_index=True)
 
     st.subheader("近一年价格走势（缓存收盘）")
@@ -679,7 +1104,15 @@ with tab2:
     chart_data = {}
     for sym in ["SPY", "QQQ", "XAUT-USD"]:
         s = series.get(sym, {})
-        recent = {d: v for d, v in s.items() if d >= str(date.today().year - 1) + "-" + str(date.today().month).zfill(2) + "-01"}
+        recent = {
+            d: v
+            for d, v in s.items()
+            if d
+            >= str(date.today().year - 1)
+            + "-"
+            + str(date.today().month).zfill(2)
+            + "-01"
+        }
         if recent:
             chart_data[sym] = recent
     if chart_data:
@@ -690,21 +1123,42 @@ with tab2:
 
 with tab3:
     st.subheader("记录实际成交（买入/卖出）")
-    st.caption("流程：填写 → 复述确认 → 写入 transactions.csv（只追加）。建议与成交严格分离。")
+    st.caption(
+        "流程：填写 → 复述确认 → 写入 transactions.csv（只追加）。建议与成交严格分离。"
+    )
     with st.form("tx_form"):
         c1, c2, c3 = st.columns(3)
         tx_date = c1.text_input("日期", value=str(date.today()))
-        tx_asset = c2.selectbox("资产", list(ASSETS.keys()), format_func=lambda k: ASSETS[k]["name_cn"])
+        tx_asset = c2.selectbox(
+            "资产", list(ASSETS.keys()), format_func=lambda k: ASSETS[k]["name_cn"]
+        )
         tx_action = c3.selectbox("类型", ["buy", "sell"])
         default_sym = ASSETS[tx_asset]["symbol"]
         c4, c5, c6 = st.columns(3)
         tx_symbol = c4.text_input("代码", value=default_sym)
         tx_amount = c5.number_input("金额 RMB", min_value=0.0, step=100.0)
-        tx_price = c6.number_input("净值价格 U", min_value=0.0, step=0.01, format="%.4f")
+        tx_price = c6.number_input(
+            "净值价格 U", min_value=0.0, step=0.01, format="%.4f"
+        )
         c7, c8, c9 = st.columns(3)
-        default_fx = result.get("usdtcny") if ASSETS[tx_asset].get("fx_mode") == "usdt" else result["usdcny"]
-        tx_fx = c7.number_input("汇率（U/CNY 或 USD/CNY）", value=float(default_fx or 6.73), step=0.001, format="%.4f")
-        tx_shares = c8.number_input("数量（0 = 按金额÷汇率÷价格自动算）", min_value=0.0, step=0.001, format="%.4f")
+        default_fx = (
+            result.get("usdtcny")
+            if ASSETS[tx_asset].get("fx_mode") == "usdt"
+            else result["usdcny"]
+        )
+        try:
+            _fx_default = float(default_fx or 6.73)
+        except (TypeError, ValueError):
+            _fx_default = 6.73
+        tx_fx = c7.number_input(
+            "汇率（U/CNY 或 USD/CNY）", value=_fx_default, step=0.001, format="%.4f"
+        )
+        tx_shares = c8.number_input(
+            "数量（0 = 按金额÷汇率÷价格自动算）",
+            min_value=0.0,
+            step=0.001,
+            format="%.4f",
+        )
         tx_fee = c9.number_input("手续费 RMB", min_value=0.0, value=0.0, step=1.0)
         tx_notes = st.text_input("备注", value="")
         submitted = st.form_submit_button("生成复述")
@@ -714,9 +1168,17 @@ with tab3:
         else:
             shares = tx_shares if tx_shares else round(tx_amount / tx_fx / tx_price, 6)
             st.session_state["pending_tx"] = {
-                "date": tx_date, "action": tx_action, "asset": tx_asset, "symbol": tx_symbol,
-                "currency": "USDT", "amount_rmb": tx_amount, "price": tx_price,
-                "shares": shares, "fee_rmb": tx_fee, "fx_rate": tx_fx, "notes": tx_notes,
+                "date": tx_date,
+                "action": tx_action,
+                "asset": tx_asset,
+                "symbol": tx_symbol,
+                "currency": "USDT",
+                "amount_rmb": tx_amount,
+                "price": tx_price,
+                "shares": shares,
+                "fee_rmb": tx_fee,
+                "fx_rate": tx_fx,
+                "notes": tx_notes,
             }
     if st.session_state.get("pending_tx"):
         p = st.session_state["pending_tx"]
@@ -744,16 +1206,25 @@ with tab3:
     if obs_submit:
         w = result["suggested_weights"]
         st.session_state["pending_obs"] = {
-            "date": str(date.today()), "action": "observe",
-            "total_suggested_rmb": dec["suggested_amount_rmb"], "user_amount_rmb": 0,
+            "date": str(date.today()),
+            "action": "observe",
+            "total_suggested_rmb": dec["suggested_amount_rmb"],
+            "user_amount_rmb": 0,
             "decision_level": dec["level_label"],
-            "sp500_weight": round(w.get("sp500", 0), 4), "ndx100_weight": round(w.get("nasdaq100", 0), 4),
-            "gold_weight": round(w.get("gold", 0), 4), "reason": obs_reason, "notes": obs_notes,
+            "sp500_weight": round(w.get("sp500", 0), 4),
+            "ndx100_weight": round(w.get("nasdaq100", 0), 4),
+            "gold_weight": round(w.get("gold", 0), 4),
+            "reason": obs_reason,
+            "notes": obs_notes,
         }
     if st.session_state.get("pending_obs"):
-        st.warning(f"请确认写入观察记录：{json.dumps(st.session_state['pending_obs'], ensure_ascii=False)}")
+        st.warning(
+            f"请确认写入观察记录：{json.dumps(st.session_state['pending_obs'], ensure_ascii=False)}"
+        )
         if st.button("✅ 确认写入观察", use_container_width=True):
-            storage.append_row("observations", CURRENT_USER, st.session_state.pop("pending_obs"))
+            storage.append_row(
+                "observations", CURRENT_USER, st.session_state.pop("pending_obs")
+            )
             st.cache_data.clear()
             st.success("已写入观察记录")
             st.rerun()
@@ -774,42 +1245,71 @@ with tab4:
 
 with tab5:
     st.subheader("历史回测结果")
-    st.caption("以下回测均基于历史数据滚动测算，不代表未来表现。数据窗口、定投频率、金额各标的略有差异，横向仅供参考。")
+    st.caption(
+        "以下回测均基于历史数据滚动测算，不代表未来表现。数据窗口、定投频率、金额各标的略有差异，横向仅供参考。"
+    )
 
     # ========== ① 三策略对比（组合级） ==========
     st.markdown("---")
     st.markdown("### 一、三策略对比（组合级，2021-08 → 2026-08，1254 条任意起点路径）")
     cmp_file = BACKTEST_DIR / "results_compare3.json"
     single_file = BACKTEST_DIR / "results_single_compare.json"
-    if cmp_file.exists():
-        d = json.loads(cmp_file.read_text(encoding="utf-8"))
+    d = _load_json(cmp_file) if cmp_file.exists() else None
+    if d is None and cmp_file.exists():
+        st.warning("三策略对比结果文件损坏，已跳过展示")
+    if d:
         rows = []
-        for mode, label in [("dynamic", "A 全动态"), ("tilt", "B 定额+动态比例"), ("equal", "C 定额等比")]:
+        for mode, label in [
+            ("dynamic", "A 全动态"),
+            ("tilt", "B 定额+动态比例"),
+            ("equal", "C 定额等比"),
+        ]:
             o = d["overall"][mode]
-            rows.append({"策略": label,
-                         "收益中位": f"{o['ret_med']:.1%}",
-                         "XIRR中位": f"{o['xirr_med']:.2%}",
-                         "回撤中位": f"{o['maxdd_med']:.1%}",
-                         "最差回撤": f"{o['maxdd_worst']:.1%}",
-                         "浮亏天占比": f"{o['uw_ratio_mean']:.1%}",
-                         "正收益路径": f"{o['win_rate']:.2%}"})
+            rows.append(
+                {
+                    "策略": label,
+                    "收益中位": f"{o['ret_med']:.1%}",
+                    "XIRR中位": f"{o['xirr_med']:.2%}",
+                    "回撤中位": f"{o['maxdd_med']:.1%}",
+                    "最差回撤": f"{o['maxdd_worst']:.1%}",
+                    "浮亏天占比": f"{o['uw_ratio_mean']:.1%}",
+                    "正收益路径": f"{o['win_rate']:.2%}",
+                }
+            )
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
         # 按持有期的分桶对比
         st.markdown("**按持有期分（三策略）**")
-        bucket_labels = [("<3mo", "<3个月"), ("3-6mo", "3-6个月"), ("6-12mo", "6-12个月"),
-                         ("1-2y", "1-2年"), ("2-3y", "2-3年"), ("3y+", "3年以上")]
+        bucket_labels = [
+            ("<3mo", "<3个月"),
+            ("3-6mo", "3-6个月"),
+            ("6-12mo", "6-12个月"),
+            ("1-2y", "1-2年"),
+            ("2-3y", "2-3年"),
+            ("3y+", "3年以上"),
+        ]
         b_rows = []
         for bk, bk_cn in bucket_labels:
-            for mode, label in [("dynamic", "A 全动态"), ("tilt", "B 定额+动态"), ("equal", "C 定额等比")]:
+            for mode, label in [
+                ("dynamic", "A 全动态"),
+                ("tilt", "B 定额+动态"),
+                ("equal", "C 定额等比"),
+            ]:
                 b = d["buckets"][mode].get(bk, {})
-                b_rows.append({"持有期": bk_cn, "策略": label,
-                               "路径数": b.get("n", ""),
-                               "胜率": f"{b['win_rate']:.1%}" if "win_rate" in b else "",
-                               "收益中位": f"{b['ret_med']:.1%}" if "ret_med" in b else "",
-                               "最差收益": f"{b['ret_worst']:.1%}" if "ret_worst" in b else "",
-                               "回撤中位": f"{b['maxdd_med']:.1%}" if "maxdd_med" in b else "",
-                               "浮亏天占比": f"{b['uw_ratio_med']:.1%}" if "uw_ratio_med" in b else ""})
+                b_rows.append(
+                    {
+                        "持有期": bk_cn,
+                        "策略": label,
+                        "路径数": b.get("n", ""),
+                        "胜率": f"{b['win_rate']:.1%}" if "win_rate" in b else "",
+                        "收益中位": f"{b['ret_med']:.1%}" if "ret_med" in b else "",
+                        "最差收益": f"{b['ret_worst']:.1%}" if "ret_worst" in b else "",
+                        "回撤中位": f"{b['maxdd_med']:.1%}" if "maxdd_med" in b else "",
+                        "浮亏天占比": f"{b['uw_ratio_med']:.1%}"
+                        if "uw_ratio_med" in b
+                        else "",
+                    }
+                )
         st.dataframe(pd.DataFrame(b_rows), use_container_width=True, hide_index=True)
 
         # 代表性路径
@@ -818,15 +1318,20 @@ with tab5:
         for ex in d.get("examples", []):
             for mode, label in [("dynamic", "A"), ("tilt", "B"), ("equal", "C")]:
                 e = ex.get(mode, {})
-                ex_rows.append({"起点": ex.get("start", ""), "策略": label,
-                                "天数": e.get("days", ""),
-                                "累计投入": f"¥{e.get('invested', 0):,.0f}",
-                                "期末市值": f"¥{e.get('final_value', 0):,.0f}",
-                                "总收益": f"{e.get('simple_return', 0):.1%}",
-                                "XIRR": f"{e.get('xirr', 0):.2%}",
-                                "最大回撤": f"{e.get('max_nav_dd', 0):.1%}",
-                                "浮亏天占比": f"{e.get('uw_ratio', 0):.1%}",
-                                "最长连续浮亏": f"{e.get('max_consec_uw', 0)}天"})
+                ex_rows.append(
+                    {
+                        "起点": ex.get("start", ""),
+                        "策略": label,
+                        "天数": e.get("days", ""),
+                        "累计投入": f"¥{e.get('invested', 0):,.0f}",
+                        "期末市值": f"¥{e.get('final_value', 0):,.0f}",
+                        "总收益": f"{e.get('simple_return', 0):.1%}",
+                        "XIRR": f"{e.get('xirr', 0):.2%}",
+                        "最大回撤": f"{e.get('max_nav_dd', 0):.1%}",
+                        "浮亏天占比": f"{e.get('uw_ratio', 0):.1%}",
+                        "最长连续浮亏": f"{e.get('max_consec_uw', 0)}天",
+                    }
+                )
         st.dataframe(pd.DataFrame(ex_rows), use_container_width=True, hide_index=True)
 
     # ========== ② 策略对比说明 ==========
@@ -845,155 +1350,503 @@ with tab5:
     # ========== ③ 单品种滚动定投回测 ==========
     st.markdown("---")
     st.markdown("### 三、单品种滚动定投回测（每个交易日均可起投）")
-    st.caption("以下每个标的的表格，展示不同持有周期下、所有可能起投日的回测统计。"
-               "例如「3年 / 中位收益 21%」表示：在过去 ~10 年里，任意交易日开始月投、持有 3 年，中位累计收益为 21%。")
+    st.caption(
+        "以下每个标的的表格，展示不同持有周期下、所有可能起投日的回测统计。"
+        "例如「3年 / 中位收益 21%」表示：在过去 ~10 年里，任意交易日开始月投、持有 3 年，中位累计收益为 21%。"
+    )
 
-    if single_file.exists():
-        d2 = json.loads(single_file.read_text(encoding="utf-8"))
+    d2 = _load_json(single_file) if single_file.exists() else None
+    if d2 is None and single_file.exists():
+        st.warning("单品种回测结果文件损坏，已跳过展示")
+    if d2:
         st.markdown("**单品种 + 动态/固定金额对比（1254 条路径，5 年窗口）**")
         s_rows = []
-        for key, label in [("sp500", "标普500"), ("nasdaq100", "纳指100"), ("gold", "黄金")]:
+        for key, label in [
+            ("sp500", "标普500"),
+            ("nasdaq100", "纳指100"),
+            ("gold", "黄金"),
+        ]:
             v = d2[key]
             for mode, mlabel in [("dynamic", "动态"), ("fixed", "固定")]:
                 o = v[mode]
-                s_rows.append({"品种": label, "模式": mlabel,
-                               "胜率": f"{o['win_rate']:.1%}",
-                               "收益中位": f"{o['ret_med']:.1%}",
-                               "最差收益": f"{o.get('ret_worst', 0):.1%}",
-                               "XIRR中位": f"{o['xirr_med']:.2%}",
-                               "回撤中位": f"{o['maxdd_med']:.1%}",
-                               "最差回撤": f"{o['maxdd_worst']:.1%}",
-                               "浮亏天占比": f"{o['uw_ratio_mean']:.1%}",
-                               "最长连续浮亏": f"{o.get('max_consec_uw_max', '')}天"})
+                s_rows.append(
+                    {
+                        "品种": label,
+                        "模式": mlabel,
+                        "胜率": f"{o['win_rate']:.1%}",
+                        "收益中位": f"{o['ret_med']:.1%}",
+                        "最差收益": f"{o.get('ret_worst', 0):.1%}",
+                        "XIRR中位": f"{o['xirr_med']:.2%}",
+                        "回撤中位": f"{o['maxdd_med']:.1%}",
+                        "最差回撤": f"{o['maxdd_worst']:.1%}",
+                        "浮亏天占比": f"{o['uw_ratio_mean']:.1%}",
+                        "最长连续浮亏": f"{o.get('max_consec_uw_max', '')}天",
+                    }
+                )
             pw = v["pairwise_dyn_vs_fixed"]
-            s_rows.append({"品种": label, "模式": "动态胜率",
-                           "胜率": f"{pw['beat_pct']:.1%}",
-                           "收益中位": f"平均差 {pw['mean_diff']:+.2%}",
-                           "最差收益": "—", "XIRR中位": "—",
-                           "回撤中位": "—", "最差回撤": "—",
-                           "浮亏天占比": "—", "最长连续浮亏": "—"})
+            s_rows.append(
+                {
+                    "品种": label,
+                    "模式": "动态胜率",
+                    "胜率": f"{pw['beat_pct']:.1%}",
+                    "收益中位": f"平均差 {pw['mean_diff']:+.2%}",
+                    "最差收益": "—",
+                    "XIRR中位": "—",
+                    "回撤中位": "—",
+                    "最差回撤": "—",
+                    "浮亏天占比": "—",
+                    "最长连续浮亏": "—",
+                }
+            )
         st.dataframe(pd.DataFrame(s_rows), use_container_width=True, hide_index=True)
 
     # ---- 标普500 滚动表 ----
     st.markdown("#### 标普500（^GSPC，2016-01 → 2026-08，每日定投 ¥100）")
     sp500_rolling = [
-        {"定投周期": "3个月", "样本数": 2598, "最好": "+15.6%", "中位": "+2.5%", "最差": "-27.5%",
-         "亏损概率": "23.8%", "最差回撤": "-10.9%", "XIRR中位": "21.4%", "最长修复天数": 13},
-        {"定投周期": "6个月", "样本数": 2537, "最好": "+20.0%", "中位": "+4.4%", "最差": "-27.1%",
-         "亏损概率": "19.9%", "最差回撤": "-18.5%", "XIRR中位": "18.6%", "最长修复天数": 26},
-        {"定投周期": "1年", "样本数": 2410, "最好": "+21.8%", "中位": "+8.3%", "最差": "-23.0%",
-         "亏损概率": "16.5%", "最差回撤": "-26.8%", "XIRR中位": "17.0%", "最长修复天数": 54},
-        {"定投周期": "2年", "样本数": 2160, "最好": "+32.7%", "中位": "+15.2%", "最差": "-21.7%",
-         "亏损概率": "12.9%", "最差回撤": "-30.7%", "XIRR中位": "14.8%", "最长修复天数": 113},
-        {"定投周期": "3年", "样本数": 1910, "最好": "+43.8%", "中位": "+21.2%", "最差": "-18.4%",
-         "亏损概率": "2.1%", "最差回撤": "-31.9%", "XIRR中位": "13.2%", "最长修复天数": 127},
-        {"定投周期": "5年", "样本数": 1407, "最好": "+60.1%", "中位": "+41.3%", "最差": "+9.5%",
-         "亏损概率": "0%", "最差回撤": "-32.6%", "XIRR中位": "14.0%", "最长修复天数": 300},
-        {"定投周期": "7年", "样本数": 902, "最好": "+76.9%", "中位": "+56.8%", "最差": "+28.7%",
-         "亏损概率": "0%", "最差回撤": "-32.6%", "XIRR中位": "12.8%", "最长修复天数": 469},
-        {"定投周期": "10年", "样本数": 149, "最好": "+115.0%", "中位": "+105.3%", "最差": "+83.1%",
-         "亏损概率": "0%", "最差回撤": "-32.6%", "XIRR中位": "13.9%", "最长修复天数": 480},
+        {
+            "定投周期": "3个月",
+            "样本数": 2598,
+            "最好": "+15.6%",
+            "中位": "+2.5%",
+            "最差": "-27.5%",
+            "亏损概率": "23.8%",
+            "最差回撤": "-10.9%",
+            "XIRR中位": "21.4%",
+            "最长修复天数": 13,
+        },
+        {
+            "定投周期": "6个月",
+            "样本数": 2537,
+            "最好": "+20.0%",
+            "中位": "+4.4%",
+            "最差": "-27.1%",
+            "亏损概率": "19.9%",
+            "最差回撤": "-18.5%",
+            "XIRR中位": "18.6%",
+            "最长修复天数": 26,
+        },
+        {
+            "定投周期": "1年",
+            "样本数": 2410,
+            "最好": "+21.8%",
+            "中位": "+8.3%",
+            "最差": "-23.0%",
+            "亏损概率": "16.5%",
+            "最差回撤": "-26.8%",
+            "XIRR中位": "17.0%",
+            "最长修复天数": 54,
+        },
+        {
+            "定投周期": "2年",
+            "样本数": 2160,
+            "最好": "+32.7%",
+            "中位": "+15.2%",
+            "最差": "-21.7%",
+            "亏损概率": "12.9%",
+            "最差回撤": "-30.7%",
+            "XIRR中位": "14.8%",
+            "最长修复天数": 113,
+        },
+        {
+            "定投周期": "3年",
+            "样本数": 1910,
+            "最好": "+43.8%",
+            "中位": "+21.2%",
+            "最差": "-18.4%",
+            "亏损概率": "2.1%",
+            "最差回撤": "-31.9%",
+            "XIRR中位": "13.2%",
+            "最长修复天数": 127,
+        },
+        {
+            "定投周期": "5年",
+            "样本数": 1407,
+            "最好": "+60.1%",
+            "中位": "+41.3%",
+            "最差": "+9.5%",
+            "亏损概率": "0%",
+            "最差回撤": "-32.6%",
+            "XIRR中位": "14.0%",
+            "最长修复天数": 300,
+        },
+        {
+            "定投周期": "7年",
+            "样本数": 902,
+            "最好": "+76.9%",
+            "中位": "+56.8%",
+            "最差": "+28.7%",
+            "亏损概率": "0%",
+            "最差回撤": "-32.6%",
+            "XIRR中位": "12.8%",
+            "最长修复天数": 469,
+        },
+        {
+            "定投周期": "10年",
+            "样本数": 149,
+            "最好": "+115.0%",
+            "中位": "+105.3%",
+            "最差": "+83.1%",
+            "亏损概率": "0%",
+            "最差回撤": "-32.6%",
+            "XIRR中位": "13.9%",
+            "最长修复天数": 480,
+        },
     ]
     st.dataframe(pd.DataFrame(sp500_rolling), use_container_width=True, hide_index=True)
-    st.caption("定投 ≥5 年的所有起点均正收益。最差路径回撤 -32.6%（2020 疫情 + 2022 加息），但坚持 5 年后最差仍 +9.5%。")
+    st.caption(
+        "定投 ≥5 年的所有起点均正收益。最差路径回撤 -32.6%（2020 疫情 + 2022 加息），但坚持 5 年后最差仍 +9.5%。"
+    )
 
     # ---- 纳指100 滚动表 ----
     st.markdown("#### 纳指100（QQQ，2016-01 → 2024-12，每月定投 ¥1000）")
     ndx_rolling = [
-        {"定投周期": "3个月", "样本数": 2200, "最好": "+21.3%", "中位": "+3.4%", "最差": "-17.7%",
-         "亏损概率": "23.0%", "最差回撤": "-28.6%", "回撤中位": "-6.6%", "XIRR中位": "29.6%",
-         "收益率P10": "-3.8%", "收益率P90": "+8.3%", "最长水下天数": 92},
-        {"定投周期": "6个月", "样本数": 2136, "最好": "+29.4%", "中位": "+6.4%", "最差": "-19.5%",
-         "亏损概率": "17.2%", "最差回撤": "-28.6%", "回撤中位": "-8.8%", "XIRR中位": "27.3%",
-         "收益率P10": "-5.2%", "收益率P90": "+13.0%", "最长水下天数": 164},
-        {"定投周期": "1年", "样本数": 2012, "最好": "+38.2%", "中位": "+13.5%", "最差": "-22.3%",
-         "亏损概率": "16.4%", "最差回撤": "-28.6%", "回撤中位": "-10.8%", "XIRR中位": "27.7%",
-         "收益率P10": "-6.8%", "收益率P90": "+22.9%", "最长水下天数": 331},
-        {"定投周期": "2年", "样本数": 1762, "最好": "+57.1%", "中位": "+24.4%", "最差": "-20.7%",
-         "亏损概率": "14.5%", "最差回撤": "-28.6%", "回撤中位": "-15.3%", "XIRR中位": "22.9%",
-         "收益率P10": "-5.6%", "收益率P90": "+45.4%", "最长水下天数": 465},
-        {"定投周期": "3年", "样本数": 1511, "最好": "+76.3%", "中位": "+30.8%", "最差": "-8.6%",
-         "亏损概率": "5.6%", "最差回撤": "-28.6%", "回撤中位": "-20.4%", "XIRR中位": "18.5%",
-         "收益率P10": "+5.0%", "收益率P90": "+64.1%", "最长水下天数": 465},
-        {"定投周期": "5年", "样本数": 1006, "最好": "+117.1%", "中位": "+57.8%", "最差": "+14.6%",
-         "亏损概率": "0%", "最差回撤": "-29.0%", "回撤中位": "-27.2%", "XIRR中位": "18.5%",
-         "收益率P10": "+28.8%", "收益率P90": "+107.0%", "最长水下天数": 164},
-        {"定投周期": "7年", "样本数": 503, "最好": "+112.7%", "中位": "+89.2%", "最差": "+45.1%",
-         "亏损概率": "0%", "最差回撤": "-30.7%", "回撤中位": "-29.2%", "XIRR中位": "18.0%",
-         "收益率P10": "+64.8%", "收益率P90": "+102.8%", "最长水下天数": 58},
+        {
+            "定投周期": "3个月",
+            "样本数": 2200,
+            "最好": "+21.3%",
+            "中位": "+3.4%",
+            "最差": "-17.7%",
+            "亏损概率": "23.0%",
+            "最差回撤": "-28.6%",
+            "回撤中位": "-6.6%",
+            "XIRR中位": "29.6%",
+            "收益率P10": "-3.8%",
+            "收益率P90": "+8.3%",
+            "最长水下天数": 92,
+        },
+        {
+            "定投周期": "6个月",
+            "样本数": 2136,
+            "最好": "+29.4%",
+            "中位": "+6.4%",
+            "最差": "-19.5%",
+            "亏损概率": "17.2%",
+            "最差回撤": "-28.6%",
+            "回撤中位": "-8.8%",
+            "XIRR中位": "27.3%",
+            "收益率P10": "-5.2%",
+            "收益率P90": "+13.0%",
+            "最长水下天数": 164,
+        },
+        {
+            "定投周期": "1年",
+            "样本数": 2012,
+            "最好": "+38.2%",
+            "中位": "+13.5%",
+            "最差": "-22.3%",
+            "亏损概率": "16.4%",
+            "最差回撤": "-28.6%",
+            "回撤中位": "-10.8%",
+            "XIRR中位": "27.7%",
+            "收益率P10": "-6.8%",
+            "收益率P90": "+22.9%",
+            "最长水下天数": 331,
+        },
+        {
+            "定投周期": "2年",
+            "样本数": 1762,
+            "最好": "+57.1%",
+            "中位": "+24.4%",
+            "最差": "-20.7%",
+            "亏损概率": "14.5%",
+            "最差回撤": "-28.6%",
+            "回撤中位": "-15.3%",
+            "XIRR中位": "22.9%",
+            "收益率P10": "-5.6%",
+            "收益率P90": "+45.4%",
+            "最长水下天数": 465,
+        },
+        {
+            "定投周期": "3年",
+            "样本数": 1511,
+            "最好": "+76.3%",
+            "中位": "+30.8%",
+            "最差": "-8.6%",
+            "亏损概率": "5.6%",
+            "最差回撤": "-28.6%",
+            "回撤中位": "-20.4%",
+            "XIRR中位": "18.5%",
+            "收益率P10": "+5.0%",
+            "收益率P90": "+64.1%",
+            "最长水下天数": 465,
+        },
+        {
+            "定投周期": "5年",
+            "样本数": 1006,
+            "最好": "+117.1%",
+            "中位": "+57.8%",
+            "最差": "+14.6%",
+            "亏损概率": "0%",
+            "最差回撤": "-29.0%",
+            "回撤中位": "-27.2%",
+            "XIRR中位": "18.5%",
+            "收益率P10": "+28.8%",
+            "收益率P90": "+107.0%",
+            "最长水下天数": 164,
+        },
+        {
+            "定投周期": "7年",
+            "样本数": 503,
+            "最好": "+112.7%",
+            "中位": "+89.2%",
+            "最差": "+45.1%",
+            "亏损概率": "0%",
+            "最差回撤": "-30.7%",
+            "回撤中位": "-29.2%",
+            "XIRR中位": "18.0%",
+            "收益率P10": "+64.8%",
+            "收益率P90": "+102.8%",
+            "最长水下天数": 58,
+        },
     ]
     st.dataframe(pd.DataFrame(ndx_rolling), use_container_width=True, hide_index=True)
-    st.caption("纳指100 是过去 10 年最强资产之一：5 年定投最差仍 +14.6%，7 年最差 +45.1%。但回撤最深（-28.6%~-30.7%），心理承受力要求高。")
+    st.caption(
+        "纳指100 是过去 10 年最强资产之一：5 年定投最差仍 +14.6%，7 年最差 +45.1%。但回撤最深（-28.6%~-30.7%），心理承受力要求高。"
+    )
 
     # ---- 黄金 滚动表 ----
     st.markdown("#### 黄金 XAUT/USD（2020-02 → 2026-08，每月定投 $100）")
     gold_rolling = [
-        {"定投周期": "3个月", "样本数": 2280, "最好": "+23.0%", "中位": "+1.4%", "最差": "-12.5%",
-         "亏损概率": "35.5%", "最差回撤": "-17.9%", "回撤中位": "-5.8%", "XIRR中位": "11.9%",
-         "收益率P10": "-3.6%", "收益率P90": "+8.2%", "回本最长天数": 52, "水下最长天数": 92},
-        {"定投周期": "6个月", "样本数": 2191, "最好": "+38.1%", "中位": "+3.8%", "最差": "-13.1%",
-         "亏损概率": "27.7%", "最差回撤": "-17.9%", "回撤中位": "-6.3%", "XIRR中位": "15.7%",
-         "收益率P10": "-5.0%", "收益率P90": "+13.9%", "回本最长天数": 52, "水下最长天数": 183},
-        {"定投周期": "1年", "样本数": 2007, "最好": "+57.1%", "中位": "+6.3%", "最差": "-9.8%",
-         "亏损概率": "24.5%", "最差回撤": "-17.9%", "回撤中位": "-7.6%", "XIRR中位": "12.9%",
-         "收益率P10": "-3.3%", "收益率P90": "+24.5%", "回本最长天数": 52, "水下最长天数": 294},
-        {"定投周期": "2年", "样本数": 1642, "最好": "+92.7%", "中位": "+20.2%", "最差": "-10.2%",
-         "亏损概率": "12.4%", "最差回撤": "-18.3%", "回撤中位": "-8.0%", "XIRR中位": "19.5%",
-         "收益率P10": "-1.3%", "收益率P90": "+51.9%", "回本最长天数": 12, "水下最长天数": 294},
-        {"定投周期": "3年", "样本数": 1276, "最好": "+122.0%", "中位": "+32.8%", "最差": "-1.0%",
-         "亏损概率": "0.4%", "最差回撤": "-22.4%", "回撤中位": "-8.0%", "XIRR中位": "19.7%",
-         "收益率P10": "+5.5%", "收益率P90": "+77.7%", "回本最长天数": 4, "水下最长天数": 294},
-        {"定投周期": "5年", "样本数": 546, "最好": "+156.0%", "中位": "+80.5%", "最差": "+46.6%",
-         "亏损概率": "0%", "最差回撤": "-25.0%", "回撤中位": "-9.9%", "XIRR中位": "24.2%",
-         "收益率P10": "+56.8%", "收益率P90": "+119.6%", "回本最长天数": 4, "水下最长天数": 199},
+        {
+            "定投周期": "3个月",
+            "样本数": 2280,
+            "最好": "+23.0%",
+            "中位": "+1.4%",
+            "最差": "-12.5%",
+            "亏损概率": "35.5%",
+            "最差回撤": "-17.9%",
+            "回撤中位": "-5.8%",
+            "XIRR中位": "11.9%",
+            "收益率P10": "-3.6%",
+            "收益率P90": "+8.2%",
+            "回本最长天数": 52,
+            "水下最长天数": 92,
+        },
+        {
+            "定投周期": "6个月",
+            "样本数": 2191,
+            "最好": "+38.1%",
+            "中位": "+3.8%",
+            "最差": "-13.1%",
+            "亏损概率": "27.7%",
+            "最差回撤": "-17.9%",
+            "回撤中位": "-6.3%",
+            "XIRR中位": "15.7%",
+            "收益率P10": "-5.0%",
+            "收益率P90": "+13.9%",
+            "回本最长天数": 52,
+            "水下最长天数": 183,
+        },
+        {
+            "定投周期": "1年",
+            "样本数": 2007,
+            "最好": "+57.1%",
+            "中位": "+6.3%",
+            "最差": "-9.8%",
+            "亏损概率": "24.5%",
+            "最差回撤": "-17.9%",
+            "回撤中位": "-7.6%",
+            "XIRR中位": "12.9%",
+            "收益率P10": "-3.3%",
+            "收益率P90": "+24.5%",
+            "回本最长天数": 52,
+            "水下最长天数": 294,
+        },
+        {
+            "定投周期": "2年",
+            "样本数": 1642,
+            "最好": "+92.7%",
+            "中位": "+20.2%",
+            "最差": "-10.2%",
+            "亏损概率": "12.4%",
+            "最差回撤": "-18.3%",
+            "回撤中位": "-8.0%",
+            "XIRR中位": "19.5%",
+            "收益率P10": "-1.3%",
+            "收益率P90": "+51.9%",
+            "回本最长天数": 12,
+            "水下最长天数": 294,
+        },
+        {
+            "定投周期": "3年",
+            "样本数": 1276,
+            "最好": "+122.0%",
+            "中位": "+32.8%",
+            "最差": "-1.0%",
+            "亏损概率": "0.4%",
+            "最差回撤": "-22.4%",
+            "回撤中位": "-8.0%",
+            "XIRR中位": "19.7%",
+            "收益率P10": "+5.5%",
+            "收益率P90": "+77.7%",
+            "回本最长天数": 4,
+            "水下最长天数": 294,
+        },
+        {
+            "定投周期": "5年",
+            "样本数": 546,
+            "最好": "+156.0%",
+            "中位": "+80.5%",
+            "最差": "+46.6%",
+            "亏损概率": "0%",
+            "最差回撤": "-25.0%",
+            "回撤中位": "-9.9%",
+            "XIRR中位": "24.2%",
+            "收益率P10": "+56.8%",
+            "收益率P90": "+119.6%",
+            "回本最长天数": 4,
+            "水下最长天数": 199,
+        },
     ]
     st.dataframe(pd.DataFrame(gold_rolling), use_container_width=True, hide_index=True)
-    st.caption("黄金 2020 年以来表现极强：3 年定投仅 0.4% 概率亏损，5 年全部正收益且最差仍 +46.6%。但注意 XAUT 历史仅 ~6 年，7 年/10 年无数据。")
+    st.caption(
+        "黄金 2020 年以来表现极强：3 年定投仅 0.4% 概率亏损，5 年全部正收益且最差仍 +46.6%。但注意 XAUT 历史仅 ~6 年，7 年/10 年无数据。"
+    )
 
     # ---- 沪深300 滚动表 ----
     st.markdown("#### 沪深300（000300.SS，2016-01 → 2026-08，每月定投 ¥1000）")
-    st.caption("⚠️ 沪深300 不在当前策略标的中，但作为 A 股代表，其回测结果有重要参考价值。")
+    st.caption(
+        "⚠️ 沪深300 不在当前策略标的中，但作为 A 股代表，其回测结果有重要参考价值。"
+    )
     hs300_rolling = [
-        {"定投周期": "3个月", "样本数": 2507, "最好": "+21.4%", "中位": "+0.5%", "最差": "-12.6%",
-         "亏损概率": "45.0%", "最差回撤": "-19.4%", "XIRR中位": "4.4%", "回本最长天数": 101},
-        {"定投周期": "6个月", "样本数": 2454, "最好": "+21.1%", "中位": "+1.3%", "最差": "-16.4%",
-         "亏损概率": "40.7%", "最差回撤": "-19.4%", "XIRR中位": "5.5%", "回本最长天数": 192},
-        {"定投周期": "1年", "样本数": 2330, "最好": "+28.4%", "中位": "+3.5%", "最差": "-20.3%",
-         "亏损概率": "40.6%", "最差回撤": "-19.4%", "XIRR中位": "7.1%", "回本最长天数": 370},
-        {"定投周期": "2年", "样本数": 2088, "最好": "+39.4%", "中位": "+5.2%", "最差": "-24.1%",
-         "亏损概率": "40.1%", "最差回撤": "-19.4%", "XIRR中位": "5.2%", "回本最长天数": 670},
-        {"定投周期": "3年", "样本数": 1846, "最好": "+48.0%", "中位": "+5.1%", "最差": "-24.7%",
-         "亏损概率": "36.9%", "最差回撤": "-19.4%", "XIRR中位": "3.4%", "回本最长天数": 1018},
-        {"定投周期": "5年", "样本数": 1362, "最好": "+55.4%", "中位": "-0.6%", "最差": "-23.2%",
-         "亏损概率": "52.0%", "最差回撤": "-20.9%", "XIRR中位": "-0.2%", "回本最长天数": 1224},
-        {"定投周期": "7年", "样本数": 875, "最好": "+22.4%", "中位": "-1.0%", "最差": "-20.7%",
-         "亏损概率": "54.4%", "最差回撤": "-23.9%", "XIRR中位": "-0.3%", "回本最长天数": 826},
-        {"定投周期": "10年", "样本数": 146, "最好": "+28.4%", "中位": "+21.6%", "最差": "+13.3%",
-         "亏损概率": "0%", "最差回撤": "-23.9%", "XIRR中位": "3.9%", "回本最长天数": 418},
+        {
+            "定投周期": "3个月",
+            "样本数": 2507,
+            "最好": "+21.4%",
+            "中位": "+0.5%",
+            "最差": "-12.6%",
+            "亏损概率": "45.0%",
+            "最差回撤": "-19.4%",
+            "XIRR中位": "4.4%",
+            "回本最长天数": 101,
+        },
+        {
+            "定投周期": "6个月",
+            "样本数": 2454,
+            "最好": "+21.1%",
+            "中位": "+1.3%",
+            "最差": "-16.4%",
+            "亏损概率": "40.7%",
+            "最差回撤": "-19.4%",
+            "XIRR中位": "5.5%",
+            "回本最长天数": 192,
+        },
+        {
+            "定投周期": "1年",
+            "样本数": 2330,
+            "最好": "+28.4%",
+            "中位": "+3.5%",
+            "最差": "-20.3%",
+            "亏损概率": "40.6%",
+            "最差回撤": "-19.4%",
+            "XIRR中位": "7.1%",
+            "回本最长天数": 370,
+        },
+        {
+            "定投周期": "2年",
+            "样本数": 2088,
+            "最好": "+39.4%",
+            "中位": "+5.2%",
+            "最差": "-24.1%",
+            "亏损概率": "40.1%",
+            "最差回撤": "-19.4%",
+            "XIRR中位": "5.2%",
+            "回本最长天数": 670,
+        },
+        {
+            "定投周期": "3年",
+            "样本数": 1846,
+            "最好": "+48.0%",
+            "中位": "+5.1%",
+            "最差": "-24.7%",
+            "亏损概率": "36.9%",
+            "最差回撤": "-19.4%",
+            "XIRR中位": "3.4%",
+            "回本最长天数": 1018,
+        },
+        {
+            "定投周期": "5年",
+            "样本数": 1362,
+            "最好": "+55.4%",
+            "中位": "-0.6%",
+            "最差": "-23.2%",
+            "亏损概率": "52.0%",
+            "最差回撤": "-20.9%",
+            "XIRR中位": "-0.2%",
+            "回本最长天数": 1224,
+        },
+        {
+            "定投周期": "7年",
+            "样本数": 875,
+            "最好": "+22.4%",
+            "中位": "-1.0%",
+            "最差": "-20.7%",
+            "亏损概率": "54.4%",
+            "最差回撤": "-23.9%",
+            "XIRR中位": "-0.3%",
+            "回本最长天数": 826,
+        },
+        {
+            "定投周期": "10年",
+            "样本数": 146,
+            "最好": "+28.4%",
+            "中位": "+21.6%",
+            "最差": "+13.3%",
+            "亏损概率": "0%",
+            "最差回撤": "-23.9%",
+            "XIRR中位": "3.9%",
+            "回本最长天数": 418,
+        },
     ]
     st.dataframe(pd.DataFrame(hs300_rolling), use_container_width=True, hide_index=True)
-    st.caption("沪深300 是四标的中表现最弱的：5 年定投亏损概率高达 52%，中位收益 -0.6%。但 10 年定投全部正收益（+13.3%~+28.4%），说明 A 股需要更长持有期。")
+    st.caption(
+        "沪深300 是四标的中表现最弱的：5 年定投亏损概率高达 52%，中位收益 -0.6%。但 10 年定投全部正收益（+13.3%~+28.4%），说明 A 股需要更长持有期。"
+    )
 
     # ========== ④ 四标的横向对比 ==========
     st.markdown("---")
     st.markdown("### 四、四标的横向对比（关键指标速览）")
     cross_rows = [
-        {"标的": "标普500", "数据区间": "2016-01~2026-08",
-         "3年中位收益": "+21.2%", "5年中位收益": "+41.3%",
-         "5年亏损概率": "0%", "5年最差": "+9.5%",
-         "最差回撤": "-32.6%", "XIRR中位(5y)": "14.0%"},
-        {"标的": "纳指100", "数据区间": "2016-01~2024-12",
-         "3年中位收益": "+30.8%", "5年中位收益": "+57.8%",
-         "5年亏损概率": "0%", "5年最差": "+14.6%",
-         "最差回撤": "-30.7%", "XIRR中位(5y)": "18.5%"},
-        {"标的": "黄金XAUT", "数据区间": "2020-02~2026-08",
-         "3年中位收益": "+32.8%", "5年中位收益": "+80.5%",
-         "5年亏损概率": "0%", "5年最差": "+46.6%",
-         "最差回撤": "-25.0%", "XIRR中位(5y)": "24.2%"},
-        {"标的": "沪深300", "数据区间": "2016-01~2026-08",
-         "3年中位收益": "+5.1%", "5年中位收益": "-0.6%",
-         "5年亏损概率": "52%", "5年最差": "-23.2%",
-         "最差回撤": "-23.9%", "XIRR中位(5y)": "-0.2%"},
+        {
+            "标的": "标普500",
+            "数据区间": "2016-01~2026-08",
+            "3年中位收益": "+21.2%",
+            "5年中位收益": "+41.3%",
+            "5年亏损概率": "0%",
+            "5年最差": "+9.5%",
+            "最差回撤": "-32.6%",
+            "XIRR中位(5y)": "14.0%",
+        },
+        {
+            "标的": "纳指100",
+            "数据区间": "2016-01~2024-12",
+            "3年中位收益": "+30.8%",
+            "5年中位收益": "+57.8%",
+            "5年亏损概率": "0%",
+            "5年最差": "+14.6%",
+            "最差回撤": "-30.7%",
+            "XIRR中位(5y)": "18.5%",
+        },
+        {
+            "标的": "黄金XAUT",
+            "数据区间": "2020-02~2026-08",
+            "3年中位收益": "+32.8%",
+            "5年中位收益": "+80.5%",
+            "5年亏损概率": "0%",
+            "5年最差": "+46.6%",
+            "最差回撤": "-25.0%",
+            "XIRR中位(5y)": "24.2%",
+        },
+        {
+            "标的": "沪深300",
+            "数据区间": "2016-01~2026-08",
+            "3年中位收益": "+5.1%",
+            "5年中位收益": "-0.6%",
+            "5年亏损概率": "52%",
+            "5年最差": "-23.2%",
+            "最差回撤": "-23.9%",
+            "XIRR中位(5y)": "-0.2%",
+        },
     ]
     st.dataframe(pd.DataFrame(cross_rows), use_container_width=True, hide_index=True)
 

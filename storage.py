@@ -13,6 +13,7 @@
 - 回退模式（无 secrets）行为与旧版完全一致：纯本地 CSV，无用户概念。
 - 注意：Sheets 连接基于整表 read/update，并发写存在理论上的竞态；本工具面向极小团队，可接受。
 """
+
 import csv
 import hashlib
 import json
@@ -23,11 +24,33 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-TX_FIELDS = ["user", "date", "action", "asset", "symbol", "currency",
-             "amount_rmb", "price", "shares", "fee_rmb", "fx_rate", "notes"]
-OBS_FIELDS = ["user", "date", "action", "total_suggested_rmb", "user_amount_rmb",
-              "decision_level", "sp500_weight", "ndx100_weight", "gold_weight",
-              "reason", "notes"]
+TX_FIELDS = [
+    "user",
+    "date",
+    "action",
+    "asset",
+    "symbol",
+    "currency",
+    "amount_rmb",
+    "price",
+    "shares",
+    "fee_rmb",
+    "fx_rate",
+    "notes",
+]
+OBS_FIELDS = [
+    "user",
+    "date",
+    "action",
+    "total_suggested_rmb",
+    "user_amount_rmb",
+    "decision_level",
+    "sp500_weight",
+    "ndx100_weight",
+    "gold_weight",
+    "reason",
+    "notes",
+]
 OVR_FIELDS = ["user", "month", "budget_rmb"]
 USER_FIELDS = ["name", "pin_hash", "role", "created_at"]
 
@@ -35,6 +58,7 @@ TABLES = {"transactions": TX_FIELDS, "observations": OBS_FIELDS}
 
 
 # ---------- 后端探测 ----------
+
 
 def sheets_enabled() -> bool:
     """secrets 里配置了 [connections.gsheets] 才启用云端模式。"""
@@ -49,15 +73,18 @@ def _conn():
     # 延迟导入：未安装 st-gsheets-connection 时本地 CSV 模式仍可用
     from streamlit_gsheets import GSheetsConnection
     import streamlit_gsheets.gsheets_connection as _gc
+
     # 该库内部 @cache_data 没关 show_spinner，会把 Running GSheetsServiceAccountClient...
     # 这类内部函数名闪到前端；给它打个静默补丁（_get_as_dataframe 在调用时才装饰，补丁有效）
     if not getattr(_gc, "_quiet_patched", False):
         _orig_cache_data = _gc.cache_data
+
         def _quiet_cache_data(*args, **kwargs):
             kwargs["show_spinner"] = False
             return _orig_cache_data(*args, **kwargs)
+
         _gc.cache_data = _quiet_cache_data
-        _gc._quiet_patched = True
+        _gc._quiet_patched = True  # type: ignore[attr-defined]  # 猴子补丁标记，pyright 不认模块动态属性
     return st.connection("gsheets", type=GSheetsConnection)
 
 
@@ -70,8 +97,10 @@ _SHEET_CACHE: dict = {}
 _SHEET_CACHE_TTL = 8.0
 
 
-def _read_ws(name: str, fields: list) -> pd.DataFrame:
-    """读整个 worksheet；不存在或为空时返回带表头的空表。"""
+def _read_ws(name: str, fields: list, fresh: bool = False) -> pd.DataFrame:
+    """读整个 worksheet；不存在或为空时返回带表头的空表。fresh=True 绕过 8 秒短缓存强制新鲜读。"""
+    if fresh:
+        _SHEET_CACHE.pop(name, None)
     _hit = _SHEET_CACHE.get(name)
     if _hit is not None and (time.time() - _hit[0]) < _SHEET_CACHE_TTL:
         return _hit[1].copy()
@@ -87,7 +116,7 @@ def _read_ws(name: str, fields: list) -> pd.DataFrame:
             df[f] = ""
     df = df[fields].fillna("").astype(str)
     _SHEET_CACHE[name] = (time.time(), df)
-    return df.copy()
+    return df.copy()  # type: ignore[return-value]  # pandas 切片在 pyright 下是 DataFrame|Series 联合类型
 
 
 def _write_ws(name: str, df: pd.DataFrame) -> None:
@@ -101,8 +130,9 @@ def _write_ws(name: str, df: pd.DataFrame) -> None:
 
 # ---------- 用户（名字 + PIN）----------
 
+
 def _pin_hash(name: str, pin: str) -> str:
-    return hashlib.sha256(f"dca::{name.strip()}::{pin}".encode("utf-8")).hexdigest()
+    return hashlib.sha256(f"dca::{name.strip()}::{pin}".encode()).hexdigest()
 
 
 def _match_user(df: pd.DataFrame, name: str):
@@ -115,6 +145,30 @@ def list_users() -> list:
     if not sheets_enabled():
         return []
     return [n for n in _read_ws("users", USER_FIELDS)["name"].tolist() if n]
+
+
+def list_users_fresh() -> list:
+    """绕过 8 秒短缓存的新鲜用户名单（登录第二阶段、自举防呆用）。"""
+    if not sheets_enabled():
+        return []
+    return [n for n in _read_ws("users", USER_FIELDS, fresh=True)["name"].tolist() if n]
+
+
+def authenticate(name: str, pin: str):
+    """登录校验：一次新鲜读取 users 表完成 存在性/激活态/PIN 三重判断。
+    返回 (status, canon_name, names)；status ∈ ok|no_user|pending|bad_pin，
+    names 为这次新鲜读到的用户名列表（调用方拿来刷新会话缓存）。"""
+    df = _read_ws("users", USER_FIELDS, fresh=True)
+    names = [n for n in df["name"].tolist() if n]
+    hit = df[_match_user(df, name)]
+    if hit.empty:
+        return "no_user", None, names
+    stored = hit.iloc[0]["name"]
+    if not hit.iloc[0]["pin_hash"]:
+        return "pending", stored, names
+    if hit.iloc[0]["pin_hash"] != _pin_hash(stored, pin):
+        return "bad_pin", stored, names
+    return "ok", stored, names
 
 
 def verify_user(name: str, pin: str) -> bool:
@@ -138,8 +192,16 @@ def create_user(name: str, pin: str, pin_confirm: str, role: str = "user"):
     df = _read_ws("users", USER_FIELDS)
     if _match_user(df, name).any():
         return False, "这个名字已存在"
-    row = pd.DataFrame([{"name": name, "pin_hash": _pin_hash(name, pin), "role": role,
-                         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}])
+    row = pd.DataFrame(
+        [
+            {
+                "name": name,
+                "pin_hash": _pin_hash(name, pin),
+                "role": role,
+                "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            }
+        ]
+    )
     _write_ws("users", pd.concat([df, row], ignore_index=True))
     return True, "ok"
 
@@ -158,8 +220,16 @@ def admin_add_user(name: str):
     df = _read_ws("users", USER_FIELDS)
     if _match_user(df, name).any():
         return False, "这个名字已存在"
-    row = pd.DataFrame([{"name": name, "pin_hash": "", "role": "user",
-                         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}])
+    row = pd.DataFrame(
+        [
+            {
+                "name": name,
+                "pin_hash": "",
+                "role": "user",
+                "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            }
+        ]
+    )
     _write_ws("users", pd.concat([df, row], ignore_index=True))
     return True, "ok"
 
@@ -194,7 +264,7 @@ def delete_user(name: str):
     hit = _match_user(df, name)
     if not hit.any():
         return False, "用户不存在"
-    _write_ws("users", df[~hit].reset_index(drop=True))
+    _write_ws("users", df[~hit].reset_index(drop=True))  # type: ignore[arg-type]
     return True, "ok"
 
 
@@ -211,13 +281,14 @@ def reset_pin(name: str):
 
 # ---------- 数据读写（统一入口）----------
 
+
 def read_rows(table: str, user: str) -> list:
     """返回该用户的全部行（list[dict]，云端数据已按 user 过滤）。"""
     fields = TABLES[table]
     if sheets_enabled():
         df = _read_ws(table, fields)
         df = df[df["user"] == user]
-        return df.to_dict("records")
+        return df.to_dict("records")  # type: ignore[call-overload]
     path = _local_csv(table)
     if not path.exists() or path.stat().st_size == 0:
         return []
@@ -250,7 +321,14 @@ def get_overrides(user: str) -> dict:
     if sheets_enabled():
         df = _read_ws("budget_overrides", OVR_FIELDS)
         df = df[df["user"] == user]
-        return {r["month"]: float(r["budget_rmb"]) for _, r in df.iterrows() if r["month"]}
+        try:
+            return {
+                r["month"]: float(r["budget_rmb"])
+                for _, r in df.iterrows()
+                if r["month"]
+            }  # type: ignore
+        except (TypeError, ValueError):
+            return {}  # 个别行金额异常不拖垮整个预算读取
     path = _local_json("budget_overrides.json")
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -262,20 +340,30 @@ def set_override(user: str, month: str, budget_rmb: float) -> None:
     if sheets_enabled():
         df = _read_ws("budget_overrides", OVR_FIELDS)
         keep = df[~((df["user"] == user) & (df["month"] == month))]
-        row = pd.DataFrame([{"user": user, "month": month, "budget_rmb": str(budget_rmb)}])
-        _write_ws("budget_overrides", pd.concat([keep, row], ignore_index=True))
+        row = pd.DataFrame(
+            [{"user": user, "month": month, "budget_rmb": str(budget_rmb)}]
+        )
+        _write_ws("budget_overrides", pd.concat([keep, row], ignore_index=True))  # type: ignore[arg-type]
         sync_local(user)
     else:
         path = _local_json("budget_overrides.json")
         try:
-            overrides = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+            overrides = (
+                json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+            )
         except Exception:
             overrides = {}
-        overrides[month] = float(budget_rmb)
-        path.write_text(json.dumps(overrides, ensure_ascii=False, indent=2), encoding="utf-8")
+        try:
+            overrides[month] = float(budget_rmb)
+        except (TypeError, ValueError):
+            return  # 非法金额直接忽略，不写坏本地文件
+        path.write_text(
+            json.dumps(overrides, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
 
 
 # ---------- 云端 → 本地缓存同步（供 dca_calculator 子进程读）----------
+
 
 def sync_local(user: str) -> None:
     """把云端该用户的 transactions/observations/budget_overrides 落盘成本地缓存。
@@ -296,7 +384,8 @@ def sync_local(user: str) -> None:
             w.writerows(rows)
     ov = get_overrides(user)
     _local_json("budget_overrides.json").write_text(
-        json.dumps(ov, ensure_ascii=False, indent=2), encoding="utf-8")
+        json.dumps(ov, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
 
 def import_local_to_sheets(user: str) -> dict:
@@ -312,9 +401,11 @@ def import_local_to_sheets(user: str) -> dict:
             r["user"] = user
         if rows:
             df = _read_ws(table, TABLES[table])
-            df = pd.concat([df, pd.DataFrame(rows)[TABLES[table]].fillna("").astype(str)],
-                           ignore_index=True)
-            _write_ws(table, df)
+            df = pd.concat(
+                [df, pd.DataFrame(rows)[TABLES[table]].fillna("").astype(str)],
+                ignore_index=True,
+            )
+            _write_ws(table, df)  # type: ignore[arg-type]
         counts[table] = len(rows)
     ov_path = _local_json("budget_overrides.json")
     try:
@@ -324,7 +415,9 @@ def import_local_to_sheets(user: str) -> dict:
     if ov:
         df = _read_ws("budget_overrides", OVR_FIELDS)
         rows = [{"user": user, "month": m, "budget_rmb": str(v)} for m, v in ov.items()]
-        _write_ws("budget_overrides", pd.concat([df, pd.DataFrame(rows)], ignore_index=True))
+        _write_ws(
+            "budget_overrides", pd.concat([df, pd.DataFrame(rows)], ignore_index=True)
+        )
     counts["budget_overrides"] = len(ov)
     sync_local(user)
     return counts
