@@ -173,6 +173,14 @@ body { background: #f7f8fa; }
     background-size: 40% 100%; background-repeat: no-repeat;
     animation: dca-slide 1.15s ease-in-out infinite; }
 @keyframes dca-slide { 0% { background-position: -40% 0; } 100% { background-position: 140% 0; } }
+/* 登录后整屏同步遮罩：盖住上一个 run 残留的登录页，避免同步期间一直看到登录页 */
+.dca-sync-mask { position: fixed; inset: 0; z-index: 999999; background: #f7f8fa;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; }
+.dca-sync-ring { width: 44px; height: 44px; border-radius: 50%; flex: none;
+    border: 4px solid #e3e9f5; border-top-color: #2f6bff;
+    animation: dca-spin .8s linear infinite; }
+.dca-sync-msg { font-size: 16px; font-weight: 600; color: #22315e; letter-spacing: 1px; }
+.dca-sync-sub { font-size: 13px; color: #8490ae; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -186,6 +194,19 @@ def show_loading(msg: str, sub: str = ""):
         f"<div class='dca-loader-msg'>{msg}</div>"
         + (f"<div class='dca-loader-sub'>{sub}</div>" if sub else "")
         + "</div></div>",
+        unsafe_allow_html=True,
+    )
+    return ph
+
+
+def show_sync_mask(msg: str, sub: str = ""):
+    """登录后整屏同步遮罩：盖住上一个 run 残留的登录页。"""
+    ph = st.empty()
+    ph.markdown(
+        "<div class='dca-sync-mask'><div class='dca-sync-ring'></div>"
+        f"<div class='dca-sync-msg'>{msg}</div>"
+        + (f"<div class='dca-sync-sub'>{sub}</div>" if sub else "")
+        + "</div>",
         unsafe_allow_html=True,
     )
     return ph
@@ -267,7 +288,7 @@ if storage.sheets_enabled():
         st.stop()
     CURRENT_USER = st.session_state["user"]
     if not st.session_state.get("synced"):
-        _ld = show_loading("正在同步云端数据…", "首次进入稍等几秒")
+        _ld = show_sync_mask("正在同步云端数据…", "首次进入稍等几秒")
         storage.sync_local(CURRENT_USER)  # 每会话首次进入同步一次云端数据到本地缓存
         st.session_state["synced"] = True
         _ld.empty()
