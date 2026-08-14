@@ -279,10 +279,160 @@ def show_auth_mask(title: str, steps: list, ph=None):
     return ph
 
 
+
+def _render_login_page(names, ph):
+    """登录/激活/自举页整体渲染（统一挂在 ph 容器内）。
+    提交校验通过时先把 ph 掏空——登录页立刻从 DOM 整体摘除，再挂遮罩并 stash+rerun。
+    不再依赖 run 末尾的路径剪枝（实测剪枝不可靠，残留登录元素会一路带进主应用）。"""
+    # 科技风背景层（fixed 定位铺全屏；随 ph 容器一起被摘除）
+    st.markdown(
+        "<div class='fz-bg'><div class='fz-grid'></div><div class='fz-stars'></div>"
+        "<div class='fz-stars s2'></div><div class='fz-orb o1'></div><div class='fz-orb o2'></div></div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        "<div style='height:12vh'></div>", unsafe_allow_html=True
+    )  # 顶部留白（在卡片外，控制整体下移）
+    _pad_l, _mid, _pad_r = st.columns([1, 1, 1])
+    with _mid:
+        st.markdown(
+            "<div class='fz-scope'></div>", unsafe_allow_html=True
+        )  # 卡片样式标记（CSS 据此限定作用域）
+        st.markdown(
+            "<div class='fz-badge'>📈</div>"
+            "<div class='fz-brand'>模拟定投决策台<span class='fz-pill'>试用版</span></div>"
+            "<div class='fz-title'>欢迎登录</div>",
+            unsafe_allow_html=True,
+        )
+        if not names:
+            # 自举：系统还没有任何用户时，首个注册者自动成为管理员
+            st.markdown(
+                "<div class='fz-hint'>首次使用：创建管理员账号</div>",
+                unsafe_allow_html=True,
+            )
+            _berr = st.session_state.pop("_boot_err", None)
+            if _berr:
+                st.error(_berr)
+            with st.form("bootstrap_form"):
+                reg_name = st.text_input(
+                    "账号",
+                    placeholder="请输入管理员名字",
+                    label_visibility="collapsed",
+                )
+                reg_pin = st.text_input(
+                    "密码",
+                    type="password",
+                    placeholder="请设置 PIN（4-8 位，记牢）",
+                    label_visibility="collapsed",
+                )
+                reg_pin2 = st.text_input(
+                    "确认密码",
+                    type="password",
+                    placeholder="请再次输入 PIN",
+                    label_visibility="collapsed",
+                )
+                if st.form_submit_button("创建并进入", use_container_width=True):
+                    if not reg_name.strip():
+                        st.error("名字不能为空")
+                    elif reg_pin != reg_pin2:
+                        st.error("两次输入的 PIN 不一致")
+                    elif not (4 <= len(reg_pin or "") <= 8):
+                        st.error("PIN 需要 4-8 位")
+                    else:
+                        st.session_state["_auth"] = {
+                            "stage": "bootstrap",
+                            "name": reg_name.strip(),
+                            "pin": reg_pin,
+                            "pin2": reg_pin2,
+                        }
+                        ph.empty()  # 登录页立即整体摘除
+                        show_auth_mask(
+                            "正在创建管理员", [("创建账号", "on"), ("准备数据", "off")]
+                        )
+                        st.rerun()
+        elif st.session_state.get("activating"):
+            who = st.session_state["activating"]
+            st.markdown(
+                f"<div class='fz-hint'>👋 你好，{who}！首次登录请设置你的 PIN<br><span>只有你自己知道，管理员也看不到</span></div>",
+                unsafe_allow_html=True,
+            )
+            _aerr = st.session_state.pop("_act_err", None)
+            if _aerr:
+                st.error(_aerr)
+            with st.form("activate_form"):
+                act_pin = st.text_input(
+                    "密码",
+                    type="password",
+                    placeholder="请设置 PIN（4-8 位，记牢）",
+                    label_visibility="collapsed",
+                )
+                act_pin2 = st.text_input(
+                    "确认密码",
+                    type="password",
+                    placeholder="请再次输入 PIN",
+                    label_visibility="collapsed",
+                )
+                if st.form_submit_button(
+                    "设置 PIN 并进入", use_container_width=True
+                ):
+                    if act_pin != act_pin2:
+                        st.error("两次输入的 PIN 不一致")
+                    elif not (4 <= len(act_pin or "") <= 8):
+                        st.error("PIN 需要 4-8 位")
+                    else:
+                        st.session_state["_auth"] = {
+                            "stage": "activate",
+                            "who": who,
+                            "pin": act_pin,
+                            "pin2": act_pin2,
+                        }
+                        ph.empty()
+                        show_auth_mask(
+                            "正在设置 PIN", [("写入云端", "on"), ("同步云端数据", "off")]
+                        )
+                        st.rerun()
+            if st.button("← 返回登录", key="back_login"):
+                st.session_state.pop("activating", None)
+                st.rerun()
+        else:
+            _lerr = st.session_state.pop("_login_err", None)
+            if _lerr:
+                st.error(_lerr)
+            with st.form("login_form"):
+                login_name = st.text_input(
+                    "账号", placeholder="请输入用户名", label_visibility="collapsed"
+                )
+                login_pin = st.text_input(
+                    "密码",
+                    type="password",
+                    placeholder="请输入密码",
+                    label_visibility="collapsed",
+                )
+                if st.form_submit_button("登 录", use_container_width=True):
+                    nm = login_name.strip()
+                    if not nm or not login_pin:
+                        st.error("请输入账号和密码")
+                    else:
+                        st.session_state["_auth"] = {
+                            "stage": "login",
+                            "name": nm,
+                            "pin": login_pin,
+                        }
+                        ph.empty()  # 登录页立即整体摘除
+                        show_auth_mask(
+                            "正在登录", [("验证账号", "on"), ("同步云端数据", "off")]
+                        )
+                        st.rerun()
+        st.markdown(
+            "<div class='dca-login-foot'>忘记 PIN？联系管理员重置 · 每人数据互相隔离</div>",
+            unsafe_allow_html=True,
+        )
+
 # ---- 用户门闸：Sheets 云端模式必须 名字+PIN 登录；本地 CSV 模式直进 ----
 CURRENT_USER = "local"
 if storage.sheets_enabled():
     if "user" not in st.session_state:
+        _login_ph = st.empty()  # 登录页统一挂载点：每趟运行都在门闸首位创建，保证 delta 路径稳定
         _auth = st.session_state.get("_auth")
         if _auth is not None:
             # —— 第二阶段（点击后的下一趟运行）：先挂整屏「登录中」遮罩，再做一切网络校验/同步。
@@ -391,137 +541,9 @@ if storage.sheets_enabled():
         if names is None:
             names = storage.list_users()  # 仅每会话首次加载触网一次
             st.session_state["_names"] = names
-        # 科技风背景层（fixed 定位铺全屏；登录成功后本分支不再渲染，背景自动消失）
-        st.markdown(
-            "<div class='fz-bg'><div class='fz-grid'></div><div class='fz-stars'></div>"
-            "<div class='fz-stars s2'></div><div class='fz-orb o1'></div><div class='fz-orb o2'></div></div>",
-            unsafe_allow_html=True,
-        )
-        st.markdown(
-            "<div style='height:12vh'></div>", unsafe_allow_html=True
-        )  # 顶部留白（在卡片外，控制整体下移）
-        _pad_l, _mid, _pad_r = st.columns([1, 1, 1])
-        with _mid:
-            st.markdown(
-                "<div class='fz-scope'></div>", unsafe_allow_html=True
-            )  # 卡片样式标记（CSS 据此限定作用域）
-            st.markdown(
-                "<div class='fz-badge'>📈</div>"
-                "<div class='fz-brand'>模拟定投决策台<span class='fz-pill'>试用版</span></div>"
-                "<div class='fz-title'>欢迎登录</div>",
-                unsafe_allow_html=True,
-            )
-            if not names:
-                # 自举：系统还没有任何用户时，首个注册者自动成为管理员
-                st.markdown(
-                    "<div class='fz-hint'>首次使用：创建管理员账号</div>",
-                    unsafe_allow_html=True,
-                )
-                _berr = st.session_state.pop("_boot_err", None)
-                if _berr:
-                    st.error(_berr)
-                with st.form("bootstrap_form"):
-                    reg_name = st.text_input(
-                        "账号",
-                        placeholder="请输入管理员名字",
-                        label_visibility="collapsed",
-                    )
-                    reg_pin = st.text_input(
-                        "密码",
-                        type="password",
-                        placeholder="请设置 PIN（4-8 位，记牢）",
-                        label_visibility="collapsed",
-                    )
-                    reg_pin2 = st.text_input(
-                        "确认密码",
-                        type="password",
-                        placeholder="请再次输入 PIN",
-                        label_visibility="collapsed",
-                    )
-                    if st.form_submit_button("创建并进入", use_container_width=True):
-                        if not reg_name.strip():
-                            st.error("名字不能为空")
-                        elif reg_pin != reg_pin2:
-                            st.error("两次输入的 PIN 不一致")
-                        elif not (4 <= len(reg_pin or "") <= 8):
-                            st.error("PIN 需要 4-8 位")
-                        else:
-                            st.session_state["_auth"] = {
-                                "stage": "bootstrap",
-                                "name": reg_name.strip(),
-                                "pin": reg_pin,
-                                "pin2": reg_pin2,
-                            }
-                            st.rerun()
-            elif st.session_state.get("activating"):
-                who = st.session_state["activating"]
-                st.markdown(
-                    f"<div class='fz-hint'>👋 你好，{who}！首次登录请设置你的 PIN<br><span>只有你自己知道，管理员也看不到</span></div>",
-                    unsafe_allow_html=True,
-                )
-                _aerr = st.session_state.pop("_act_err", None)
-                if _aerr:
-                    st.error(_aerr)
-                with st.form("activate_form"):
-                    act_pin = st.text_input(
-                        "密码",
-                        type="password",
-                        placeholder="请设置 PIN（4-8 位，记牢）",
-                        label_visibility="collapsed",
-                    )
-                    act_pin2 = st.text_input(
-                        "确认密码",
-                        type="password",
-                        placeholder="请再次输入 PIN",
-                        label_visibility="collapsed",
-                    )
-                    if st.form_submit_button(
-                        "设置 PIN 并进入", use_container_width=True
-                    ):
-                        if act_pin != act_pin2:
-                            st.error("两次输入的 PIN 不一致")
-                        elif not (4 <= len(act_pin or "") <= 8):
-                            st.error("PIN 需要 4-8 位")
-                        else:
-                            st.session_state["_auth"] = {
-                                "stage": "activate",
-                                "who": who,
-                                "pin": act_pin,
-                                "pin2": act_pin2,
-                            }
-                            st.rerun()
-                if st.button("← 返回登录", key="back_login"):
-                    st.session_state.pop("activating", None)
-                    st.rerun()
-            else:
-                _lerr = st.session_state.pop("_login_err", None)
-                if _lerr:
-                    st.error(_lerr)
-                with st.form("login_form"):
-                    login_name = st.text_input(
-                        "账号", placeholder="请输入用户名", label_visibility="collapsed"
-                    )
-                    login_pin = st.text_input(
-                        "密码",
-                        type="password",
-                        placeholder="请输入密码",
-                        label_visibility="collapsed",
-                    )
-                    if st.form_submit_button("登 录", use_container_width=True):
-                        nm = login_name.strip()
-                        if not nm or not login_pin:
-                            st.error("请输入账号和密码")
-                        else:
-                            st.session_state["_auth"] = {
-                                "stage": "login",
-                                "name": nm,
-                                "pin": login_pin,
-                            }
-                            st.rerun()
-            st.markdown(
-                "<div class='dca-login-foot'>忘记 PIN？联系管理员重置 · 每人数据互相隔离</div>",
-                unsafe_allow_html=True,
-            )
+        # 登录页整体挂进固定容器：提交趟/校验趟里容器保持为空 → 上一趟登录页被整体摘除
+        with _login_ph.container():
+            _render_login_page(names, _login_ph)
         st.stop()
     CURRENT_USER = st.session_state["user"]
     if not st.session_state.get("synced"):
