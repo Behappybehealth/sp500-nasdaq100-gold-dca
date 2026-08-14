@@ -195,10 +195,16 @@ body { background: #f7f8fa; }
 
 /* ===== 登录中整屏遮罩：延续登录页科技风，玻璃拟态状态卡 + 分步进度 ===== */
 .dca-auth-mask { position: fixed; inset: 0; z-index: 999999;
-    display: flex; align-items: center; justify-content: center; }
+    display: flex; align-items: center; justify-content: center;
+    background:  /* 不透明深色渐变：必须完全盖住上一趟残留的登录页，否则透明遮罩等于没遮 */
+        radial-gradient(ellipse 90% 55% at 70% -10%, rgba(59,110,255,.28), transparent 60%),
+        radial-gradient(ellipse 70% 50% at 15% 110%, rgba(0,198,255,.16), transparent 60%),
+        linear-gradient(155deg, #0b1730 0%, #0d1f42 48%, #080f22 100%); }
+.dca-auth-mask .fz-bg { z-index: 0; }  /* 遮罩内科技纹理：盖在遮罩底色上、状态卡之下 */
+.dca-auth-mask .dca-auth-card { position: relative; z-index: 1; }
 .dca-auth-card { display: flex; flex-direction: column; align-items: center; gap: 15px;
     width: 320px; padding: 36px 32px 30px; border-radius: 20px;
-    background: rgba(13,24,52,.62); border: 1px solid rgba(148,180,255,.22);
+    background: rgba(11,20,44,.78); border: 1px solid rgba(148,180,255,.38);
     -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
     box-shadow: 0 30px 80px rgba(2,8,26,.55), inset 0 1px 0 rgba(255,255,255,.08);
     animation: dca-auth-in .3s cubic-bezier(.2,.9,.3,1.15); }
@@ -250,22 +256,20 @@ def show_sync_mask(msg: str, sub: str = ""):
 
 
 def show_auth_mask(title: str, steps: list, ph=None):
-    """登录中整屏遮罩：延续登录页科技风背景，玻璃拟态状态卡 + 分步进度。
+    """登录中整屏遮罩：自带不透明深色背景+科技纹理（fz-bg 在遮罩内部），完全盖住残留登录页。
     steps: [(文案, 状态)]，状态 on=进行中 / done=完成 / off=待办。
     传入 ph（st.empty 占位）则原地更新卡片，用于推进分步进度。"""
     if ph is None:
-        st.markdown(
-            "<div class='fz-bg'><div class='fz-grid'></div><div class='fz-stars'></div>"
-            "<div class='fz-stars s2'></div><div class='fz-orb o1'></div><div class='fz-orb o2'></div></div>",
-            unsafe_allow_html=True,
-        )
         ph = st.empty()
     rows = "".join(
         f"<div class='dca-auth-step {state}'><span class='dot'></span>{label}</div>"
         for label, state in steps
     )
     ph.markdown(
-        "<div class='dca-auth-mask'><div class='dca-auth-card'>"
+        "<div class='dca-auth-mask'>"
+        "<div class='fz-bg'><div class='fz-grid'></div><div class='fz-stars'></div>"
+        "<div class='fz-stars s2'></div><div class='fz-orb o1'></div><div class='fz-orb o2'></div></div>"
+        "<div class='dca-auth-card'>"
         "<div class='dca-auth-ring'></div>"
         f"<div class='dca-auth-title'>{title}</div>"
         f"<div class='dca-auth-steps'>{rows}</div>"
