@@ -1,0 +1,59 @@
+{
+  "base_currency": "RMB",
+  "monthly_budget_rmb": 30000,
+  "default_trade_amount_rmb": 5000,
+  "original_daily_plan_rmb": 1500,
+  "preferred_trade_interval_days": [1, 1],
+  "assets": {
+    "sp500": {
+      "name_cn": "标普500",
+      "symbol": "SPY",
+      "index_symbol": "^GSPC",
+      "neutral_weight": 0.35,
+      "min_weight": 0.20,
+      "max_weight": 0.55
+    },
+    "nasdaq100": {
+      "name_cn": "纳指100",
+      "symbol": "QQQ",
+      "index_symbol": "^NDX",
+      "neutral_weight": 0.45,
+      "min_weight": 0.30,
+      "max_weight": 0.70
+    },
+    "gold": {
+      "name_cn": "黄金",
+      "symbol": "XAUT",
+      "index_symbol": "GC=F",
+      "price_proxy_symbols": ["XAUT-USD", "GC=F"],
+      "fetch_trade_symbol": false,
+      "fx_mode": "usdt",
+      "neutral_weight": 0.20,
+      "min_weight": 0.10,
+      "max_weight": 0.30
+    }
+  },
+  "strategy": {
+    "lookback_years": 10,
+    "moving_average_windows": [20, 60, 120, 252],
+    "return_windows": [1, 5, 20, 60, 120, 252],
+    "volatility_windows": [20, 60]
+  },
+  "cache": {
+    "enabled": true,
+    "dir": "data/market_history"
+  },
+  "month_end_release": {
+    "enabled": true,
+    "window_days": 7
+  },
+  "model": {
+    "base_amount_rmb": 5000,
+    "deploy_gain": 1.1,
+    "deploy_max": 1.8,
+    "skip_below": 0.15,
+    "score_weights": {"value": 0.50, "trend": 0.25, "momentum": 0.15, "heat": 0.45, "heat_quad": 0.20, "volatility": 0.15},
+    "tilt_strength": 0.9,
+    "defense_boost": 0.6
+  }
+}

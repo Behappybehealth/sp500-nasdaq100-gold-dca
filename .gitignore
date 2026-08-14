@@ -1,0 +1,9 @@
+# 本地用户数据与密钥不入库（保留默认配置与行情缓存，便于 Streamlit Cloud 直接运行）
+data/transactions.csv
+data/observations.csv
+data/budget_overrides.json
+data/*.localbak
+.streamlit/secrets.toml
+__pycache__/
+.venv/
+streamlit.log
