@@ -102,15 +102,22 @@ body { background: #f7f8fa; }
 .dca-login-foot { text-align: center; color: rgba(170,190,228,.45); font-size: 12px; margin-top: 12px; }
 
 /* 登录卡内输入框：深色内嵌 + 亮边框（对比加强） */
-[data-testid="stColumn"]:has(.fz-scope) [data-testid="stTextInput"] div[data-baseweb="input"] {
-    background: rgba(255,255,255,.10); border: 1.5px solid rgba(160,190,255,.32) !important; border-radius: 10px !important;
-    min-height: 48px; transition: all .15s ease;
+[data-testid="stColumn"]:has(.fz-scope) [data-testid="stTextInput"] div[data-baseweb="input"],
+[data-testid="stColumn"]:has(.fz-scope) [data-testid="stTextInput"] div[data-baseweb="base-input"],
+[data-testid="stColumn"]:has(.fz-scope) [data-testid="stTextInput"] [data-testid="stTextInputRootElement"],
+[data-testid="stColumn"]:has(.fz-scope) [data-testid="stTextInput"] .react-aria-TextField {
+    background: rgba(8,16,38,.62) !important; background-color: rgba(8,16,38,.62) !important;
+    border: 1.5px solid rgba(160,190,255,.45) !important; border-radius: 10px !important;
+    min-height: 48px; transition: all .15s ease; color-scheme: dark;
 }
-[data-testid="stColumn"]:has(.fz-scope) [data-testid="stTextInput"] div[data-baseweb="input"]:focus-within {
-    background: rgba(255,255,255,.14); border-color: #6b9bff !important;
+[data-testid="stColumn"]:has(.fz-scope) [data-testid="stTextInput"] div[data-baseweb="input"]:focus-within,
+[data-testid="stColumn"]:has(.fz-scope) [data-testid="stTextInput"] div[data-baseweb="base-input"]:focus-within,
+[data-testid="stColumn"]:has(.fz-scope) [data-testid="stTextInput"] [data-testid="stTextInputRootElement"]:focus-within,
+[data-testid="stColumn"]:has(.fz-scope) [data-testid="stTextInput"] .react-aria-TextField:focus-within {
+    background: rgba(13,26,58,.78) !important; background-color: rgba(13,26,58,.78) !important; border-color: #6b9bff !important;
     box-shadow: 0 0 0 3px rgba(91,147,255,.30);
 }
-[data-testid="stColumn"]:has(.fz-scope) [data-testid="stTextInput"] input { background-color: transparent !important; font-size: 15.5px; color: #f2f6ff !important; -webkit-text-fill-color: #f2f6ff; }
+[data-testid="stColumn"]:has(.fz-scope) [data-testid="stTextInput"] input { background-color: transparent !important; font-size: 15.5px; font-weight: 500; color: #f2f6ff !important; -webkit-text-fill-color: #f2f6ff; caret-color: #eaf1ff; }
 [data-testid="stColumn"]:has(.fz-scope) [data-testid="stTextInput"] input::placeholder { color: rgba(200,216,246,.5); -webkit-text-fill-color: rgba(200,216,246,.5); }
 [data-testid="stColumn"]:has(.fz-scope) [data-testid="stTextInput"] input[type="text"],
 [data-testid="stColumn"]:has(.fz-scope) [data-testid="stTextInput"] input[type="password"] {
@@ -245,13 +252,14 @@ if storage.sheets_enabled():
                     login_pin = st.text_input("密码", type="password", placeholder="请输入密码", label_visibility="collapsed")
                     if st.form_submit_button("登 录", use_container_width=True):
                         nm = login_name.strip()
-                        if nm not in names:
+                        canon = next((n for n in names if str(n).strip().casefold() == nm.casefold()), None)
+                        if canon is None:
                             st.error("账号不存在，请联系管理员开通")
-                        elif not storage.is_activated(nm):
-                            st.session_state["activating"] = nm
+                        elif not storage.is_activated(canon):
+                            st.session_state["activating"] = canon
                             st.rerun()
-                        elif storage.verify_user(nm, login_pin):
-                            st.session_state["user"] = nm
+                        elif storage.verify_user(canon, login_pin):
+                            st.session_state["user"] = canon
                             st.rerun()
                         else:
                             st.error("账号或密码不对")

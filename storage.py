@@ -105,6 +105,12 @@ def _pin_hash(name: str, pin: str) -> str:
     return hashlib.sha256(f"dca::{name.strip()}::{pin}".encode("utf-8")).hexdigest()
 
 
+def _match_user(df: pd.DataFrame, name: str):
+    """大小写不敏感 + 去首尾空格的名字匹配，返回布尔掩码。"""
+    key = (name or "").strip().casefold()
+    return df["name"].astype(str).str.strip().str.casefold() == key
+
+
 def list_users() -> list:
     if not sheets_enabled():
         return []
@@ -113,12 +119,15 @@ def list_users() -> list:
 
 def verify_user(name: str, pin: str) -> bool:
     df = _read_ws("users", USER_FIELDS)
-    hit = df[df["name"] == name.strip()]
-    return not hit.empty and hit.iloc[0]["pin_hash"] == _pin_hash(name, pin)
+    hit = df[_match_user(df, name)]
+    if hit.empty:
+        return False
+    stored = hit.iloc[0]["name"]
+    return hit.iloc[0]["pin_hash"] == _pin_hash(stored, pin)
 
 
 def create_user(name: str, pin: str, pin_confirm: str, role: str = "user"):
-    """返回 (ok, msg)。名字唯一；PIN 要求 4-8 位。role: user|admin"""
+    """返回 (ok, msg)。名字唯一（不区分大小写）；PIN 要求 4-8 位。role: user|admin"""
     name = (name or "").strip()
     if not name:
         return False, "名字不能为空"
@@ -127,7 +136,7 @@ def create_user(name: str, pin: str, pin_confirm: str, role: str = "user"):
     if not (4 <= len(pin or "") <= 8):
         return False, "PIN 需要 4-8 位"
     df = _read_ws("users", USER_FIELDS)
-    if name in df["name"].tolist():
+    if _match_user(df, name).any():
         return False, "这个名字已存在"
     row = pd.DataFrame([{"name": name, "pin_hash": _pin_hash(name, pin), "role": role,
                          "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}])
@@ -137,7 +146,7 @@ def create_user(name: str, pin: str, pin_confirm: str, role: str = "user"):
 
 def is_admin(name: str) -> bool:
     df = _read_ws("users", USER_FIELDS)
-    hit = df[df["name"] == (name or "").strip()]
+    hit = df[_match_user(df, name)]
     return not hit.empty and hit.iloc[0].get("role", "") == "admin"
 
 
@@ -147,7 +156,7 @@ def admin_add_user(name: str):
     if not name:
         return False, "名字不能为空"
     df = _read_ws("users", USER_FIELDS)
-    if name in df["name"].tolist():
+    if _match_user(df, name).any():
         return False, "这个名字已存在"
     row = pd.DataFrame([{"name": name, "pin_hash": "", "role": "user",
                          "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}])
@@ -158,7 +167,7 @@ def admin_add_user(name: str):
 def is_activated(name: str) -> bool:
     """已设置过 PIN 才算已激活。"""
     df = _read_ws("users", USER_FIELDS)
-    hit = df[df["name"] == (name or "").strip()]
+    hit = df[_match_user(df, name)]
     return not hit.empty and bool(hit.iloc[0].get("pin_hash", ""))
 
 
@@ -169,31 +178,30 @@ def set_pin(name: str, pin: str, pin_confirm: str):
     if not (4 <= len(pin or "") <= 8):
         return False, "PIN 需要 4-8 位"
     df = _read_ws("users", USER_FIELDS)
-    name = (name or "").strip()
-    hit = df["name"] == name
+    hit = _match_user(df, name)
     if not hit.any():
         return False, "用户不存在"
     if df.loc[hit, "pin_hash"].iloc[0]:
         return False, "该账号已激活，请联系管理员重置"
-    df.loc[hit, "pin_hash"] = _pin_hash(name, pin)
+    stored = df.loc[hit, "name"].iloc[0]
+    df.loc[hit, "pin_hash"] = _pin_hash(stored, pin)
     _write_ws("users", df)
     return True, "ok"
 
 
 def delete_user(name: str):
     df = _read_ws("users", USER_FIELDS)
-    name = (name or "").strip()
-    if name not in df["name"].tolist():
+    hit = _match_user(df, name)
+    if not hit.any():
         return False, "用户不存在"
-    _write_ws("users", df[df["name"] != name].reset_index(drop=True))
+    _write_ws("users", df[~hit].reset_index(drop=True))
     return True, "ok"
 
 
 def reset_pin(name: str):
     """管理员重置：清空 PIN 回到待激活，用户下次登录重新自己设置。"""
     df = _read_ws("users", USER_FIELDS)
-    name = (name or "").strip()
-    hit = df["name"] == name
+    hit = _match_user(df, name)
     if not hit.any():
         return False, "用户不存在"
     df.loc[hit, "pin_hash"] = ""
