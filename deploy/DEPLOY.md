@@ -212,6 +212,16 @@ EOF
 cloudflared tunnel run dca-sim
 ```
 
+### 本机临时外发（ngrok 固定域名）
+
+`deploy/start-dca-tunnel.bat` —— 本机开着 Streamlit（8501）时，双击即把它发到公网固定地址
+`https://sudoku-manhood-argue.ngrok-free.dev`。脚本会先查 ngrok 是否已在跑，避免重复启动。
+
+脚本**无位置依赖**，放哪都能跑：`ngrok.exe` 先从 PATH 找，找不到再兜底 `%USERPROFILE%\bin\ngrok.exe`。
+本机 ngrok 装在 `C:\Users\xiezhibo\bin\`（已在 PATH 上）。
+
+这条路子只适合临时给人看，机器一关就断；长期在线走上面的 Cloudflare Tunnel 或 Streamlit Community Cloud。
+
 ---
 
 ## 7. 日常运维
