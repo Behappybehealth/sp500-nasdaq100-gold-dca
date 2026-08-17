@@ -70,24 +70,31 @@ sudo usermod -aG docker $USER
 mkdir -p ~/dca-sim && cd ~/dca-sim
 
 # 从你的电脑上传（在你本地电脑执行）
-scp -r /c/Users/xiezhibo/.claude/skills/sp500-nasdaq100-gold-dca/*  用户名@服务器IP:~/dca-sim/
+scp -r /x/coding/projects/sp500-nasdaq100-gold-dca/*  用户名@服务器IP:~/dca-sim/
 
-# 或者用 Git（如果你把代码推到了 GitHub）
-git clone https://github.com/你的用户名/dca-sim.git ~/dca-sim
+# 或者用 Git（推荐，仓库是私有的，需要凭据）
+git clone https://github.com/Behappybehealth/sp500-nasdaq100-gold-dca.git ~/dca-sim
 cd ~/dca-sim
 ```
+
+> ⚠️ 走 Git 的话，`.streamlit/secrets.toml`（GCP 凭据）不在库里，必须单独传上去，
+> 否则存储层会回退到本地 CSV，多用户共享数据就失效了。
 
 项目目录结构：
 
 ```
 ~/dca-sim/
 ├── app.py                  # Streamlit 应用
+├── storage.py              # 存储层（Google Sheets / 本地 CSV）
 ├── requirements.txt        # Python 依赖
 ├── scripts/
 │   └── dca_calculator.py   # 策略引擎
 ├── data/
 │   ├── config.json         # 默认配置
+│   ├── market_history/     # 行情缓存（增量更新，别删）
 │   └── user1/              # 用户数据（部署后生成）
+├── backtest/               # 回测脚本与结果（Tab5 读这里）
+├── strategy/               # 策略文档（Tab6 读这里）
 └── deploy/
     ├── Dockerfile          # 容器镜像
     ├── docker-compose.yml  # 多用户编排
