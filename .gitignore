@@ -1,9 +1,30 @@
-# 本地用户数据与密钥不入库（保留默认配置与行情缓存，便于 Streamlit Cloud 直接运行）
+# ---- 本地用户数据与密钥不入库（保留默认配置与行情缓存，便于 Streamlit Cloud 直接运行）----
 data/transactions.csv
 data/observations.csv
 data/budget_overrides.json
 data/*.localbak
+
+# ---- 密钥 ----
 .streamlit/secrets.toml
-__pycache__/
+.env
+
+# ---- Python 环境与缓存 ----
 .venv/
-streamlit.log
+__pycache__/
+*.py[cod]
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+
+# ---- 运行时日志与 PID ----
+*.log
+*.pid
+
+# ---- IDE ----
+.idea/
+.vscode/
+
+# ---- 系统 ----
+.DS_Store
+Thumbs.db
+desktop.ini
