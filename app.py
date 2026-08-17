@@ -279,7 +279,6 @@ def show_auth_mask(title: str, steps: list, ph=None):
     return ph
 
 
-
 def _render_login_page(names, ph):
     """登录/激活/自举页整体渲染（统一挂在 ph 容器内）。
     提交校验通过时先把 ph 掏空——登录页立刻从 DOM 整体摘除，再挂遮罩并 stash+rerun。
@@ -372,9 +371,7 @@ def _render_login_page(names, ph):
                     placeholder="请再次输入 PIN",
                     label_visibility="collapsed",
                 )
-                if st.form_submit_button(
-                    "设置 PIN 并进入", use_container_width=True
-                ):
+                if st.form_submit_button("设置 PIN 并进入", use_container_width=True):
                     if act_pin != act_pin2:
                         st.error("两次输入的 PIN 不一致")
                     elif not (4 <= len(act_pin or "") <= 8):
@@ -388,7 +385,8 @@ def _render_login_page(names, ph):
                         }
                         ph.empty()
                         show_auth_mask(
-                            "正在设置 PIN", [("写入云端", "on"), ("同步云端数据", "off")]
+                            "正在设置 PIN",
+                            [("写入云端", "on"), ("同步云端数据", "off")],
                         )
                         st.rerun()
             if st.button("← 返回登录", key="back_login"):
@@ -428,11 +426,14 @@ def _render_login_page(names, ph):
             unsafe_allow_html=True,
         )
 
+
 # ---- 用户门闸：Sheets 云端模式必须 名字+PIN 登录；本地 CSV 模式直进 ----
 CURRENT_USER = "local"
 if storage.sheets_enabled():
     if "user" not in st.session_state:
-        _login_ph = st.empty()  # 登录页统一挂载点：每趟运行都在门闸首位创建，保证 delta 路径稳定
+        _login_ph = (
+            st.empty()
+        )  # 登录页统一挂载点：每趟运行都在门闸首位创建，保证 delta 路径稳定
         _auth = st.session_state.get("_auth")
         if _auth is not None:
             # —— 第二阶段（点击后的下一趟运行）：先挂整屏「登录中」遮罩，再做一切网络校验/同步。
