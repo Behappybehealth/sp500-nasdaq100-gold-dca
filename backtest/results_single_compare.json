@@ -1,0 +1,308 @@
+{
+  "sp500": {
+    "dynamic": {
+      "win_rate": 0.9992025518341308,
+      "ret_med": 0.2668749798709411,
+      "ret_worst": -0.00011808374454813642,
+      "xirr_med": 0.20718889892379527,
+      "maxdd_med": -0.18998904170121078,
+      "maxdd_worst": -0.2536057341953333,
+      "uw_ratio_mean": 0.12849620965593841,
+      "max_consec_uw_max": 280,
+      "invested_med": 919855.35
+    },
+    "fixed": {
+      "win_rate": 0.9984051036682615,
+      "ret_med": 0.2726569119515989,
+      "ret_worst": -0.00014870871183403356,
+      "xirr_med": 0.2073347681035139,
+      "maxdd_med": -0.1899890417012109,
+      "maxdd_worst": -0.2536057341953326,
+      "uw_ratio_mean": 0.12808278954998625,
+      "max_consec_uw_max": 266,
+      "invested_med": 942000.0
+    },
+    "pairwise_dyn_vs_fixed": {
+      "beat_pct": 0.29505582137161085,
+      "mean_diff": -0.0027559150568721626
+    },
+    "examples": {
+      "2021-08-11": {
+        "dynamic": {
+          "days": 1254,
+          "invested": 1825855.35,
+          "final_value": 2813765.18,
+          "simple_return": 0.541066867049379,
+          "xirr": 0.1764584880164141,
+          "max_nav_dd": -0.2536057341953314,
+          "uw_days": 357,
+          "uw_ratio": 0.284688995215311,
+          "max_consec_uw": 280
+        },
+        "fixed": {
+          "days": 1254,
+          "invested": 1881000.0,
+          "final_value": 2910395.22,
+          "simple_return": 0.5472595542792498,
+          "xirr": 0.1772967171891255,
+          "max_nav_dd": -0.2536057341953315,
+          "uw_days": 358,
+          "uw_ratio": 0.28548644338118023,
+          "max_consec_uw": 266
+        }
+      },
+      "2022-01-03": {
+        "dynamic": {
+          "days": 1154,
+          "invested": 1675855.35,
+          "final_value": 2557624.99,
+          "simple_return": 0.5261609545081112,
+          "xirr": 0.1895059251237488,
+          "max_nav_dd": -0.2536057341953313,
+          "uw_days": 277,
+          "uw_ratio": 0.24003466204506066,
+          "max_consec_uw": 112
+        },
+        "fixed": {
+          "days": 1154,
+          "invested": 1731000.0,
+          "final_value": 2654721.77,
+          "simple_return": 0.5336347589506254,
+          "xirr": 0.18999655939470614,
+          "max_nav_dd": -0.25360573419533206,
+          "uw_days": 273,
+          "uw_ratio": 0.2365684575389948,
+          "max_consec_uw": 111
+        }
+      },
+      "2024-08-05": {
+        "dynamic": {
+          "days": 505,
+          "invested": 743128.07,
+          "final_value": 904590.99,
+          "simple_return": 0.21727468910362102,
+          "xirr": 0.21344064608215524,
+          "max_nav_dd": -0.18998904170121123,
+          "uw_days": 49,
+          "uw_ratio": 0.09702970297029703,
+          "max_consec_uw": 46
+        },
+        "fixed": {
+          "days": 505,
+          "invested": 757500.0,
+          "final_value": 926686.2,
+          "simple_return": 0.22334812498954548,
+          "xirr": 0.21336889195937253,
+          "max_nav_dd": -0.18998904170121078,
+          "uw_days": 50,
+          "uw_ratio": 0.09900990099009901,
+          "max_consec_uw": 46
+        }
+      }
+    }
+  },
+  "nasdaq100": {
+    "dynamic": {
+      "win_rate": 0.9984051036682615,
+      "ret_med": 0.34003739059134497,
+      "ret_worst": -0.0014585748274917876,
+      "xirr_med": 0.26389688160130803,
+      "maxdd_med": -0.22883306906757594,
+      "maxdd_worst": -0.3561721516911859,
+      "uw_ratio_mean": 0.14585429879371697,
+      "max_consec_uw_max": 271,
+      "invested_med": 924000.0
+    },
+    "fixed": {
+      "win_rate": 0.9992025518341308,
+      "ret_med": 0.3488736218514763,
+      "ret_worst": -0.0014937374060294273,
+      "xirr_med": 0.2639780076099903,
+      "maxdd_med": -0.22883306906757606,
+      "maxdd_worst": -0.35617215169118643,
+      "uw_ratio_mean": 0.14640822271563447,
+      "max_consec_uw_max": 252,
+      "invested_med": 942000.0
+    },
+    "pairwise_dyn_vs_fixed": {
+      "beat_pct": 0.15231259968102073,
+      "mean_diff": -0.008912481455763954
+    },
+    "examples": {
+      "2021-08-11": {
+        "dynamic": {
+          "days": 1254,
+          "invested": 1830000.0,
+          "final_value": 3186728.51,
+          "simple_return": 0.7413817019859861,
+          "xirr": 0.22795694931470664,
+          "max_nav_dd": -0.356172151691184,
+          "uw_days": 344,
+          "uw_ratio": 0.2743221690590112,
+          "max_consec_uw": 271
+        },
+        "fixed": {
+          "days": 1254,
+          "invested": 1881000.0,
+          "final_value": 3294370.18,
+          "simple_return": 0.7513929736899114,
+          "xirr": 0.2289719372205881,
+          "max_nav_dd": -0.35617215169118477,
+          "uw_days": 348,
+          "uw_ratio": 0.27751196172248804,
+          "max_consec_uw": 252
+        }
+      },
+      "2022-01-03": {
+        "dynamic": {
+          "days": 1154,
+          "invested": 1680000.0,
+          "final_value": 2901727.12,
+          "simple_return": 0.7272185222967891,
+          "xirr": 0.24732925414757104,
+          "max_nav_dd": -0.3524696013425779,
+          "uw_days": 278,
+          "uw_ratio": 0.24090121317157712,
+          "max_consec_uw": 114
+        },
+        "fixed": {
+          "days": 1154,
+          "invested": 1731000.0,
+          "final_value": 3010258.6,
+          "simple_return": 0.7390286555128647,
+          "xirr": 0.24779158987027633,
+          "max_nav_dd": -0.35246960134258,
+          "uw_days": 277,
+          "uw_ratio": 0.24003466204506066,
+          "max_consec_uw": 114
+        }
+      },
+      "2024-08-05": {
+        "dynamic": {
+          "days": 505,
+          "invested": 747272.73,
+          "final_value": 955767.18,
+          "simple_return": 0.2790071740693698,
+          "xirr": 0.2725987202470173,
+          "max_nav_dd": -0.2288330690675755,
+          "uw_days": 55,
+          "uw_ratio": 0.10891089108910891,
+          "max_consec_uw": 46
+        },
+        "fixed": {
+          "days": 505,
+          "invested": 757500.0,
+          "final_value": 975914.82,
+          "simple_return": 0.28833639856556936,
+          "xirr": 0.27275780266345695,
+          "max_nav_dd": -0.22883306906757572,
+          "uw_days": 55,
+          "uw_ratio": 0.10891089108910891,
+          "max_consec_uw": 46
+        }
+      }
+    }
+  },
+  "gold": {
+    "dynamic": {
+      "win_rate": 0.8835725677830941,
+      "ret_med": 0.38700649394351805,
+      "ret_worst": -0.03996586554750858,
+      "xirr_med": 0.27301537429764533,
+      "maxdd_med": -0.25060165248175426,
+      "maxdd_worst": -0.2506016524817559,
+      "uw_ratio_mean": 0.17714705661702976,
+      "max_consec_uw_max": 155,
+      "invested_med": 924000.0
+    },
+    "fixed": {
+      "win_rate": 0.8851674641148325,
+      "ret_med": 0.3967482522607786,
+      "ret_worst": -0.04226510421133001,
+      "xirr_med": 0.272952693681446,
+      "maxdd_med": -0.25060165248175403,
+      "maxdd_worst": -0.2506016524817559,
+      "uw_ratio_mean": 0.1768679105208798,
+      "max_consec_uw_max": 155,
+      "invested_med": 942000.0
+    },
+    "pairwise_dyn_vs_fixed": {
+      "beat_pct": 0.645933014354067,
+      "mean_diff": 0.03665386526825884
+    },
+    "examples": {
+      "2021-08-11": {
+        "dynamic": {
+          "days": 1254,
+          "invested": 1830000.0,
+          "final_value": 3409054.7,
+          "simple_return": 0.8628714223800142,
+          "xirr": 0.25617704623000936,
+          "max_nav_dd": -0.2506016524817536,
+          "uw_days": 177,
+          "uw_ratio": 0.14114832535885166,
+          "max_consec_uw": 112
+        },
+        "fixed": {
+          "days": 1254,
+          "invested": 1881000.0,
+          "final_value": 3519344.47,
+          "simple_return": 0.8709965303678628,
+          "xirr": 0.2568047696059932,
+          "max_nav_dd": -0.25060165248175437,
+          "uw_days": 184,
+          "uw_ratio": 0.1467304625199362,
+          "max_consec_uw": 114
+        }
+      },
+      "2022-01-03": {
+        "dynamic": {
+          "days": 1154,
+          "invested": 1680000.0,
+          "final_value": 3043225.03,
+          "simple_return": 0.8114434684299501,
+          "xirr": 0.2693823085155969,
+          "max_nav_dd": -0.25060165248175503,
+          "uw_days": 175,
+          "uw_ratio": 0.15164644714038128,
+          "max_consec_uw": 148
+        },
+        "fixed": {
+          "days": 1154,
+          "invested": 1731000.0,
+          "final_value": 3153792.4,
+          "simple_return": 0.821948240240935,
+          "xirr": 0.2694662580622739,
+          "max_nav_dd": -0.2506016524817538,
+          "uw_days": 176,
+          "uw_ratio": 0.15251299826689774,
+          "max_consec_uw": 148
+        }
+      },
+      "2024-08-05": {
+        "dynamic": {
+          "days": 505,
+          "invested": 747272.73,
+          "final_value": 941483.27,
+          "simple_return": 0.2598924603817252,
+          "xirr": 0.2546947459883659,
+          "max_nav_dd": -0.25060165248175337,
+          "uw_days": 7,
+          "uw_ratio": 0.013861386138613862,
+          "max_consec_uw": 3
+        },
+        "fixed": {
+          "days": 505,
+          "invested": 757500.0,
+          "final_value": 961439.74,
+          "simple_return": 0.2692273758322614,
+          "xirr": 0.25540794284472046,
+          "max_nav_dd": -0.25060165248175403,
+          "uw_days": 6,
+          "uw_ratio": 0.011881188118811881,
+          "max_consec_uw": 3
+        }
+      }
+    }
+  }
+}

@@ -43,11 +43,10 @@ try:
 except (json.JSONDecodeError, OSError) as _e:
     raise SystemExit(f"缺少或损坏的 data/config.json：{_e}") from None
 ASSETS = CONFIG["assets"]
-BACKTEST_DIR = (
-    Path(_args.base_dir + "/backtest")
-    if _args.base_dir and Path(_args.base_dir + "/backtest").exists()
-    else CODE_DIR.parent.parent.parent / "backtest-dca-5y"
-)
+# 回测结果：优先用户数据目录下的 backtest/（多用户部署可各自覆盖），否则用仓库自带那份。
+# 不要再用相对代码目录上跳的路径 —— 那会跟着代码搬家而失效。
+_BT_OVERRIDE = BASE / "backtest"
+BACKTEST_DIR = _BT_OVERRIDE if _BT_OVERRIDE.exists() else CODE_DIR / "backtest"
 
 st.set_page_config(page_title="模拟定投决策台", layout="wide", page_icon="📈")
 
@@ -1282,8 +1281,8 @@ with tab5:
     cmp_file = BACKTEST_DIR / "results_compare3.json"
     single_file = BACKTEST_DIR / "results_single_compare.json"
     d = _load_json(cmp_file) if cmp_file.exists() else None
-    if d is None and cmp_file.exists():
-        st.warning("三策略对比结果文件损坏，已跳过展示")
+    if d is None:
+        st.warning(f"三策略对比结果不可用（缺失或损坏）：{cmp_file}")
     if d:
         rows = []
         for mode, label in [
@@ -1383,8 +1382,8 @@ with tab5:
     )
 
     d2 = _load_json(single_file) if single_file.exists() else None
-    if d2 is None and single_file.exists():
-        st.warning("单品种回测结果文件损坏，已跳过展示")
+    if d2 is None:
+        st.warning(f"单品种回测结果不可用（缺失或损坏）：{single_file}")
     if d2:
         st.markdown("**单品种 + 动态/固定金额对比（1254 条路径，5 年窗口）**")
         s_rows = []
