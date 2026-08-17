@@ -217,10 +217,19 @@ cloudflared tunnel run dca-sim
 `deploy/start-dca-tunnel.bat` —— 本机开着 Streamlit（8501）时，双击即把它发到公网固定地址
 `https://sudoku-manhood-argue.ngrok-free.dev`。脚本会先查 ngrok 是否已在跑，避免重复启动。
 
-脚本**无位置依赖**，放哪都能跑：`ngrok.exe` 先从 PATH 找，找不到再兜底 `%USERPROFILE%\bin\ngrok.exe`。
-本机 ngrok 装在 `C:\Users\xiezhibo\bin\`（已在 PATH 上）。
+`ngrok.exe` 放在 `deploy/bin/`（33 MB，**随项目走但不入库**，见 .gitignore）。
+脚本用 `%~dp0bin\ngrok.exe` 相对定位，PATH 作兜底——**全程无绝对路径**，项目搬到哪都能跑。
+换机器只需去 https://ngrok.com/download 重新下一个丢进 `deploy/bin/`。
+
+**唯一留在 C 盘的东西：** ngrok 的 authtoken 在 `%LOCALAPPDATA%\ngrok\ngrok.yml`，
+那是 ngrok 自己写死的配置位置，搬不走。换机器要重跑一次 `ngrok config add-authtoken <token>`。
+
+**改这个 bat 时注意：只能用 ASCII。** cmd.exe 按 OEM 码页（中文 Windows 是 936）读批处理文件，
+UTF-8 中文注释会被误读，cmd 可能把乱码碎片当命令去执行——这个坑只在双击运行时才现形，
+在编辑器里看不出来。中文说明一律写在本文档里，不要写进 bat。
 
 这条路子只适合临时给人看，机器一关就断；长期在线走上面的 Cloudflare Tunnel 或 Streamlit Community Cloud。
+（`cloudflared.exe` 本机没配过，已收到 `X:\coding\tools\bin\` 作通用工具备用。）
 
 ---
 

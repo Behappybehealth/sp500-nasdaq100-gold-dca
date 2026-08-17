@@ -1,27 +1,41 @@
 @echo off
-REM 一键启动 ngrok 固定域名隧道 -> 本地 8501 (Streamlit 定投决策台)
-REM 公网固定地址: https://sudoku-manhood-argue.ngrok-free.dev
-REM 注意: 需先启动 Streamlit 应用 (8501 端口)
-REM 本脚本无位置依赖，放哪都能跑；ngrok 先找 PATH，再兜底找 %USERPROFILE%\bin
+REM Start ngrok tunnel with reserved domain -> local port 8501 (Streamlit DCA app)
+REM Public URL: https://sudoku-manhood-argue.ngrok-free.dev
+REM Requires the Streamlit app to be already running on port 8501.
+REM
+REM ngrok.exe lives in bin\ next to this script (ships with the project, not in git).
+REM Resolution order: script-relative bin\ -> PATH. No absolute paths anywhere.
+REM
+REM NOTE: keep this file ASCII-only. cmd.exe reads .bat using the OEM codepage
+REM (936 on zh-CN Windows); UTF-8 Chinese comments get mis-decoded and cmd may try
+REM to execute the garbled fragments. Chinese docs live in DEPLOY.md instead.
 
 setlocal
 
-set "NGROK=ngrok.exe"
-where /Q ngrok.exe || set "NGROK=%USERPROFILE%\bin\ngrok.exe"
-if not "%NGROK%"=="ngrok.exe" if not exist "%NGROK%" (
-    echo [错误] 找不到 ngrok.exe：PATH 里没有，%USERPROFILE%\bin 下也没有
-    pause
-    exit /b 1
+set "NGROK=%~dp0bin\ngrok.exe"
+if exist "%NGROK%" goto found
+
+where /Q ngrok.exe
+if %ERRORLEVEL%==0 (
+    set "NGROK=ngrok.exe"
+    goto found
 )
 
+echo [ERROR] ngrok.exe not found.
+echo         Not in %~dp0bin\ and not on PATH.
+echo         Download from https://ngrok.com/download and drop it into %~dp0bin\
+pause
+exit /b 1
+
+:found
 tasklist /FI "IMAGENAME eq ngrok.exe" 2>NUL | find /I "ngrok.exe" >NUL
 if %ERRORLEVEL%==0 (
-    echo ngrok 已在运行，无需重复启动
+    echo ngrok is already running - nothing to do.
 ) else (
     start "ngrok" /MIN "%NGROK%" http --url=sudoku-manhood-argue.ngrok-free.dev 8501
-    echo ngrok 隧道已启动
+    echo ngrok tunnel started.
 )
 timeout /t 3 >NUL
 echo.
-echo 公网地址: https://sudoku-manhood-argue.ngrok-free.dev
+echo Public URL: https://sudoku-manhood-argue.ngrok-free.dev
 pause

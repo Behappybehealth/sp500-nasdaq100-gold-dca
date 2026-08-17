@@ -8,6 +8,10 @@ data/*.localbak
 .streamlit/secrets.toml
 .env
 
+# ---- 随项目走但不入库的二进制工具（33 MB，官网可重新下载）----
+# 注意：只是不入库，文件本身留在 deploy/bin/，隧道脚本靠相对路径找它。
+deploy/bin/
+
 # ---- Python 环境与缓存 ----
 .venv/
 __pycache__/
