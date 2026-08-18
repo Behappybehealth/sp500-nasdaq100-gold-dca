@@ -7,6 +7,7 @@
 
 ## 2026-08-18
 
+- 17:48:35 [重构] 建 src/context + 服务层三模块，app.py 1559→1381（`2a9f816`；BUG-020 刀 2/7）
 - 16:54:51 [文档] 架构说明拆分为概要+详设两份，全文严审修正 12 处漂移（`1b6f3c7`）
 - 16:10:11 [功能] CHANGELOG 全量回填时刻 + changelog.py 生成/校验 + logs/ 定为运行日志落点（`9618fe2`）
 - 15:42:03 [重构] Tab5 五块硬编码表导出 results_rolling.json，caption 改指 backtest/（`77ea4a6`；BUG-025）

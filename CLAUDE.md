@@ -21,11 +21,12 @@
 
 ```
 sp500-nasdaq100-gold-dca/
-├── app.py                    # Streamlit 主程序（⚠️ 1381 行，拆分进行中：BUG-020 刀 2/7 已搬出服务层）
+├── app.py                    # Streamlit 主程序（⚠️ 1163 行，拆分进行中：BUG-020 已落 3/7 刀）
 ├── storage.py                # 存储层：Google Sheets 优先，本地 CSV 回退（594 行；含写前快照、PBKDF2 认证）
 ├── src/                      # app.py 拆分新家（BUG-020，7 刀方案逐刀外搬中）
 │   ├── context.py            # 启动上下文：Paths / Decision / build_paths（73 行；code_dir 按 parent.parent 定位）
-│   └── services/             # 服务层：model.py 模型调用（45）/ quotes.py 行情抓取（87）/ curves.py 曲线数据（85）
+│   ├── services/             # 服务层：model.py 模型调用（45）/ quotes.py 行情抓取（87）/ curves.py 曲线数据（85）
+│   └── ui/                   # 样式与遮罩：styles.py 全局 CSS / overlays.py 三遮罩（刀 3）
 ├── CHANGELOG.md              # 改动日志：每个 commit 一行带时刻（人读版流水，见第 12 条；scripts/changelog.py 维护）
 ├── start-app.bat             # 本机双击启动 Streamlit
 ├── logs/                     # 运行日志约定落点（*.log 不入库；Cloud 容器重启即失，实现见 BUG-017）
@@ -87,7 +88,7 @@ app.py（UI + 业务逻辑，耦合较紧）
 
 | 问题 | 现状 | 计划 |
 |---|---|---|
-| **app.py 过长** | 1381 行（原 1559；服务层已搬 `src/services/`），CSS + 认证 + 侧栏 + 6 tab 仍混在一起 | 7 刀拆分中（BUG-020）：已完成 2 刀，余 CSS/遮罩 → 5 个只读 tab → 记账 tab → 侧栏 → 认证收口 |
+| **app.py 过长** | 1163 行（原 1559；服务层 + CSS/遮罩已搬 `src/services/`、`src/ui/`），认证 + 侧栏 + 6 tab 仍混在一起 | 7 刀拆分中（BUG-020）：已落 3 刀，余 5 个只读 tab → 记账 tab → 侧栏 → 认证收口 |
 | 状态管理分散 | `st.session_state` 多处读写 | 集中管理 |
 
 **拆分方案（草案，动手前需重新核对行数与依赖）：**

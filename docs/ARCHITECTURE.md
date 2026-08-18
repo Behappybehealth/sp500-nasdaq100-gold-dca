@@ -52,8 +52,7 @@
    浏览器（用户）  ←───→ │  Streamlit Community Cloud      │
                         │  一个 Python 进程服务所有用户     │
                         │                                 │
-                        │    app.py（1381 行）             │
-                        │    ├─ 全局 CSS                   │
+                        │    app.py（1163 行）             │
                         │    ├─ 登录门闸（名字+PIN）         │
                         │    ├─ 侧边栏（在这里跑模型）       │
                         │    └─ 6 个 Tab                   │
@@ -86,7 +85,7 @@
 
 **三层 + 一个边界**：`app.py`（UI + 业务逻辑，耦合较紧）→ 通过 subprocess 隔离 `dca_calculator.py`（纯计算）、通过 import 使用 `storage.py`（数据层）。子进程边界是本项目最干净的设计：改计算不影响 UI，反之亦然。
 
-**拆分进行中（BUG-020，7 刀方案，见 `docs/plans/app-split-design.md`）**：2026-08-18 完成刀 2——服务函数（模型调用 / 行情抓取 / 曲线计算）已搬至 `src/services/`，启动路径逻辑收编 `src/context.py`，app.py 1559→1381 行；CSS / 认证 / 侧栏 / tab 仍在上图框内，逐刀外搬中。
+**拆分进行中（BUG-020，7 刀方案，见 `docs/plans/app-split-design.md`）**：2026-08-18 已完成 3 刀——服务函数（模型调用 / 行情抓取 / 曲线计算）搬至 `src/services/`，全局 CSS 与三个遮罩组件搬至 `src/ui/`，启动路径逻辑收编 `src/context.py`，app.py 1559→1163 行；认证 / 侧栏 / tab 仍在上图框内，逐刀外搬中。
 
 ## 4. 数据流：一次"打开页面看今日建议"
 
@@ -122,7 +121,7 @@
 
 ## 5. 三条业务链路
 
-### A. 认证链（`_render_login_page()` 及门闸，app.py:269–571）
+### A. 认证链（`_render_login_page()` 及门闸，app.py:51–353）
 
 三阶段状态机，全部走 `st.session_state`：`login`（名字+PIN 校验）→ `activate`（未激活账号首次设 PIN）→ `bootstrap`（users 表为空时首个注册者自动成为 admin）。门闸用 `st.stop()` 拦住未登录用户，后续代码根本不执行。两段式防残留设计与其踩过的三轮坑，见详设 §6（**不要轻易改动**）。
 
@@ -152,14 +151,14 @@ tab4 只有 14 行，是这条链的读侧，业务上和 tab3 是一件事。
 `app.py` **不是模块，是一个从头跑到尾的脚本**（Streamlit 重跑模型所致，详解见详设 §1）：
 
 ```
-① 1–39      import → build_paths()（启动逻辑已收编 src/context.py：解析 --base-dir、定路径、读 config.json）→ storage.init() → set_page_config
-② 42–217    注入全局 CSS（176 行）
-③ 218–268   定义三个遮罩组件（show_loading / show_sync_mask / show_auth_mask）
-④ 269–571   认证门闸（303 行；含 _render_login_page :269、登录后会话首同步 :562–570）←── 未登录就 st.stop()，下面的代码根本不执行
-⑤ 573–575   服务函数已搬至 src/services/（BUG-020 刀 2），此处仅留指向注释
-⑥ 577–854   渲染侧边栏（278 行）←── 副作用：:633 在这里跑模型（run_model 显式收 _paths），产出 result/dec/ms/pf
-⑦ 856–866   声明 6 个 tab（st.tabs 在 :856）
-⑧ 867–1381  依次渲染 6 个 tab ←── 消费 ⑥ 产出的变量
+① 1–41      import → build_paths()（启动逻辑已收编 src/context.py：解析 --base-dir、定路径、读 config.json）→ storage.init() → set_page_config
+② 44–46     注入全局 CSS（inject_css()，样式本体在 src/ui/styles.py，BUG-020 刀 3）
+③ 48–49     遮罩组件已搬 src/ui/overlays.py（show_loading / show_sync_mask / show_auth_mask，同名 import 调用点不变）
+④ 51–353    认证门闸（303 行；含 _render_login_page :51、登录后会话首同步 :344–352）←── 未登录就 st.stop()，下面的代码根本不执行
+⑤ 355–357   服务函数已搬至 src/services/（BUG-020 刀 2），此处仅留指向注释
+⑥ 359–636   渲染侧边栏（278 行）←── 副作用：:415 在这里跑模型（run_model 显式收 _paths），产出 result/dec/ms/pf
+⑦ 638–648   声明 6 个 tab（st.tabs 在 :638）
+⑧ 649–1163  依次渲染 6 个 tab ←── 消费 ⑥ 产出的变量
 ```
 
 **关键点：⑥ 既是 UI 又是业务入口。** 侧边栏渲染的过程中调用 `run_model()`，把决策结果留在模块级作用域，下游 6 个 tab 直接引用。这就是为什么"把 tab 搬出去"必须先解决"结果怎么传进去"（拆分方案见 `docs/plans/app-split-design.md`）。
@@ -170,12 +169,12 @@ tab4 只有 14 行，是这条链的读侧，业务上和 tab3 是一件事。
 
 | tab | 行区间 | 行数 | 业务职责 | 依赖 |
 |---|---|---:|---|---|
-| 🎯 今日模拟 | 867–946 | 80 | 今日建议金额/部署系数/三资产分配/三档执行方案 | result, dec, ms, ASSETS |
-| 📊 持仓与曲线 | 947–1010 | 64 | 持仓汇总、估值、浮盈亏、XIRR、净值曲线 | pf, ASSETS |
-| ✍️ 记账 | 1011–1126 | 116 | 回报成交 / 主动跳过，二次确认后落库 | result, dec, ASSETS, CURRENT_USER |
-| 📜 历史记录 | 1127–1140 | 14 | 回读 transactions / observations | CURRENT_USER |
-| 🧪 回测结果 | 1141–1373 | 233 | 5 段静态回测报告（全部读 `backtest/*.json`，BUG-025 已修；内部段界见详设 §10） | BACKTEST_DIR |
-| 📖 策略说明 | 1374–1381 | 8 | 读 `strategy/core-strategy.md` 渲染（唯一事实源，BUG-026 已修） | CODE_DIR |
+| 🎯 今日模拟 | 649–728 | 80 | 今日建议金额/部署系数/三资产分配/三档执行方案 | result, dec, ms, ASSETS |
+| 📊 持仓与曲线 | 729–792 | 64 | 持仓汇总、估值、浮盈亏、XIRR、净值曲线 | pf, ASSETS |
+| ✍️ 记账 | 793–908 | 116 | 回报成交 / 主动跳过，二次确认后落库 | result, dec, ASSETS, CURRENT_USER |
+| 📜 历史记录 | 909–922 | 14 | 回读 transactions / observations | CURRENT_USER |
+| 🧪 回测结果 | 923–1155 | 233 | 5 段静态回测报告（全部读 `backtest/*.json`，BUG-025 已修；内部段界见详设 §10） | BACKTEST_DIR |
+| 📖 策略说明 | 1156–1163 | 8 | 读 `strategy/core-strategy.md` 渲染（唯一事实源，BUG-026 已修） | CODE_DIR |
 
 （行号复核于 2026-08-18）
 
@@ -205,8 +204,8 @@ tab4 只有 14 行，是这条链的读侧，业务上和 tab3 是一件事。
 
 | 路径 | 行数 | 是什么 | 谁读它 | 入库 |
 |---|---:|---|---|:---:|
-| `app.py` | 1381 | Streamlit 主程序。CSS + 登录 + 侧边栏 + 6 个 Tab 仍在里面；服务函数已搬出（BUG-020 刀 2，7 刀拆分进行中） | Streamlit 直接执行 | ✅ |
-| `src/` | 294 | **app.py 拆分新家（BUG-020）**：`context.py`（73，启动上下文 `Paths`/`build_paths`）+ `services/`（`model.py` 45 模型调用 / `quotes.py` 87 行情抓取 / `curves.py` 85 曲线数据）；函数显式收 `paths` 参数，不读模块级全局 | `app.py` import | ✅ |
+| `app.py` | 1163 | Streamlit 主程序。登录 + 侧边栏 + 6 个 Tab 仍在里面；CSS/遮罩与服务函数已搬出（BUG-020 已落 3/7 刀） | Streamlit 直接执行 | ✅ |
+| `src/` | 542 | **app.py 拆分新家（BUG-020）**：`context.py`（73，启动上下文 `Paths`/`build_paths`）+ `services/`（`model.py` 45 模型调用 / `quotes.py` 87 行情抓取 / `curves.py` 85 曲线数据）+ `ui/`（`styles.py` 186 全局 CSS / `overlays.py` 60 三遮罩）；函数显式收参，不读模块级全局 | `app.py` import | ✅ |
 | `storage.py` | 594 | 存储层。所有 Google Sheets 读写都走它（含写前快照、PBKDF2 认证）；19 个公开接口明细见详设 §9 | `app.py` import | ✅ |
 | `requirements.txt` | 6 | 依赖清单。只约束包版本且几乎全无上界，未声明 Python 版本 → `BUG-015` | Cloud 装依赖时 | ✅ |
 | `CHANGELOG.md` | — | **全量改动的人读版流水**：每 commit 一行带 `HH:MM:SS` 时刻（取自 git），由 `scripts/changelog.py` 生成/校验 | 人 | ✅ |
@@ -329,3 +328,4 @@ tab4 只有 14 行，是这条链的读侧，业务上和 tab3 是一件事。
 | 2026-08-18 | **日志体系落成（用户拍板）**：① CHANGELOG.md 全量回填时刻——每条 `HH:MM:SS` 取自 git commit 时间，组内改按时刻新在上；② 新增 `scripts/changelog.py`（`add <hash>` 生成行、`--check` 校验 commit 全覆盖且时刻一致）；③ 新建 `logs/` 目录定为**运行日志**落点（`*.log` 不入库，`.gitkeep` 占位；Cloud 容器重启即失的限制已写入本文 §11） | 用户在 `.git/logs/refs/heads/main` 里只看到 epoch 秒数、人读层 CHANGELOG 又只有日期——"没有时间戳"的真相是机器层有、人读层缺。脚本化维护让漏行/错时刻在机制上不可能 |
 | 2026-08-18 | **本文拆分为「概要 + 详设」两份**：实现细节（重跑模型深挖、subprocess/Sheets/增量缓存的动机与代价、认证两段式、全局耦合实测、storage 接口表、tab5 段界、引擎接口）移入 [ARCHITECTURE-DETAIL.md](ARCHITECTURE-DETAIL.md)；本文保留技术栈、架构图、数据流、业务链路、渲染时序、tab 职责、目录说明、数据口径。**同期完成全文事实核查，修正 12 处漂移**：① §1.1 谎称"requirements.txt 声明了 Python 版本下限"（实际从未声明）；② session_state 键数 11→**10**（原文自相矛盾，自己列的名单就是 10 个）；③ 渲染时序大改——侧边栏实为 755–1032（原写 732–993）、tab 声明实为 1033–1043（原写 994–1005）、认证门闸实为 281–583 共 303 行（原写 281–556/327 行，区间与行数不自洽）；④ 六处行号漂移（subprocess 调用、append 读改写、_SHEET_CACHE、增量抓取块等）；⑤ 全局耦合用量表整体重测（八全局按十区分桶，BUG-023/025 术后未重测导致的漂移）；⑥ 引擎行数 930→**938**（原文 §2.1 与 §3.2 自相矛盾）；⑦ .dockerignore 13→16 行；⑧ 根目录表补 CHANGELOG.md、docs 表补 docs/README.md 门户 | 用户发现 §1.1 的 Python 版本错误后要求全文严审。教训：**行号是文档腐坏的头号来源**（12 处错里 9 处是行号/计数），从此立规——行号必须锚点双写 + 节末标复核日期。拆分原则：同一事实只写一处；概要只写稳定事实，顶层变更才更新本文 |
 | 2026-08-18 | **BUG-020 刀 2/7：服务层外搬**。新建 `src/context.py`（`Paths`/`Decision`/`build_paths`，启动逻辑原样收编，`code_dir` 按 `parent.parent` 定位——设计文档点名的唯一真实陷阱）+ `src/services/`（model/quotes/curves 三模块，函数显式收 `paths` 参数，零逻辑改动）；app.py 删原 585–754 服务区、5 处调用点改传 `_paths`、imports 精简。**app.py 1559→1381 行**；本文 §3/§4/§5/§6/§7/§9 行号同期平移 | app.py 拆分 7 刀方案第二刀（刀 1 = BUG-025 先行完成）。手术脚本 bottom-up 替换 + 逐行 assert 前置内容；回归：py_compile 全过、引擎 L1 exit 0（15 键齐）、AppTest 冒烟 5 项 PASS、行情缓存备份/还原无污染 |
+| 2026-08-18 | **BUG-020 刀 3/7：CSS + 遮罩外搬**。全局 CSS（176 行）搬至 `src/ui/styles.py`（`inject_css()`），三个遮罩组件搬至 `src/ui/overlays.py`；app.py 侧换单行调用 + 同名 import。**app.py 1381→1163 行**；本文 §3/§5/§6/§7/§9 行号同期平移 | 第三刀。遮罩专项核验：`.dca-sync-mask` / `.dca-auth-mask` 的不透明 background 原样随迁（详设 §6 冻屏坑——DOM 在不代表看得见）；AppTest 冒烟 6 项 PASS、行情缓存备份/还原无污染 |
