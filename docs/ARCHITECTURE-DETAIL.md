@@ -148,7 +148,7 @@ Python 版本只活在两处事实里：本机 `.venv` 实装 **3.14.4**，以�
 
 ---
 
-## 6. 认证链深挖（app.py:51–353，303 行）
+## 6. 认证链深挖（app.py:50–352，303 行）
 
 三阶段状态机，全部走 `st.session_state`：
 
@@ -158,7 +158,7 @@ Python 版本只活在两处事实里：本机 `.venv` 实装 **3.14.4**，以�
 | `activate` | 账号存在但未激活 | 首次设 PIN → `storage.set_pin()` |
 | `bootstrap` | users 表为空 | 首个注册者自动成为 admin → `storage.create_user()` |
 
-区间构成：登录/激活/自举页渲染函数 `_render_login_page()` 定义于 :51；fail-closed 认证模式判断在 :199 一带（`DCA_AUTH_MODE=local` 才进单机模式）；门闸执行在 :340–342（`with _login_ph.container(): _render_login_page(...)` + `st.stop()`）；:344–352 是登录成功后的**会话首同步**（`storage.sync_local(CURRENT_USER)`，同步失败不阻塞但给可见警告）。
+区间构成：登录/激活/自举页渲染函数 `_render_login_page()` 定义于 :50；fail-closed 认证模式判断在 :198 一带（`DCA_AUTH_MODE=local` 才进单机模式）；门闸执行在 :339–341（`with _login_ph.container(): _render_login_page(...)` + `st.stop()`）；:343–351 是登录成功后的**会话首同步**（`storage.sync_local(CURRENT_USER)`，同步失败不阻塞但给可见警告）。
 
 **两段式设计（踩过 3 轮坑，不要动）：** 点击那一趟**零网络 I/O**（用户名单取 session 缓存），把意图写进 `session_state["_auth"]` → `ph.empty()` 把登录页从 DOM 里**真删除**（不是遮住）→ 挂 `show_auth_mask` → `st.rerun()`。下一趟才在遮罩后面做全部网络工作。
 
@@ -183,7 +183,7 @@ Python 版本只活在两处事实里：本机 `.venv` 实装 **3.14.4**，以�
          (result×9 dec×6 ms×4)  (pf×8)        (result×3 dec×3)
 ```
 
-服务函数已随 BUG-020 刀 2 搬至 `src/services/`（`run_model` model.py:19、`parse_wide_table` model.py:42、`fetch_xau_spot` quotes.py:18、`fetch_btc` quotes.py:64、`_load_json` curves.py:19、`load_price_series` curves.py:28、`portfolio_curve` curves.py:44；全部显式收 `paths: Paths` 参数，`Paths` 定义于 `src/context.py`）；执行点在侧边栏 :415（`# ---- 先运行模型 ----` 标记在 :410）。
+服务函数已随 BUG-020 刀 2 搬至 `src/services/`（`run_model` model.py:19、`parse_wide_table` model.py:42、`fetch_xau_spot` quotes.py:18、`fetch_btc` quotes.py:64、`_load_json` curves.py:19、`load_price_series` curves.py:28、`portfolio_curve` curves.py:44；全部显式收 `paths: Paths` 参数，`Paths` 定义于 `src/context.py`）；执行点在侧边栏 :414（`# ---- 先运行模型 ----` 标记在 :409）。下游 tab1/tab2 已随刀 4 拆至 `src/tabs/today.py`、`src/tabs/holdings.py`（result/dec/ms/pf 由 app.py 以显式参数传入 render()），tab3 暂留 app.py。
 
 **模型会跑两次**：侧栏先 `run_model(None)` 自动定额；若用户手填了金额（`amount_in > 0`），再 `run_model(amount_in)` 整体重跑一遍子进程。→ `BUG-024`
 
@@ -244,17 +244,17 @@ Python 版本只活在两处事实里：本机 `.venv` 实装 **3.14.4**，以�
 
 ---
 
-## 10. tab5「回测结果」内部构成
+## 10. tab5「回测结果」内部构成（src/tabs/backtest.py，249 行）
 
-段界对齐代码里的 `# ========== ①…⑤` 注释锚点：
+> BUG-020 刀 4 起本 tab 从 app.py 搬至 `src/tabs/backtest.py`（`render(tab, backtest_dir)` :17）；段界对齐模块内 `# ========== ①…⑤` 注释锚点。
 
 | 段 | 行区间 | 行数 | 数据来源 |
 |---|---|---:|---|
-| 一、三策略对比 | 929–1013 | 85 | ✅ 读 `results_compare3.json` |
-| 二、为什么定额等比最高 | 1014–1026 | 13 | 纯 markdown |
-| 三、单品种滚动回测（含四张子表） | 1027–1118 | 92 | ✅ 读 `results_single_compare.json` + `results_rolling.json` |
-| 四、四标的横向对比 | 1119–1124 | 6 | ✅ 读 `results_rolling.json` |
-| 五、综合结论 | 1125–1155 | 31 | 纯 markdown |
+| 一、三策略对比 | 24–108 | 85 | ✅ 读 `results_compare3.json` |
+| 二、为什么定额等比最高 | 109–121 | 13 | 纯 markdown |
+| 三、单品种滚动回测（含四张子表） | 122–213 | 92 | ✅ 读 `results_single_compare.json` + `results_rolling.json` |
+| 四、四标的横向对比 | 214–219 | 6 | ✅ 读 `results_rolling.json` |
+| 五、综合结论 | 220–249 | 30 | 纯 markdown |
 
 历史上后五张表曾把 415 行数据硬写在代码里，2026-08-18 已导出 `results_rolling.json`（BUG-025），现在全 tab 统一从文件读数；文件缺失时 warning 优雅降级（加载器 `_load_json`，src/services/curves.py:19）。
 
