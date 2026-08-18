@@ -52,10 +52,8 @@
    浏览器（用户）  ←───→ │  Streamlit Community Cloud      │
                         │  一个 Python 进程服务所有用户     │
                         │                                 │
-                        │    app.py（385 行）              │
-                        │    ├─ 登录门闸（名字+PIN）         │
-                        │    └─ 装配层（调侧栏 + 6 个 tab）  │
-                        │    （侧栏/Tab 已全拆到 src/）      │
+                        │    app.py（78 行，纯装配层）      │
+                        │    认证/侧栏/6 tab 全部在 src/   │
                         └───┬──────────────────┬──────────┘
                             │                  │
               subprocess    │                  │  import
@@ -85,7 +83,7 @@
 
 **三层 + 一个边界**：`app.py`（UI + 业务逻辑，耦合较紧）→ 通过 subprocess 隔离 `dca_calculator.py`（纯计算）、通过 import 使用 `storage.py`（数据层）。子进程边界是本项目最干净的设计：改计算不影响 UI，反之亦然。
 
-**拆分进行中（BUG-020，7 刀方案，见 `docs/plans/app-split-design.md`）**：2026-08-18 已完成 6 刀——启动路径逻辑收编 `src/context.py`，服务函数（模型调用 / 行情抓取 / 曲线计算）搬至 `src/services/`，全局 CSS 与三个遮罩组件搬至 `src/ui/`，六个 tab 搬至 `src/tabs/`，侧边栏搬至 `src/ui/sidebar.py`（`render(paths, user)` 返回 `Decision`，收口 result/dec/ms/pf；每个模块数据全部显式收参），app.py 1559→385 行；只剩认证在上图框内，刀 7 收口。
+**拆分已完成（BUG-020，7 刀全部落地，见 `docs/plans/app-split-design.md`）**：2026-08-18 一天内完成——启动路径逻辑收编 `src/context.py`，服务函数（模型调用 / 行情抓取 / 曲线计算）在 `src/services/`，全局 CSS / 遮罩 / 侧栏 / 认证在 `src/ui/`，六个 tab 在 `src/tabs/`；所有模块数据显式收参，不读 app.py 模块级全局。app.py 1559→**78 行纯装配层**（import → build_paths → storage.init → 认证门闸一行 → 侧栏一行 → 6 个 tab render 调用）。
 
 ## 4. 数据流：一次"打开页面看今日建议"
 
@@ -121,7 +119,7 @@
 
 ## 5. 三条业务链路
 
-### A. 认证链（`_render_login_page()` 及门闸，app.py:44–346）
+### A. 认证链（`src/ui/auth.py` 的 `require_user()`；app.py 侧仅 :39 一行调用）
 
 三阶段状态机，全部走 `st.session_state`：`login`（名字+PIN 校验）→ `activate`（未激活账号首次设 PIN）→ `bootstrap`（users 表为空时首个注册者自动成为 admin）。门闸用 `st.stop()` 拦住未登录用户，后续代码根本不执行。两段式防残留设计与其踩过的三轮坑，见详设 §6（**不要轻易改动**）。
 
@@ -151,17 +149,16 @@ tab4（29 行）是这条链的读侧，业务上和 tab3 是一件事。
 `app.py` **不是模块，是一个从头跑到尾的脚本**（Streamlit 重跑模型所致，详解见详设 §1）：
 
 ```
-① 1–34      import → build_paths()（启动逻辑已收编 src/context.py：解析 --base-dir、定路径、读 config.json）→ storage.init() → set_page_config
-② 37–39     注入全局 CSS（inject_css()，样式本体在 src/ui/styles.py，BUG-020 刀 3）
-③ 41–42     遮罩指针注释（show_sync_mask / show_auth_mask 供认证段用；show_loading 调用点随侧栏搬走，刀 6）
-④ 44–346    认证门闸（303 行；含 _render_login_page :44、登录后会话首同步 :337–345）←── 未登录就 st.stop()，下面的代码根本不执行
-⑤ 348–350   服务函数指针注释（服务本体在 src/services/，BUG-020 刀 2）
-⑥ 352–355   侧边栏调用 ←── sidebar.render(_paths, CURRENT_USER)（:354，本体在 src/ui/sidebar.py，BUG-020 刀 6），返回 Decision 解包出 result/dec/ms/pf
-⑦ 357–369   声明 6 个 tab（st.tabs 在 :358）
-⑧ 370–385   渲染 6 个 tab ←── 6 个 tab 已全部拆成 src/tabs/ 的 render() 调用（BUG-020 刀 4/5）
+① 1–31   import → build_paths()（启动逻辑在 src/context.py）→ storage.init() → set_page_config
+② 34–36  注入全局 CSS（inject_css()，样式本体在 src/ui/styles.py）
+③ 38–39  认证门闸：CURRENT_USER = auth.require_user()（本体在 src/ui/auth.py；未登录 st.stop()，下面的代码根本不执行）
+④ 41–43  服务函数指针注释（本体在 src/services/）
+⑤ 45–48  侧边栏：sidebar.render(_paths, CURRENT_USER)（本体在 src/ui/sidebar.py），返回 Decision 解包出 result/dec/ms/pf
+⑥ 50–61  声明 6 个 tab（st.tabs 在 :51）
+⑦ 62–78  渲染 6 个 tab（全部 src/tabs/ 的 render() 调用）
 ```
 
-**关键点：⑥ 既是 UI 又是业务入口。** 侧边栏渲染的过程中调用 `run_model()`（执行点在 `src/ui/sidebar.py` render() 内），决策结果收口为 `Decision` 返回值，app.py 解包后显式传给下游 6 个 tab 的 render()。这就是"把 tab 搬出去"要求的"结果怎么传进去"的答案（拆分方案见 `docs/plans/app-split-design.md`）。
+**关键点：app.py 已是纯装配层**——每段只剩一行调用 + 指针注释，业务全在 `src/` 对应模块。模型执行点在 `src/ui/sidebar.py` render() 内（首跑 :130、金额重跑 :237，「模型跑两次」病灶 → `BUG-024`）；决策结果收口为 `Decision` 返回值，由 app.py 解包显式传给各 tab。
 
 （行号复核于 2026-08-18）
 
@@ -204,8 +201,8 @@ tab4（29 行）是这条链的读侧，业务上和 tab3 是一件事。
 
 | 路径 | 行数 | 是什么 | 谁读它 | 入库 |
 |---|---:|---|---|:---:|
-| `app.py` | 385 | Streamlit 主程序。登录门闸 + 装配层（调侧栏与 6 个 tab 的 render）仍在里面；CSS/遮罩、服务函数、侧栏、六个 tab 已拆出（BUG-020 已落 6/7 刀） | Streamlit 直接执行 | ✅ |
-| `src/` | 1458 | **app.py 拆分新家（BUG-020）**：`context.py`（73，启动上下文 `Paths`/`Decision`/`build_paths`）+ `services/`（`model.py` 45 模型调用 / `quotes.py` 87 行情抓取 / `curves.py` 85 曲线数据）+ `ui/`（`styles.py` 186 全局 CSS / `overlays.py` 60 三遮罩 / `sidebar.py` 304 侧栏，返回 `Decision`）+ `tabs/`（`today.py` 94 / `holdings.py` 81 / `records.py` 132 / `history.py` 29 / `backtest.py` 249 / `strategy_doc.py` 21，各暴露 `render(tab, ...)` 显式收参）；不读 app.py 模块级全局 | `app.py` import | ✅ |
+| `app.py` | 78 | Streamlit 主程序，**纯装配层**：import → build_paths → storage.init → 认证一行 → 侧栏一行 → 6 个 tab render 调用（BUG-020 七刀全部落地） | Streamlit 直接执行 | ✅ |
+| `src/` | 1790 | **app.py 拆分新家（BUG-020 收官）**：`context.py`（73，启动上下文 `Paths`/`Decision`/`build_paths`）+ `services/`（`model.py` 45 模型调用 / `quotes.py` 87 行情抓取 / `curves.py` 85 曲线数据）+ `ui/`（`styles.py` 186 全局 CSS / `overlays.py` 60 三遮罩 / `sidebar.py` 304 侧栏，返回 `Decision` / `auth.py` 332 认证门闸，`require_user()`）+ `tabs/`（`today.py` 94 / `holdings.py` 81 / `records.py` 132 / `history.py` 29 / `backtest.py` 249 / `strategy_doc.py` 21，各暴露 `render(tab, ...)` 显式收参）；不读 app.py 模块级全局 | `app.py` import | ✅ |
 | `storage.py` | 594 | 存储层。所有 Google Sheets 读写都走它（含写前快照、PBKDF2 认证）；19 个公开接口明细见详设 §9 | `app.py` import | ✅ |
 | `requirements.txt` | 6 | 依赖清单。只约束包版本且几乎全无上界，未声明 Python 版本 → `BUG-015` | Cloud 装依赖时 | ✅ |
 | `CHANGELOG.md` | — | **全量改动的人读版流水**：每 commit 一行带 `HH:MM:SS` 时刻（取自 git），由 `scripts/changelog.py` 生成/校验 | 人 | ✅ |
@@ -332,3 +329,4 @@ tab4（29 行）是这条链的读侧，业务上和 tab3 是一件事。
 | 2026-08-18 | **BUG-020 刀 4/7：五个只读 tab 外搬**。tab1/2/4/5/6 搬至 `src/tabs/`（today/holdings/history/backtest/strategy_doc，各暴露 `render(tab, ...)` 显式收参）；app.py 侧换 5 行调用，`pandas` 与 `curves` 整行 import 等死引用同步摘除。**app.py 1163→777 行**；本文 §3/§5/§6/§7/§9 改指新模块 | 第四刀。AppTest 冒烟 6 项 PASS（exceptions 0、tab1 metric、tab5 三策略 md、tab6 策略 md、6 tab 齐）、行情缓存备份/还原无污染。tab3 记账是写路径，按方案单独成刀（刀 5） |
 | 2026-08-18 | **BUG-020 刀 5/7：tab3 记账写链外搬**。tab3（116 行，写路径：pending_tx/pending_obs → 复述确认 → storage.append_row）搬至 `src/tabs/records.py`（132 行，含文件头注释与类型标注）；app.py 侧换 1 行调用，`json` 死引用同步摘除。**app.py 777→663 行**，六个 tab 全部出主文件；本文 §3/§5/§6/§7/§9 改指新模块 | 第五刀。写链单独成刀的原因是要做**真实写入回归**：local 模式 append_row→read_rows 逐字段断言（tx/obs 各一条，写前备份、验后还原，[OK]×5）；AppTest 冒烟 6 项 PASS（tab3 两表单渲染、exceptions 0）、行情缓存备份/还原无污染 |
 | 2026-08-18 | **BUG-020 刀 6/7：侧边栏外搬**。侧栏（278 行：用户管理 + 行情卡片 + 基准金额 + 汇率 + 预算 + 免责声明 + 数据迁移，含模型执行点）搬至 `src/ui/sidebar.py`（304 行，`render(paths, user)` 返回 `Decision` 收口 result/dec/ms/pf）；app.py 侧换 4 行调用，死引用同步摘除（`run_model`/`fetch_*`/`show_loading`/`date` import 与 BASE/TX_CSV/CONFIG 三个过渡桥别名）。**app.py 663→385 行**；本文 §3/§5/§6/§9 改指新模块 | 第六刀。「模型跑两次」病灶（BUG-024）执行点随之入模块（sidebar.py 内 :130/:237）。AppTest 冒烟 9 项 PASS（侧栏标题/行情/汇率/金额+预算输入框/tab1 metric/6 tab 齐/exceptions 0，**含手填 5000 触发金额重跑分支**）、行情缓存备份/还原无污染 |
+| 2026-08-18 | **BUG-020 刀 7/7：认证收口，拆分收官**。认证门闸（303 行：登录页渲染 + fail-closed + 三阶段状态机 + 会话首同步）搬至 `src/ui/auth.py`（332 行，`require_user()` 零参数、返回用户名）；app.py 侧换 1 行调用，`contextlib`/`os`/遮罩 import 同步摘除。**app.py 385→78 行，纯装配层，BUG-020 七刀全部落地**；本文 §3/§5/§6/§9 改指新模块 | 第七刀，最高风险隔离单独成刀。两段式防残留设计原样随迁（ph.empty() 真删除 + 遮罩不透明 background，详设 §6）。**AppTest 5 条认证路径 12 项全 PASS**：local 直通 / 凭据缺失 fail-closed / 凭据损坏 fail-closed / 未登录渲染登录页且主界面拦截 / 已登录直通（sheets 状态 monkeypatch 模拟）；行情缓存备份/还原无污染 |

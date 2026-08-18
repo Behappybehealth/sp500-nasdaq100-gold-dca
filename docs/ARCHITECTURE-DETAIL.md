@@ -148,7 +148,9 @@ Python 版本只活在两处事实里：本机 `.venv` 实装 **3.14.4**，以�
 
 ---
 
-## 6. 认证链深挖（app.py:44–346，303 行）
+## 6. 认证链深挖（src/ui/auth.py，332 行；BUG-020 刀 7 起）
+
+> 2026-08-18 刀 7 前本节锚点在 app.py（44–346）；现 app.py 侧仅剩 :39 一行 `CURRENT_USER = auth.require_user()`。
 
 三阶段状态机，全部走 `st.session_state`：
 
@@ -158,7 +160,7 @@ Python 版本只活在两处事实里：本机 `.venv` 实装 **3.14.4**，以�
 | `activate` | 账号存在但未激活 | 首次设 PIN → `storage.set_pin()` |
 | `bootstrap` | users 表为空 | 首个注册者自动成为 admin → `storage.create_user()` |
 
-区间构成：登录/激活/自举页渲染函数 `_render_login_page()` 定义于 :44；fail-closed 认证模式判断在 :192 一带（`DCA_AUTH_MODE=local` 才进单机模式）；门闸执行在 :333–335（`with _login_ph.container(): _render_login_page(...)` + `st.stop()`）；:337–345 是登录成功后的**会话首同步**（`storage.sync_local(CURRENT_USER)`，同步失败不阻塞但给可见警告）。
+区间构成：登录/激活/自举页渲染函数 `_render_login_page()` 定义于 auth.py:24；门闸入口 `require_user()` 在 :172（零参数，全部输入走 storage / session_state / 环境变量）；fail-closed 认证模式判断在 :180 一带（`DCA_AUTH_MODE=local` 才进单机模式，secrets 缺失/损坏 :195 `st.stop()`）；登录门闸执行在 :319–321（`with _login_ph.container(): _render_login_page(...)` + `st.stop()`）；:322–330 是登录成功后的**会话首同步**（`storage.sync_local(user)`，同步失败不阻塞但给可见警告）；:332 返回用户名。
 
 **两段式设计（踩过 3 轮坑，不要动）：** 点击那一趟**零网络 I/O**（用户名单取 session 缓存），把意图写进 `session_state["_auth"]` → `ph.empty()` 把登录页从 DOM 里**真删除**（不是遮住）→ 挂 `show_auth_mask` → `st.rerun()`。下一趟才在遮罩后面做全部网络工作。
 
@@ -193,7 +195,7 @@ Python 版本只活在两处事实里：本机 `.venv` 实装 **3.14.4**，以�
 
 ## 8. 全局耦合实测清单
 
-> ⚠️ **拆分前基线**（1559 行版 app.py，2026-08-18 上午实测）。BUG-020 刀 2 后「服务」列的用量已随函数搬入 `src/services/`（改用显式 `paths` 参数），app.py 侧相应减少；每刀推进后本表应重测，刀 7 收口时出终版。
+> ⚠️ **拆分前基线**（1559 行版 app.py，2026-08-18 上午实测）。BUG-020 七刀已于同日全部落地，app.py 收口为 78 行纯装配层——本表保留为历史基线不再重测。收口后 app.py 模块级全局仅剩 6 个（`_paths` / `CODE_DIR` / `DATA_DIR` / `ASSETS` / `BACKTEST_DIR` / `CURRENT_USER`），全部是装配参数，业务代码零引用模块级全局。
 >
 > 口径：`\b名字\b` 在 app.py 的出现次数（含注释提及），按结构区分桶。分区边界见概要版 §6（渲染时序）。2026-08-18 重测——上一版数字在 BUG-023/025 两次手术后已漂移，本次全部重算。
 

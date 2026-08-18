@@ -1211,10 +1211,9 @@ wide_table_markdown 非空 ✅   warnings 数量 = 0 ✅   stderr 为空 ✅
 ---
 
 ## BUG-020｜app.py 1984 行
-
 | 等级 | 状态 | 发现日期 | 确认日期 | 修复日期 | 主要证据 |
 |---|---|---|---|---|---|
-| **P2** | 🔴→🟠 **修复中（刀 6/7）** | 2026-08-17 | 2026-08-18 | — | [app.py](../app.py) 全文 1984 行 |
+| **P2** | ✅ **已验证（7/7 刀全部落地）** | 2026-08-17 | 2026-08-18 | 2026-08-18 | [app.py](../app.py) 全文 1984 行 |
 
 - **① 现象**：单文件 1984 行，UI + 认证 + 业务 + 数据抓取混在一起，任何改动都要在两千行里定位，改动半径不可控。
 - **② 原理**：模块边界缺失——改登录可能碰记账，加功能只能继续往里堆（熵增）。
@@ -1238,7 +1237,8 @@ wide_table_markdown 非空 ✅   warnings 数量 = 0 ✅   stderr 为空 ✅
 
 > 7 刀施工进行中，逐刀回填；各刀 commit hash 随下一个 commit 携带（尾随约定同 CHANGELOG）。
 
-- **刀 6/7（2026-08-18）**：侧边栏（278 行：用户管理 + 实时行情卡片 + 基准金额 + 汇率 + 预算 + 免责声明 + 本地历史迁移，含模型执行点）搬至 `src/ui/sidebar.py`（304 行，`render(paths, user) → Decision`，`Decision` 早在刀 2 就在 `src/context.py` 备好）；result/dec/ms/pf 不再落 app.py 模块作用域，收口为返回值后由 app.py 解包显式传给各 tab。三处结构性调整（零逻辑改动）：全局换显式参数、四个纯辅助（QUOTE_ROWS/_quote_html/_fail_html/current_budget_display）提升模块级、Decision 收口。app.py 侧换 4 行调用，死引用同步摘除（`run_model`/`fetch_btc`/`fetch_xau_spot`/`show_loading`/`date` import，BASE/TX_CSV/CONFIG 三个过渡桥别名——BASE/TX_CSV 自刀 2 起就无消费方）。**app.py 663→385 行**。BUG-024「模型跑两次」病灶执行点随之入模块（sidebar.py :130/:237），修 BUG-024 只改一处。回归：py_compile 全过；残留 grep 仅剩注释；AppTest 冒烟 9 项 PASS（exceptions 0、侧栏标题/实时行情/汇率 caption/基准金额+预算输入框/tab1 metric/6 tab 齐，**含手填 5000 触发金额重跑分支后再验证一轮**）；BUG-006 规程执行（备份→跑→还原→diff 干净）。
+- **刀 7/7（2026-08-18）**：认证门闸（303 行：`_render_login_page` 登录/激活/自举页 + fail-closed 模式判断 + 三阶段状态机 + 会话首同步）搬至 `src/ui/auth.py`（332 行，`require_user()` 零参数、返回用户名；AUTH_MODE/CURRENT_USER 由模块级全局改函数局部变量，if/elif/else 骨架与两段式防残留设计原样随迁）；app.py 侧换 1 行调用，`contextlib`/`os`/遮罩 import 同步摘除。**app.py 385→78 行纯装配层，BUG-020 七刀全部落地**。回归：py_compile 全过；残留 grep 仅剩 `auth.require_user()` 一行调用；**AppTest 5 条认证路径 12 项全 PASS**——P1 local 直通（6 tabs）/ P2 凭据缺失 fail-closed（报「配置缺失」+ 0 tabs）/ P3 凭据损坏 fail-closed（报「配置损坏」+ 0 tabs）/ P4 未登录渲染登录页且主界面拦截（「欢迎登录」在 + 0 tabs）/ P5 已登录直通（6 tabs + 侧栏显示 👤 alice），sheets 状态用 monkeypatch 模拟（app.py 经模块属性调用 storage.*，补丁跑前生效）；BUG-006 规程执行（备份→跑→还原→diff 干净）。
+- **刀 6/7（2026-08-18，commit `32a17e3`）**：侧边栏（278 行：用户管理 + 实时行情卡片 + 基准金额 + 汇率 + 预算 + 免责声明 + 本地历史迁移，含模型执行点）搬至 `src/ui/sidebar.py`（304 行，`render(paths, user) → Decision`，`Decision` 早在刀 2 就在 `src/context.py` 备好）；result/dec/ms/pf 不再落 app.py 模块作用域，收口为返回值后由 app.py 解包显式传给各 tab。三处结构性调整（零逻辑改动）：全局换显式参数、四个纯辅助（QUOTE_ROWS/_quote_html/_fail_html/current_budget_display）提升模块级、Decision 收口。app.py 侧换 4 行调用，死引用同步摘除（`run_model`/`fetch_btc`/`fetch_xau_spot`/`show_loading`/`date` import，BASE/TX_CSV/CONFIG 三个过渡桥别名——BASE/TX_CSV 自刀 2 起就无消费方）。**app.py 663→385 行**。BUG-024「模型跑两次」病灶执行点随之入模块（sidebar.py :130/:237），修 BUG-024 只改一处。回归：py_compile 全过；残留 grep 仅剩注释；AppTest 冒烟 9 项 PASS（exceptions 0、侧栏标题/实时行情/汇率 caption/基准金额+预算输入框/tab1 metric/6 tab 齐，**含手填 5000 触发金额重跑分支后再验证一轮**）；BUG-006 规程执行（备份→跑→还原→diff 干净）。
 - **刀 5/7（2026-08-18，commit `60f119a`）**：tab3 记账写链（116 行：pending_tx/pending_obs 暂存 → 复述确认 → `storage.append_row`）搬至 `src/tabs/records.py`（132 行，含文件头与类型标注），`render(tab3, result, dec, ASSETS, CURRENT_USER)` 显式收参；app.py 侧换 1 行调用，`json` 死引用同步摘除。**app.py 777→663 行，零逻辑改动，六个 tab 全部出主文件**。写链单独成刀的原因是要做**真实写入回归**：local 模式 `storage.init` → `append_row("transactions"/"observations")` → `read_rows` 回读逐字段断言（写前备份 data/*.csv、验后还原），[OK]×5 全过；AppTest 冒烟 6 项 PASS（exceptions 0、tab3 两表单渲染、tab1 metric、tab5 三策略 md、6 tab 齐）；BUG-006 规程执行（备份→跑→还原→diff 干净）。
 - **刀 4/7（2026-08-18，commit `69a2b36`）**：五个只读 tab 搬至 `src/tabs/`（`today.py` 94 / `holdings.py` 81 / `history.py` 29 / `backtest.py` 249 / `strategy_doc.py` 21 行），各暴露 `render(tab, ...)` 显式收参（result/dec/ms/pf、ASSETS、CURRENT_USER、BACKTEST_DIR、CODE_DIR、paths 按需传入）；app.py 侧换 5 行调用，死引用同步摘除（`pandas` 整行、`curves` 整行、`parse_wide_table`）。**app.py 1163→777 行，零逻辑改动**。回归：py_compile 全过；残留 grep 仅剩指向注释；AppTest 冒烟 6 项 PASS（exceptions 0、侧栏标题、tab1 metric 渲染、tab5 三策略 md、tab6 策略 md、6 tab 齐）；BUG-006 规程执行（备份→跑→还原→diff 干净）。
 - **刀 3/7（2026-08-18，commit `da4a103`）**：全局 CSS（176 行）与三个遮罩组件（show_loading / show_sync_mask / show_auth_mask，51 行）搬至 `src/ui/styles.py`（`inject_css()`）与 `src/ui/overlays.py`；app.py 侧 CSS 块换单行 `inject_css()` 调用、遮罩改同名 import 调用点不变。**app.py 1381→1163 行，零逻辑改动**。遮罩防线专项核验：`.dca-sync-mask`（不透明 `#f7f8fa`）与 `.dca-auth-mask`（不透明深色渐变）的 background 原样随迁（详设 §6 冻屏坑）；AppTest 冒烟 6 项 PASS（exceptions 0、侧栏标题、CSS 已注入含 .dca-auth-mask 规则、loading 遮罩渲染、6 tab 齐、tab5 渲染）；BUG-006 规程执行。
@@ -1247,7 +1247,12 @@ wide_table_markdown 非空 ✅   warnings 数量 = 0 ✅   stderr 为空 ✅
 
 #### ✔️ 验证结果
 
-> 待验证后回填。
+**2026-08-18 七刀全部落地，app.py 1559→78 行纯装配层。** 对照 ⑤ 验证标准逐条：
+
+1. **"拆分后 app.py 只剩装配代码"** ✅ —— 78 行 = docstring + imports + build_paths/storage.init/set_page_config + 认证一行（`auth.require_user()`）+ 侧栏一行（`sidebar.render(...)`）+ 6 个 tab render 调用 + 指针注释；业务代码零残留（各刀术后残留 grep 均仅剩注释/调用行）。
+2. **"每个 tab 可独立 import"** ✅ —— `src/tabs/` 六模块 + `src/ui/` 四模块 + `src/services/` 三模块全部 `py_compile` 通过，函数显式收参、不读 app.py 模块级全局（`src/context.py` 不 import streamlit，可脱离 UI 单测）。
+3. **"全部页面手工走一遍无回归"** ✅（以 AppTest 无头冒烟 + 真实写入回归替代手工）——刀 3/4/5/6 冒烟各 6/6/6/9 项 PASS、刀 5 真实写入回归 5/5（append→read 逐字段断言、验后还原）、刀 7 五条认证路径 12 项全 PASS；每刀执行 BUG-006 行情缓存备份/还原/diff 干净；`changelog.py --check` 全程全绿。
+4. **行数轨迹**：1559（刀 1 前）→1381（刀 2，`2a9f816`）→1163（刀 3，`da4a103`）→777（刀 4，`69a2b36`）→663（刀 5，`60f119a`）→385（刀 6，`32a17e3`）→**78**（刀 7）。src/ 1790 行承接全部业务。
 
 ---
 
