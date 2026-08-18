@@ -754,7 +754,7 @@ wide_table_markdown 非空 ✅   warnings 数量 = 0 ✅   stderr 为空 ✅
 | 更新 | `CLAUDE.md` 目录树、`docs/ARCHITECTURE.md` §3.6 |
 
 **净变更：10 个文件，94 增 / 572 删（−478 行），零新增代码。**
-尚未 commit（按"只在你要求时提交"）。建议信息：`refactor(deploy): 删除从未跑通的 Docker 方案，DEPLOY.md 收敛到真实路径`
+已于 2026-08-18 提交：`06daa77 refactor(deploy): 删除从未跑通的 Docker 方案，DEPLOY.md 收敛到真实路径（BUG-012，连带关闭 BUG-005/013/014）`（实际落地 9 文件，+103/−573）；配套文档同日提交于 `eb463ac`。
 
 #### ✔️ 验证结果
 
@@ -953,7 +953,7 @@ wide_table_markdown 非空 ✅   warnings 数量 = 0 ✅   stderr 为空 ✅
 
 #### 🔧 实际修复
 
-**2026-08-17**：删除 `deploy/Dockerfile` / `docker-compose.yml` / `nginx.conf` / `setup_user.sh` / `streamlit-config.toml`；重写 `deploy/DEPLOY.md`、`.dockerignore`；更新 `CLAUDE.md`、`README.md`、`docs/ARCHITECTURE.md` §3.6。**净 94 增 / 572 删，零新增代码。**
+**2026-08-17**：删除 `deploy/Dockerfile` / `docker-compose.yml` / `nginx.conf` / `setup_user.sh` / `streamlit-config.toml`；重写 `deploy/DEPLOY.md`、`.dockerignore`；更新 `CLAUDE.md`、`README.md`、`docs/ARCHITECTURE.md` §3.6。**净 94 增 / 572 删，零新增代码。** 2026-08-18 提交于 `06daa77`。
 
 #### ✔️ 验证结果
 
