@@ -13,6 +13,7 @@
 | [部署与外发指南](../deploy/DEPLOY.md) | 部署者 | 部署方式变动同期 | 只写真实在用的 Cloud / 本机 / ngrok 三条路径 |
 | [CLAUDE.md](../CLAUDE.md) | AI 助手 | 规矩变动同期 | AI 入口：目录树、红线规矩 |
 | [README.md](../README.md) | 访客 | 门面信息变动同期 | 项目门面 |
+| [CHANGELOG.md](../CHANGELOG.md) | 所有人 | 每个 commit 同期 | 全量改动的人读版流水 |
 
 ## 数据产物（冻，重跑才更新）
 
