@@ -39,6 +39,7 @@ sp500-nasdaq100-gold-dca/
 │   ├── backtest_dca.py / backtest_single.py / backtest_compare3.py  # ⚠️ 硬编码旧绝对路径，现在跑不起来
 │   └── results*.json / results.md / compare3.md   # Tab5「回测结果」读这里
 ├── docs/
+│   ├── README.md             # 文档门户：全部说明文件的索引（活/冻标注、读者、更新时机）
 │   ├── ARCHITECTURE.md       # 架构唯一事实源（架构变动必须同期更新）
 │   ├── BUGLIST.md            # 问题唯一事实源（逐条确认后才可修复）
 │   └── plans/                # 计划、设计与历史审计快照
@@ -131,6 +132,7 @@ cd X:/coding/projects/sp500-nasdaq100-gold-dca
 8. **全项目零绝对路径**，保持这个性质，搬目录才不会断。（⚠️ `backtest/*.py` 三个脚本目前违反这条，写死了已失效的 `~/.claude/skills/...`，待修）
 9. **提交信息用 Conventional Commits**（`feat:` / `fix:` / `refactor:` / `chore:`）。
 10. **动手前先读 `docs/ARCHITECTURE.md` 与 `docs/BUGLIST.md`** —— 前者是架构唯一事实源，后者是问题唯一事实源。`BUGLIST.md` 中每条问题必须先完成“1 对 1 确认修复路径”并回填确认记录，才允许修改真实逻辑；修复后必须回填实际改动、修复日期和真实验证结果。
+11. **行为变更的 commit 必须同期核对相关活文档** —— 活/冻清单见 `docs/README.md`（文档门户）。活文档头部标 `【活·更新时机：…】`，冻文档（`docs/plans/`、`backtest/`）标 `【冻】`、只增不改、不回改。
 
 ---
 
