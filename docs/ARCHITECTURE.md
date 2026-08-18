@@ -23,7 +23,7 @@
 | **Web 决策台** | `app.py` | Streamlit 网页，多用户，云端存储 |
 | **Claude Skill** | `X:\coding\skills\projects\sp500-nasdaq100-gold-dca\SKILL.md`（通过目录联接挂到 `~/.claude/skills`） | 对话式每日建议 |
 
-⚠️ 两个入口**不共用业务层** —— Skill 那一路绕过 `app.py` 直接调引擎，登录、预算覆盖、记账逻辑在 Skill 侧是缺失的。→ `BUG-022`
+两个入口的业务写操作（记账 / 预算覆盖）走**同一业务层**：Web 侧由 `storage.py` 直接承担，Skill 侧经 `scripts/dca_action.py` CLI 薄壳（subprocess 调同一 `storage.py`）——两边口径一致，不会分叉。
 
 ## 2. 技术栈全表
 
@@ -216,6 +216,7 @@ tab4（29 行）是这条链的读侧，业务上和 tab3 是一件事。
 | 路径 | 行数 | 说明 |
 |---|---:|---|
 | `scripts/dca_calculator.py` | 938 | **策略大脑**。完全独立可单跑，不依赖 Streamlit。输入 = CSV + config，输出 = JSON（15 个顶层键）；参数与键明细见详设 §11 |
+| `scripts/dca_action.py` | 187 | 业务动作 CLI（`record tx` / `record obs` / `override`）：Skill 入口经它与 Web 共用 storage 业务层；shares 可按金额自动换算，sheets 模式写后自动 `sync_local` 刷新落盘缓存 |
 | `scripts/changelog.py` | 115 | CHANGELOG 维护工具：`add <hash>` 从 git 取提交时刻生成行草稿；`--check` 校验每个 commit 都有行且时刻与 git 一致（CLAUDE.md 第 12 条的配套） |
 
 ### 9.3 `data/` — 数据目录（引擎唯一的数据来源）
@@ -330,3 +331,4 @@ tab4（29 行）是这条链的读侧，业务上和 tab3 是一件事。
 | 2026-08-18 | **BUG-020 刀 5/7：tab3 记账写链外搬**。tab3（116 行，写路径：pending_tx/pending_obs → 复述确认 → storage.append_row）搬至 `src/tabs/records.py`（132 行，含文件头注释与类型标注）；app.py 侧换 1 行调用，`json` 死引用同步摘除。**app.py 777→663 行**，六个 tab 全部出主文件；本文 §3/§5/§6/§7/§9 改指新模块 | 第五刀。写链单独成刀的原因是要做**真实写入回归**：local 模式 append_row→read_rows 逐字段断言（tx/obs 各一条，写前备份、验后还原，[OK]×5）；AppTest 冒烟 6 项 PASS（tab3 两表单渲染、exceptions 0）、行情缓存备份/还原无污染 |
 | 2026-08-18 | **BUG-020 刀 6/7：侧边栏外搬**。侧栏（278 行：用户管理 + 行情卡片 + 基准金额 + 汇率 + 预算 + 免责声明 + 数据迁移，含模型执行点）搬至 `src/ui/sidebar.py`（304 行，`render(paths, user)` 返回 `Decision` 收口 result/dec/ms/pf）；app.py 侧换 4 行调用，死引用同步摘除（`run_model`/`fetch_*`/`show_loading`/`date` import 与 BASE/TX_CSV/CONFIG 三个过渡桥别名）。**app.py 663→385 行**；本文 §3/§5/§6/§9 改指新模块 | 第六刀。「模型跑两次」病灶（BUG-024）执行点随之入模块（sidebar.py 内 :130/:237）。AppTest 冒烟 9 项 PASS（侧栏标题/行情/汇率/金额+预算输入框/tab1 metric/6 tab 齐/exceptions 0，**含手填 5000 触发金额重跑分支**）、行情缓存备份/还原无污染 |
 | 2026-08-18 | **BUG-020 刀 7/7：认证收口，拆分收官**。认证门闸（303 行：登录页渲染 + fail-closed + 三阶段状态机 + 会话首同步）搬至 `src/ui/auth.py`（332 行，`require_user()` 零参数、返回用户名）；app.py 侧换 1 行调用，`contextlib`/`os`/遮罩 import 同步摘除。**app.py 385→78 行，纯装配层，BUG-020 七刀全部落地**；本文 §3/§5/§6/§9 改指新模块 | 第七刀，最高风险隔离单独成刀。两段式防残留设计原样随迁（ph.empty() 真删除 + 遮罩不透明 background，详设 §6）。**AppTest 5 条认证路径 12 项全 PASS**：local 直通 / 凭据缺失 fail-closed / 凭据损坏 fail-closed / 未登录渲染登录页且主界面拦截 / 已登录直通（sheets 状态 monkeypatch 模拟）；行情缓存备份/还原无污染 |
+| 2026-08-18 | **BUG-022 修复：新增 `scripts/dca_action.py`（187 行）业务动作 CLI**，Skill 入口经 `record tx` / `record obs` / `override` 子命令与 Web 共用 storage 业务层；shares 可按金额自动换算，sheets 模式写后自动 `sync_local` 刷新落盘缓存 | 此前 Skill 绕过业务层直接调引擎，记账/预算覆盖两边口径分叉；现在写操作全部收口到同一 `storage.py`，双入口行为一致 |

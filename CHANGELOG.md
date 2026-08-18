@@ -7,6 +7,7 @@
 
 ## 2026-08-18
 
+- 19:59:05 [重构] 认证门闸搬 src/ui/auth.py，app.py 385→78 纯装配层（BUG-020 刀 7/7，拆分收官）（`85f3c3d`）
 - 19:42:59 [重构] 侧边栏搬 src/ui/sidebar.py 返回 Decision，app.py 663→385（`32a17e3`；BUG-020 刀 6/7）
 - 19:25:17 [重构] tab3 记账写链搬 src/tabs/records.py，app.py 777→663（`60f119a`；BUG-020 刀 5/7）
 - 19:06:06 [重构] 五个只读 tab 搬 src/tabs/，app.py 1163→777（`69a2b36`；BUG-020 刀 4/7）

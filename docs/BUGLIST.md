@@ -90,9 +90,9 @@
 | [BUG-017](#bug-017可观测性全空线上炸了只能等人告诉你) | P2 | 🔴 | 可观测性全空 | logging 零命中 |
 | [BUG-018](#bug-018事实源没有项目级可恢复备份) | P2 | 🔴 | 事实源没有项目级可恢复备份 | 无自动导出 / 保留周期 / 恢复演练 |
 | [BUG-019](#bug-019把表格当数据库用的结构性代价) | P2 | 🔴 | Sheets 当 OLTP 的结构性代价 | storage.py:304-306 |
-| [BUG-020](#bug-020apppy-1984-行) | P2 | 🟠 | app.py 1984 行（拆分中，现 1381） | app.py |
+| [BUG-020](#bug-020apppy-1984-行) | P2 | ✅ | app.py 1984→78 行纯装配层 | app.py |
 | [BUG-021](#bug-021对用户的隐私陈述不实) | P2 | ✅ | 对用户的隐私陈述不实 | app.py:1983 |
-| [BUG-022](#bug-022无-api-层两个入口共用引擎但不共用业务层) | P2 | 🟡 | 两入口不共用业务层 | SKILL 绕过 app.py |
+| [BUG-022](#bug-022无-api-层两个入口共用引擎但不共用业务层) | P2 | ✅ | 两入口不共用业务层 | SKILL 绕过 app.py |
 | [BUG-023](#bug-023死代码与孤儿文件) | P2 | ✅ | 死代码与孤儿文件 | 5 处 |
 | [BUG-024](#bug-024模型会白跑一遍) | P2 | 🟡 | 模型会白跑一遍 | app.py:771/913 |
 | [BUG-025](#bug-025tab5-把-415-行回测数据硬写在代码里) | P2 | ✅ | tab5 415 行硬编码数据 | app.py:1429-1877 |
@@ -1252,7 +1252,7 @@ wide_table_markdown 非空 ✅   warnings 数量 = 0 ✅   stderr 为空 ✅
 1. **"拆分后 app.py 只剩装配代码"** ✅ —— 78 行 = docstring + imports + build_paths/storage.init/set_page_config + 认证一行（`auth.require_user()`）+ 侧栏一行（`sidebar.render(...)`）+ 6 个 tab render 调用 + 指针注释；业务代码零残留（各刀术后残留 grep 均仅剩注释/调用行）。
 2. **"每个 tab 可独立 import"** ✅ —— `src/tabs/` 六模块 + `src/ui/` 四模块 + `src/services/` 三模块全部 `py_compile` 通过，函数显式收参、不读 app.py 模块级全局（`src/context.py` 不 import streamlit，可脱离 UI 单测）。
 3. **"全部页面手工走一遍无回归"** ✅（以 AppTest 无头冒烟 + 真实写入回归替代手工）——刀 3/4/5/6 冒烟各 6/6/6/9 项 PASS、刀 5 真实写入回归 5/5（append→read 逐字段断言、验后还原）、刀 7 五条认证路径 12 项全 PASS；每刀执行 BUG-006 行情缓存备份/还原/diff 干净；`changelog.py --check` 全程全绿。
-4. **行数轨迹**：1559（刀 1 前）→1381（刀 2，`2a9f816`）→1163（刀 3，`da4a103`）→777（刀 4，`69a2b36`）→663（刀 5，`60f119a`）→385（刀 6，`32a17e3`）→**78**（刀 7）。src/ 1790 行承接全部业务。
+4. **行数轨迹**：1559（刀 1 前）→1381（刀 2，`2a9f816`）→1163（刀 3，`da4a103`）→777（刀 4，`69a2b36`）→663（刀 5，`60f119a`）→385（刀 6，`32a17e3`）→**78**（刀 7，`85f3c3d`）。src/ 1790 行承接全部业务。
 
 ---
 
@@ -1299,7 +1299,7 @@ exceptions: none
 
 | 等级 | 状态 | 发现日期 | 确认日期 | 修复日期 | 主要证据 |
 |---|---|---|---|---|---|
-| **P2** | 🟡 已确认待修（随 A2 拆分施工） | 2026-08-17 | 2026-08-18 | — | CLAUDE.md 架构图；Skill 直接 subprocess 调引擎 |
+| **P2** | ✅ 已验证 | 2026-08-17 | 2026-08-18 | 2026-08-18 | CLAUDE.md 架构图；Skill 直接 subprocess 调引擎 |
 
 - **① 现象**：Web 和 Claude Skill 两个入口共用 `dca_calculator.py` 引擎，但 Skill 绕过 app.py 直接 subprocess 调用——登录、预算覆盖、记账去重这些业务逻辑在 Skill 侧是缺失的，两边行为会各自漂移。
 - **② 原理**：业务规则只存在于 UI 层，没有独立的业务层供两个入口复用。
@@ -1314,11 +1314,19 @@ exceptions: none
 
 #### 🔧 实际修复
 
-> 待施工后回填。
+- 新增 [scripts/dca_action.py](../scripts/dca_action.py)（业务动作 CLI 薄壳）：子命令 `record tx` / `record obs` / `override`，全局 `--base-dir` / `--user`（缺省取 `DCA_USER`，再缺省 `local`）。main() 先 `os.chdir(base_dir)`（st.secrets 按 CWD 解析，secrets 口径才与 Web 一致）、再补 `sys.path` 项目根后 `import storage`（脚本直跑时 sys.path[0] 是 scripts/，storage.py 在项目根——首跑验证即抓到这一坑）。份额缺省按 金额÷汇率÷价格 自动算（与 Web 记账 Tab 同公式）；sheets 模式写入后自动 `sync_local` 刷新落盘缓存（否则引擎复盘读不到刚写的记录；同步失败报 `synced:false` 不回滚）。输出单行 JSON，退出码 0/1。
+- Skill 侧（`SKILL.md`，skill 库不落本仓）：「可用脚本」段补 CLI 用法块（`export DCA_USER` + 三子命令示例）；「记录规则」改为"写入一律走 `scripts/dca_action.py`，不要直接编辑 `data/*.csv`——业务层负责写前快照、云端/本地分流与缓存刷新"。
+- 双入口分工不变：Web 仍走 records.py → storage；Skill 走 subprocess → dca_action → 同一 storage 业务层，保持进程隔离、不跨项目 import。
+- commit：本提交（CHANGELOG 2026-08-18 行）
 
 #### ✔️ 验证结果
 
-> 待验证后回填。
+2026-08-18 实跑 `_verify_bug022.py`（沙盒：tempdir 假项目根 = data/config.json 复制品、无 .streamlit → local 模式，不碰真实数据、不触网、不写 Sheets），**12/12 [OK]**：
+
+- ⑤ 一致性主断言：同一笔记账经 Web 路径（in-process `storage.append_row`，与 records.py 同一调用同一 dict）与 CLI 路径（subprocess 跑 dca_action）各写一次，transactions / observations 各 2 条 marker 行**逐字段一致** ✅
+- CLI 自动份额 == Web 公式（0.247441）✅；`override 45000@2026-08` 经 `get_overrides` 回读可见 ✅
+- 错误路径：缺 `--fx` 且未给 `--shares` → rc=1 + JSON error（断言错误文案含 `--fx`，防"错误原因错位"假绿）✅
+- 事故记录：首两跑发现**验证脚本自身**泄漏——in-process 部分 CWD=项目根，st.secrets 按 CWD 命中生产凭据，把 4 条 marker 行（tx/obs 各 2）写进了生产 Sheets（user="local"，真实用户视图按各自用户名过滤、不可见）。修复：验证脚本先 `os.chdir(沙盒)` 再碰 storage，并加 `sheets_enabled()` 硬闸门（沙盒内为真直接拒跑）。生产清理脚本 `_cleanup_bug022.py` 已就绪，因连续触发分类器生产写拦截，留待用户手动执行或明示授权（命令：`.venv/Scripts/python.exe _cleanup_bug022.py`，只删 user="local" 且含 BUG022 标记的行，删前打印命中数、删后新鲜读回校验）。
 
 ---
 
