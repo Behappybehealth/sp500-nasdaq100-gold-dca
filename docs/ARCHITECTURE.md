@@ -1,205 +1,51 @@
-# 工程架构说明书
+# 工程架构说明书（概要版）
 
-> 【活文档 · 更新时机：架构变动必须同期更新】索引见 [docs/README.md](README.md)。
-> **本文件是本项目架构的唯一事实源。** 首版 2026-08-17。
-> 面向"想搞懂这个项目是怎么搭的"，不假设读者熟悉 Web 工程术语，第一次出现的概念都解释。
+> 【活文档 · 更新时机：**仅顶层架构变更**（换技术栈/存储/部署、改数据流、调目录、动链路）时更新；实现细节变动只更新详设，不动本文】索引见 [docs/README.md](README.md)。
+> **本文件是本项目顶层架构的唯一事实源。** 首版 2026-08-17，2026-08-18 拆分为「概要 + 详设」两份。
+> 面向所有读者（含非技术）：第一次出现的概念都解释。实现细节、设计动机、踩坑记录 → [ARCHITECTURE-DETAIL.md](ARCHITECTURE-DETAIL.md)（同一事实只写一处，本文不重复）。
 > 问题与缺陷不写在这里，走 [BUGLIST.md](BUGLIST.md)，本文只在受影响处标 `→ BUG-0XX`。
 
-**改架构的人必读的四条维护约定：**
+**改架构的人必读的维护约定：**
 
-1. **架构一有变动，本文件同期更新** —— 不是事后补，是同一次改动里一起改。
-2. **详尽程度对齐首版** —— 新增/改动一个模块，要交代清楚：它是什么、谁调用它、它调用谁、数据怎么进怎么出、**为什么这么设计、代价是什么**。只写"新增了 X 模块"不算。
+1. **顶层架构一有变动，本文件同期更新** —— 不是事后补，是同一次改动里一起改。
+2. **本文只写稳定事实。** 行号允许出现，但必须「锚点 + 行号」双写、且所在节标复核日期；代码改动后按锚点找回、同期修行号。
 3. **术语第一次出现要解释**，读者不一定是写代码的人。
-4. **改完在文末「变更记录」加一行**：日期 / 改了什么 / 为什么。文档与代码冲突时代码为准，然后立刻修文档。
+4. **顶层变更在文末「变更记录」加一行**：日期 / 改了什么 / 为什么。文档与代码冲突时代码为准，然后立刻修文档。
 
 ---
 
-# 第一部分：这个项目是用什么技术搭的
+## 1. 这是什么
 
-## 1.1 技术栈全表
-
-| 层 | 用的技术 | 一句话说明 |
-|---|---|---|
-| 语言 | **Python 3.14.4**（本机 `.venv`） | ⚠️ 比 `requirements.txt` 声明的下限高很多，见 §1.8 |
-| 网页框架 | **Streamlit 1.61.1** | 把 Python 脚本直接变成网页的工具。**不是** Django/Flask 那种传统框架，见 §1.2 |
-| 前端 | Streamlit 自带（内部是 React） | 你不写 HTML/JS。定制样式靠 `st.markdown(..., unsafe_allow_html=True)` 注入 CSS |
-| 数据处理 | pandas 3.0.5 + numpy 2.5.2 | 表格运算。⚠️ pandas 3 是大版本，与 pandas 2 有不兼容改动 |
-| 数据存储 | **Google Sheets**（`st-gsheets-connection` + `gspread 5.12.4`） | 把一个 Google 表格当数据库用，见 §1.4 |
-| 存储回退 | 本地 CSV 文件 | 没配 Google 凭据时自动降级成单机模式 |
-| 行情数据 | Yahoo Finance Chart v8 接口（`urllib` 直连）+ `yfinance 1.6.0` 兜底 + 东方财富 push2（`curl` 子进程） | 三个来源，**都没有 API key，都是非官方接口** |
-| 用户认证 | 自己写的"名字 + PIN" | PIN 用 PBKDF2-HMAC-SHA256（20 万迭代 + 每账号随机盐）存在 Google Sheets 的 users 表里；旧 SHA256 账号登录成功时自动迁移 |
-| 计算引擎 | 独立 Python 脚本 + **subprocess** | 见 §1.3 |
-| 部署（生产） | **Streamlit Community Cloud** | 推送到 GitHub main 分支自动重新部署 |
-| 临时外发 | ngrok 固定域名 | 本机开着时把 8501 端口发到公网 |
-| 版本控制 | git + GitHub 私有仓库 | `Behappybehealth/sp500-nasdaq100-gold-dca` |
-| 代码格式 | ruff | 有格式化痕迹，但**没有强制检查**（无 CI） |
-
-## 1.2 理解一切的钥匙：Streamlit 的"脚本重跑"模型
-
-这一点必须先弄懂，因为后面**至少三个严重问题都源于它**。
-
-传统网页框架（Flask/Django）是这样：你写一堆"函数"，用户访问哪个网址就调用哪个函数。函数之间互不干扰。
-
-**Streamlit 完全不同：**
-
-```
-用户第一次打开页面
-   → 服务器从第 1 行开始，把 app.py 整个文件执行到最后一行
-   → 执行过程中每遇到 st.xxx() 就往页面上画一个东西
-
-用户点了一下按钮/滑块/输入框
-   → 服务器又从第 1 行开始，把 app.py 整个文件重新执行一遍
-   → 重画整个页面
-```
-
-**打个比方**：像一个厨师，你每换一次口味要求，他不是只改那一步，而是**把整本菜谱从第一页重念一遍**，只是这次在某一页做了不同的选择。
-
-这个模型带来三个必然的后果，Streamlit 用三个机制来应付：
-
-| 问题 | Streamlit 的机制 | 项目里怎么用的 |
-|---|---|---|
-| 重跑一遍，之前用户填的东西不就丢了？ | **`st.session_state`** —— 一个字典，跨"重跑"活着，每个浏览器标签页各有一份 | 存登录状态 `user`、待确认的记账 `pending_tx` 等 11 个键 |
-| 重跑一遍，慢操作（抓行情、算模型）每次都重做？ | **`st.cache_data`** —— 记住函数的结果，下次同样参数直接返回 | `run_model()` 缓存 900 秒 ← **`BUG-001` 就出在这里** |
-| 重跑一遍，怎么让页面停在登录页不往下走？ | **`st.stop()`** —— 立刻停止本次执行 | 认证门闸用它拦住未登录用户 ← **`BUG-003` 出在这里** |
-
-> **最关键的一条：`st.session_state` 是"每个浏览器一份"，但 `st.cache_data` 是"整个服务器共用一份"。**
-> 这个区别很容易搞混，也是 `BUG-001` 的全部原因。
-
-**还有一个必须知道的怪癖**：以 `st.rerun()` 结束的运行**不会清除该趟未重新渲染的旧元素**。所以瞬态页面（比如登录页）必须整体挂进一个固定的 `st.empty()` 容器，跳转前用 `容器.empty()` 把它从 DOM 里**真删除**，而不是用遮罩盖住 —— 否则登录表单会残留并漂在主应用上。这个坑踩过三轮，细节见 §2.4-A。
-
-## 1.3 为什么计算用"子进程"（subprocess）
-
-`app.py` 自己不算策略。它是这样做的：
-
-```
-app.py  ──启动一个全新的 Python 程序──→  scripts/dca_calculator.py
-        ←──── 对方把结果打印成 JSON 文字 ────
-        （app.py 读这段文字，转成数据用）
-```
-
-用代码看就是 app.py:558–572：
-
-```python
-cmd = [sys.executable, "scripts/dca_calculator.py", "--base-dir", str(BASE)]
-out = subprocess.run(cmd, capture_output=True, timeout=180)
-return json.loads(out.stdout)          # 把对方打印的 JSON 转成 Python 字典
-```
-
-**打个比方**：不自己做饭，打电话叫外卖。好处是厨房（引擎）和餐厅（UI）完全隔离——改菜谱不会弄坏餐厅装修。**这个设计是对的，也是这个项目最干净的一处。**
-
-代价是：两边只能通过"命令行参数"和"打印出来的文字"沟通。**引擎不知道谁是当前用户**，它只知道 `--base-dir` 指向哪个目录、那个目录里的 CSV 写了什么。这是 `BUG-001` 的另一半原因。
-
-## 1.4 为什么用 Google Sheets 当数据库
-
-好处很实在：不用买服务器、不用装数据库、你能用手机打开表格直接看数据、免费。
-
-代价是**它没有"改一行"的能力**。真正的数据库你可以说"把第 5 行的金额改成 1000"。Google Sheets 这套库只能：
-
-- 读：把**整张表**拉下来
-- 写：把**整张表**推上去（覆盖）
-
-所以"加一笔成交记录"的实际动作是（storage.py:304–306）：
-
-```
-把整张 transactions 表读下来（比如 200 行）
-  → 在末尾拼上你这 1 行（变 201 行）
-  → 把这 201 行整体推上去，覆盖原来的 200 行
-```
-
-**打个比方**：改一个字，要把整本书重新抄一遍再交上去。**这是 `BUG-002` 的全部原因**——如果"读下来"这一步失败了，你手里就是一本空书，抄完交上去，原来那本就没了。
-
-**四个工作表**（storage.py 文件头 docstring）：
-
-| 工作表 | 字段 |
-|---|---|
-| `users` | `name, pin_hash, salt, hash_algo, role, fail_count, locked_until, created_at`（旧 4 列行由 `_read_ws` 补空串兼容） |
-| `transactions` | 成交记录，含 `user` 列 |
-| `observations` | 跳过/观察记录，含 `user` 列 |
-| `budget_overrides` | 月度预算覆盖，含 `user` 列 |
-| `<任意表>_bak` | 写前快照（滚动单份）：`_write_ws` 覆写主表前先把现内容推到这里，快照失败则放弃写入（BUG-002 修复） |
-
-所有数据表都带 `user` 列做行级隔离。另有**进程内全局 8 秒短缓存** `_SHEET_CACHE`（storage.py:96–97），`_read_ws(..., fresh=True)` 可绕过它强制新鲜读。
-
-## 1.5 行情缓存的"增量"是什么意思
-
-十年历史行情不可能每次都重抓。所以缓存是这样的（`data/market_history/*.csv`，两列 `date,close`）：
-
-```python
-dca_calculator.py:312-317   period1 = last_cached   # 从缓存里最后一天开始抓
-dca_calculator.py:292-298   落盘时 open("w") 整文件截断重写 + 排序
-```
-
-`period1 = last_cached` 意味着**最前沿那一天每次运行都会被重抓并按日期键覆盖**。
-
-- **好处**：当天的价格会自动从盘中价修正成收盘价（自愈一天）
-- **代价**：只要有更晚的日期落库，前一天就再也不会被重新请求 —— **脏值永久冻结**。→ `BUG-006`
-
-**抓取路径与降级顺序**：
-
-```
-Yahoo Chart v8（urllib 直连，20s 超时，0 次重试）
-   ↓ 失败且有缓存
-标 data_source="cache_stale" + warning（不再尝试 yfinance）
-   ↓ 失败且无缓存
-yfinance 兜底（auto_adjust=True）
-
-东财 push2（curl 子进程，3 次重试无退避）→ XAU / BTC 实时价
-```
-
-⚠️ 两条路径**复权口径不一致**：Chart 走原始 `quote.close`，yfinance 兜底用 `auto_adjust=True`。→ `BUG-007`
-
-## 1.6 两个使用入口
+标普500 / 纳指100 / 黄金三资产**动态定投决策系统**：每天看一眼，告诉你今天该投多少钱、三样资产各配多少。两个使用入口，**共用同一套计算引擎和数据**：
 
 | 入口 | 文件 | 说明 |
 |---|---|---|
 | **Web 决策台** | `app.py` | Streamlit 网页，多用户，云端存储 |
 | **Claude Skill** | `X:\coding\skills\projects\sp500-nasdaq100-gold-dca\SKILL.md`（通过目录联接挂到 `~/.claude/skills`） | 对话式每日建议 |
 
-两个入口**共用同一套计算引擎和数据**，但**不共用业务层** —— Skill 那一路绕过 `app.py` 直接 subprocess 调引擎，所以登录、预算覆盖、记账逻辑在 Skill 侧是缺失的。→ `BUG-022`
+⚠️ 两个入口**不共用业务层** —— Skill 那一路绕过 `app.py` 直接调引擎，登录、预算覆盖、记账逻辑在 Skill 侧是缺失的。→ `BUG-022`
 
-## 1.7 线上地址与平台配置
+## 2. 技术栈全表
 
-| 用途 | 地址 |
-|---|---|
-| 生产 | https://dca365.streamlit.app/ |
-| ngrok 临时外发 | https://sudoku-manhood-argue.ngrok-free.dev |
+| 层 | 用的技术 | 一句话说明 |
+|---|---|---|
+| 语言 | **Python 3.14.4**（本机 `.venv` 实装） | ⚠️ `requirements.txt` **未声明 Python 版本**，只约束包版本，详见详设 §5 |
+| 网页框架 | **Streamlit 1.61.1** | 把 Python 脚本直接变成网页的工具。**不是** Django/Flask 那种传统框架——每次交互整个脚本从头重跑，模型详解见详设 §1 |
+| 前端 | Streamlit 自带（内部是 React） | 不写 HTML/JS。定制样式靠 `st.markdown(..., unsafe_allow_html=True)` 注入 CSS |
+| 数据处理 | pandas 3.0.5 + numpy 2.5.2 | 表格运算。⚠️ pandas 3 是大版本，与 pandas 2 有不兼容改动 |
+| 数据存储 | **Google Sheets**（`st-gsheets-connection` + `gspread 5.12.4`） | 把一个 Google 表格当数据库用；只能整表读、整表写，代价见详设 §3 |
+| 存储回退 | 本地 CSV 文件 | 没配 Google 凭据时自动降级成单机模式 |
+| 行情数据 | Yahoo Finance Chart v8 接口（`urllib` 直连）+ `yfinance 1.6.0` 兜底 + 东方财富 push2（`curl` 子进程） | 三个来源，**都没有 API key，都是非官方接口**；降级链见详设 §4 |
+| 用户认证 | 自己写的"名字 + PIN" | PIN 用 PBKDF2-HMAC-SHA256（20 万迭代 + 每账号随机盐）存在 users 表；旧 SHA256 账号登录成功时自动迁移 |
+| 计算引擎 | 独立 Python 脚本 + **subprocess**（子进程隔离） | 见 §3 架构图；为什么这么做见详设 §2 |
+| 部署（生产） | **Streamlit Community Cloud** | 推送到 GitHub main 分支自动重新部署 |
+| 临时外发 | ngrok 固定域名 | 本机开着时把 8501 端口发到公网 |
+| 版本控制 | git + GitHub 私有仓库 | `Behappybehealth/sp500-nasdaq100-gold-dca` |
+| 代码格式 | ruff | 有格式化痕迹，但**没有强制检查**（无 CI） |
 
-平台侧必须配的三项（`share.streamlit.io` → 应用 ⋮ → Settings）：
+（版本复核于 2026-08-18，与本机实装一致）
 
-- **Secrets** —— GCP 凭据，内容同本机 `.streamlit/secrets.toml`。**不在 git 里**，换机器/重建应用要手动贴
-- **General → App URL** —— 自定义子域 `dca365`
-- **Sharing → public** —— 否则访问者要先登录有权限的 Streamlit 账号，家人打不开
-
-> 应用是 public 的，意味着**应用内的「名字 + PIN」门闸是唯一防线**。→ `BUG-003`、`BUG-004`
-
-## 1.8 依赖声明与版本漂移
-
-`requirements.txt` 全 6 行，全是无上界的 `>=`：
-
-```
-streamlit>=1.32.0        本机实装 1.61.1
-yfinance>=0.2.40         本机实装 1.6.0
-pandas>=2.0.0            本机实装 3.0.5   ← 跨了一个大版本
-numpy>=1.24.0            本机实装 2.5.2
-st-gsheets-connection>=0.1.0
-gspread>=5.8.0,<6        本机实装 5.12.4  ← 唯一有上界的
-```
-
-无 lock 文件。**声明的和实装的差很远，等于没有可复现性** —— 上游一发版就可能把线上打挂。→ `BUG-015`
-
-## 1.9 数据口径
-
-- **交易本位**：USDT（标识 `"U"`）
-- **代码**：标普500 → `SPY`，纳指100 → `QQQ`，黄金 → `XAUT`
-- **估值**：SPY/QQQ 用 Yahoo 实时价 × USD/CNY；XAUT 用 `XAUT-USD` × U/CNY
-- **月度预算**：默认 30000 RMB，可按月覆盖（`data/budget_overrides.json`）
-- **中性权重**：SP500 35% / NDX100 45% / 黄金 20%
-
----
-
-# 第二部分：架构图与数据流
-
-## 2.1 整体架构
+## 3. 核心架构：三层 + 一个边界
 
 ```
                         ┌─────────────────────────────────┐
@@ -238,9 +84,9 @@ gspread>=5.8.0,<6        本机实装 5.12.4  ← 唯一有上界的
                                       └──────────────────────┘
 ```
 
-**三层 + 一个边界**：`app.py`（UI + 业务逻辑，耦合较紧）→ 通过 subprocess 隔离 `dca_calculator.py`（纯计算）、通过 import 使用 `storage.py`（数据层）。
+**三层 + 一个边界**：`app.py`（UI + 业务逻辑，耦合较紧）→ 通过 subprocess 隔离 `dca_calculator.py`（纯计算）、通过 import 使用 `storage.py`（数据层）。子进程边界是本项目最干净的设计：改计算不影响 UI，反之亦然。
 
-## 2.2 一次"打开页面看今日建议"的完整数据流
+## 4. 数据流：一次"打开页面看今日建议"
 
 ```
 ① 用户输入名字 + PIN 点登录
@@ -271,67 +117,53 @@ gspread>=5.8.0,<6        本机实装 5.12.4  ← 唯一有上界的
 ⑧ 用户在 Tab3 回报成交 → storage.append_row() 写回 Google Sheets
 ```
 
-## 2.3 app.py 一次渲染的真实时序
+## 5. 三条业务链路
 
-承 §1.2 —— `app.py` **不是模块，是一个从头跑到尾的脚本**：
+### A. 认证链（`_render_login_page()` 及门闸，app.py:281–583）
 
-```
-① 1–51    解析 --base-dir → 定 BASE/DATA_DIR → storage.init() → 读 config.json → set_page_config
-② 54–229  注入全局 CSS
-③ 230–280 定义三个遮罩组件（show_loading / show_sync_mask / show_auth_mask）
-④ 281–556 认证门闸 ←── 未登录就 st.stop()，下面的代码根本不执行
-⑤ 557–731 定义服务函数（run_model / 行情 / 曲线）
-⑥ 732–993 渲染侧边栏 ←── 副作用：在这里跑模型，产出 result/dec/ms/pf
-⑦ 994–1005 声明 6 个 tab
-⑧ 1034–1559 依次渲染 6 个 tab ←── 消费 ⑥ 产出的变量
-```
+三阶段状态机，全部走 `st.session_state`：`login`（名字+PIN 校验）→ `activate`（未激活账号首次设 PIN）→ `bootstrap`（users 表为空时首个注册者自动成为 admin）。门闸用 `st.stop()` 拦住未登录用户，后续代码根本不执行。两段式防残留设计与其踩过的三轮坑，见详设 §6（**不要轻易改动**）。
 
-**关键点：⑥ 既是 UI 又是业务入口。** 侧边栏渲染的过程中调用 `run_model()`，把决策结果留在模块级作用域，下游 6 个 tab 直接引用。这就是为什么"把 tab 搬出去"必须先解决"结果怎么传进去"。
-
-## 2.4 三条业务链路
-
-### A. 认证链（app.py:281–556，327 行）
-
-三阶段状态机，全部走 `st.session_state`：
-
-| 阶段 | 触发 | 做什么 |
-|---|---|---|
-| `login` | 默认 | 名字 + PIN 校验 → `storage.authenticate()` |
-| `activate` | 账号存在但未激活 | 首次设 PIN → `storage.set_pin()` |
-| `bootstrap` | users 表为空 | 首个注册者自动成为 admin → `storage.create_user()` |
-
-**两段式设计（踩过 3 轮坑，不要动）：** 点击那一趟**零网络 I/O**（用户名单取 session 缓存），把意图写进 `session_state["_auth"]` → `ph.empty()` 把登录页从 DOM 里**真删除**（不是遮住）→ 挂 `show_auth_mask` → `st.rerun()`。下一趟才在遮罩后面做全部网络工作。
-
-**两个具体的坑**：
-
-1. 以 `st.rerun()` 结束的运行不会清除该趟未重新渲染的旧元素 → 登录表单残留并漂在主应用上
-2. 遮罩必须写 `background` —— 曾因遮罩透明导致残留登录页透出，**DOM 检查全过但用户看到冻屏**。验证遮罩不能只看元素在不在 DOM，要查 computedStyle 背景不透明度或截图
-
-### B. 决策链（app.py:557–731 定义 + 732–993 执行）
+### B. 决策链（服务函数 + 侧边栏执行）
 
 ```
-侧栏渲染 ──→ run_model(None) ──subprocess──→ scripts/dca_calculator.py ──→ JSON
-                    │
-                    └─→ result / dec / ms / pf 落在模块作用域
-                                │
-              ┌─────────────────┼──────────────────┐
-            tab1 今日模拟      tab2 持仓曲线      tab3 记账
-         (result×9 dec×6 ms×4)  (pf×8)        (result×3 dec×3)
+侧栏渲染 ──→ run_model(None) ──subprocess──→ dca_calculator.py ──→ JSON
+                    └─→ result / dec / ms / pf 落在模块作用域 ──→ tab1/2/3 消费
 ```
 
-**模型会跑两次**：侧栏先 `run_model(None)` 自动定额；若用户手填了金额（`amount_in > 0`），再 `run_model(amount_in)` 整体重跑一遍子进程。→ `BUG-024`
+注意：**模型会跑两次**——侧栏先自动定额跑一遍；用户手填金额后整体重跑一遍子进程。→ `BUG-024`。细节见详设 §7。
 
 ### C. 记账链（tab3 写 → tab4 读）
 
 ```
 tab3  用户回报成交 → session_state["pending_tx"] 暂存 → 复述确认 → storage.append_row("transactions")
       主动跳过     → session_state["pending_obs"]              → storage.append_row("observations")
-tab4  storage.read_rows("transactions") + read_rows("observations") → 两张表原样展示
+tab4  storage.read_rows() 两张表原样展示
 ```
 
-tab4 是这条链的**读侧**，只有 14 行，业务上和 tab3 是一件事。
+tab4 只有 14 行，是这条链的读侧，业务上和 tab3 是一件事。
 
-## 2.5 六个 Tab 的职责
+（行号复核于 2026-08-18）
+
+## 6. app.py 一次渲染的时序
+
+`app.py` **不是模块，是一个从头跑到尾的脚本**（Streamlit 重跑模型所致，详解见详设 §1）：
+
+```
+① 1–51      解析 --base-dir → 定 BASE/DATA_DIR → storage.init() → 读 config.json → set_page_config
+② 54–229    注入全局 CSS
+③ 230–280   定义三个遮罩组件（show_loading / show_sync_mask / show_auth_mask）
+④ 281–583   认证门闸（303 行）←── 未登录就 st.stop()，下面的代码根本不执行；含登录后会话首同步
+⑤ 585–754   定义服务函数（run_model :586 / 行情 :624 :668 / 曲线 :695 :711 等）
+⑥ 755–1032  渲染侧边栏（278 行）←── 副作用：806 行一带在这里跑模型，产出 result/dec/ms/pf
+⑦ 1033–1043 声明 6 个 tab（st.tabs 在 :1034）
+⑧ 1045–1559 依次渲染 6 个 tab ←── 消费 ⑥ 产出的变量
+```
+
+**关键点：⑥ 既是 UI 又是业务入口。** 侧边栏渲染的过程中调用 `run_model()`，把决策结果留在模块级作用域，下游 6 个 tab 直接引用。这就是为什么"把 tab 搬出去"必须先解决"结果怎么传进去"（拆分方案见 `docs/plans/app-split-design.md`）。
+
+（行号复核于 2026-08-18）
+
+## 7. 六个 Tab 的职责
 
 | tab | 行区间 | 行数 | 业务职责 | 依赖 |
 |---|---|---:|---|---|
@@ -339,78 +171,54 @@ tab4 是这条链的**读侧**，只有 14 行，业务上和 tab3 是一件事�
 | 📊 持仓与曲线 | 1125–1188 | 64 | 持仓汇总、估值、浮盈亏、XIRR、净值曲线 | pf, ASSETS |
 | ✍️ 记账 | 1189–1304 | 116 | 回报成交 / 主动跳过，二次确认后落库 | result, dec, ASSETS, CURRENT_USER |
 | 📜 历史记录 | 1305–1318 | 14 | 回读 transactions / observations | CURRENT_USER |
-| 🧪 回测结果 | 1319–1551 | **233** | 5 段静态回测报告（全部读 `backtest/*.json`，BUG-025 已修） | BACKTEST_DIR |
+| 🧪 回测结果 | 1319–1551 | 233 | 5 段静态回测报告（全部读 `backtest/*.json`，BUG-025 已修；内部段界见详设 §10） | BACKTEST_DIR |
 | 📖 策略说明 | 1552–1559 | 8 | 读 `strategy/core-strategy.md` 渲染（唯一事实源，BUG-026 已修） | CODE_DIR |
 
-（行区间 2026-08-18 复核）
+（行号复核于 2026-08-18）
 
-**tab5 内部构成**：
+## 8. 数据在哪：四张主表 + 快照 + 本地回退
 
-| 段 | 行区间 | 行数 | 数据来源 |
-|---|---|---:|---|
-| 一、三策略对比 | 1327–1410 | 84 | ✅ 读 `results_compare3.json` |
-| 二、为什么定额等比最高 | 1412–1424 | 13 | 纯 markdown |
-| 三、单品种滚动回测（含四张子表） | 1425–1514 | 90 | ✅ 读 `results_single_compare.json` + `results_rolling.json` |
-| 四、四标的横向对比 | 1516–1520 | 5 | ✅ 读 `results_rolling.json` |
-| 五、综合结论 | 1522–1551 | 30 | 纯 markdown |
+**Google Sheets（多用户唯一事实源）**——四张主表 + 每表一条写前快照：
 
-历史上后五张表曾把 415 行数据硬写在代码里，2026-08-18 已导出 `results_rolling.json`（BUG-025），现在全 tab 统一从文件读数。
+| 工作表 | 字段 |
+|---|---|
+| `users` | `name, pin_hash, salt, hash_algo, role, fail_count, locked_until, created_at`（旧 4 列行由 `_read_ws` 补空串兼容） |
+| `transactions` | 成交记录，含 `user` 列 |
+| `observations` | 跳过/观察记录，含 `user` 列 |
+| `budget_overrides` | 月度预算覆盖，含 `user` 列 |
+| `<任意表>_bak` | 写前快照（滚动单份）：覆写主表前先把现内容推到这里，快照失败则放弃写入（BUG-002 修复） |
 
-## 2.6 全局耦合清单（实测，不是估计）
+所有数据表都带 `user` 列做行级隔离。 Sheets 只能整表读、整表写——这个约束与写前快照的动机见详设 §3。
 
-**模块级全局 8 个**，作用域比想象的窄得多：
+**本地回退与缓存**：
 
-| 全局 | 总用量 | 侧栏 | tab1 | tab2 | tab3 | tab4 | tab5 | tab6 | 归属判定 |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
-| `CURRENT_USER` | 15 | 8 | 0 | 0 | 2 | 2 | 0 | 0 | 会话态 |
-| `DATA_DIR` | 9 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | **纯服务层** |
-| `ASSETS` | 7 | 0 | 1 | 1 | 4 | 0 | 0 | 0 | 配置 |
-| `CODE_DIR` | 5 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | **纯服务层** |
-| `BASE` | 4 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | **纯服务层** |
-| `CONFIG` | 3 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 配置 |
-| `TX_CSV` | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | **纯服务层** |
-| `BACKTEST_DIR` | 3 | 0 | 0 | 0 | 0 | 0 | 2 | 0 | **只 tab5 用** |
+- 无 Google 凭据 → 自动降级单机模式，读写 `data/{transactions,observations}.csv` + `data/budget_overrides.json`
+- 云端模式每用户落盘缓存 `data/users/<user>/`（`sync_local` 生成，覆盖前轮转留底 10 份），供引擎 `--user` 读取
+- **行情缓存 `data/market_history/*.csv`（6 个文件，两列 `date,close`，增量更新）——入库是刻意的**，让 Cloud 部署不用冷启动重抓十年数据。⚠️ 这是本仓库最宝贵的资产，别删 → `BUG-006`；增量机制的代价见详设 §4
 
-`DATA_DIR / CODE_DIR / BASE / TX_CSV` 在**任何 UI 代码里都是 0 次** —— 它们只被服务函数用。这意味着 UI 层根本不需要看见路径。
+## 9. 目录逐个说明
 
-**session_state key 11 个**：`synced`(5) `user`(4) `_names`(4) `_login_err`(4) `_auth`(3) `pending_tx`(2) `activating`(2) `pending_obs` `_boot_err` `_act_err`，另有 13 处 `.pop()` / 6 处 `.get()` / 1 处 `.clear()`。其中 8 个属认证链、3 个属记账链，**没有跨链共享**。
-
-**storage 接口 19 个公开函数**（BUG-001~004 修复新增 `sheets_status` / `list_users_fresh`；`sync_local`×4, `read_rows`×2, `list_users`×2, `is_admin`×2, `append_row`×2, 其余各 1）—— 已是干净边界。
-
----
-
-# 第三部分：目录与文件逐个说明
-
-## 3.1 根目录
+### 9.1 根目录
 
 | 路径 | 行数 | 是什么 | 谁读它 | 入库 |
 |---|---:|---|---|:---:|
 | `app.py` | 1559 | Streamlit 主程序。CSS + 登录 + 侧边栏 + 6 个 Tab 全在里面 | Streamlit 直接执行 | ✅ |
-| `storage.py` | 594 | 存储层。所有 Google Sheets 读写都走它（含写前快照、PBKDF2 认证） | `app.py` import | ✅ |
-| `requirements.txt` | 6 | 依赖清单。全是 `>=` 不钉版本 | Cloud 装依赖时 | ✅ |
+| `storage.py` | 594 | 存储层。所有 Google Sheets 读写都走它（含写前快照、PBKDF2 认证）；19 个公开接口明细见详设 §9 | `app.py` import | ✅ |
+| `requirements.txt` | 6 | 依赖清单。只约束包版本且几乎全无上界，未声明 Python 版本 → `BUG-015` | Cloud 装依赖时 | ✅ |
+| `CHANGELOG.md` | — | **全量改动的人读版流水**：每 commit 一行带 `HH:MM:SS` 时刻（取自 git），由 `scripts/changelog.py` 生成/校验 | 人 | ✅ |
 | `start-app.bat` | — | 本机双击启动 | 你 | ✅ |
 | `CLAUDE.md` | — | 给 AI 编程助手的项目说明 | AI 助手 | ✅ |
 | `README.md` | — | 项目自述 | 人 | ✅ |
-| `.dockerignore` | 13 | **Docker 当前未启用**，保留作将来重写 Dockerfile 的安全默认（第一条排除 secrets） | 无（暂时） | ✅ |
+| `.dockerignore` | 16 | **Docker 当前未启用**，保留作将来重写 Dockerfile 的安全默认（第一条排除 secrets） | 无（暂时） | ✅ |
 
-## 3.2 `scripts/` — 计算引擎
+### 9.2 `scripts/` — 计算引擎与工具
 
 | 路径 | 行数 | 说明 |
 |---|---:|---|
-| `scripts/dca_calculator.py` | 930 | **策略大脑**。完全独立可单跑，不依赖 Streamlit。输入 = CSV + config，输出 = JSON（15 个顶层键） |
-| `scripts/changelog.py` | ~115 | CHANGELOG 维护工具：`add <hash>` 从 git 取提交时刻生成行草稿；`--check` 校验每个 commit 都有行且时刻与 git 一致（CLAUDE.md 第 12 条的配套） |
+| `scripts/dca_calculator.py` | 938 | **策略大脑**。完全独立可单跑，不依赖 Streamlit。输入 = CSV + config，输出 = JSON（15 个顶层键）；参数与键明细见详设 §11 |
+| `scripts/changelog.py` | 115 | CHANGELOG 维护工具：`add <hash>` 从 git 取提交时刻生成行草稿；`--check` 校验每个 commit 都有行且时刻与 git 一致（CLAUDE.md 第 12 条的配套） |
 
-单独跑它：
-
-```bash
-.venv/Scripts/python.exe scripts/dca_calculator.py --base-dir .
-.venv/Scripts/python.exe scripts/dca_calculator.py --amount 5000 --base-dir .
-```
-
-**参数四个**：`--amount`、`--base-dir`、`--history-years`、`--user`（多用户模式：记账数据从 `data/users/<user>/` 读取，config 与行情缓存保持共享；含路径穿越防护。没有 `--no-refresh`）。
-**引擎读的文件**：`data/config.json`、`data/market_history/`、记账三件套——无 `--user` 时读 `data/{transactions,observations}.csv` + `data/budget_overrides.json`，有 `--user` 时读 `data/users/<user>/` 下同名文件。
-
-## 3.3 `data/` — 数据目录（引擎唯一的数据来源）
+### 9.3 `data/` — 数据目录（引擎唯一的数据来源）
 
 | 路径 | 是什么 | 入库 | 说明 |
 |---|---|:---:|---|
@@ -424,9 +232,7 @@ tab4 是这条链的**读侧**，只有 14 行，业务上和 tab3 是一件事�
 
 **行情缓存 6 个文件**：`_GSPC.csv`（标普指数）、`SPY.csv`（标普 ETF）、`_NDX.csv`（纳指）、`QQQ.csv`（纳指 ETF）、`GC_F.csv`（黄金期货）、`XAUT_USD.csv`（黄金代币）。孤儿 `GLD.csv`（不在抓取名单、冻结在 2026-08-10）已于 2026-08-18 从仓库移除（BUG-023），取回：`git show f1ed967:data/market_history/GLD.csv`。
 
-> ⚠️ **这是本仓库最宝贵的资产**（增量十年历史）。"能重下"≠"可以丢"。别删。→ `BUG-006`
-
-## 3.4 `backtest/` — 回测（一次性产物，非运行时依赖）
+### 9.4 `backtest/` — 回测（一次性产物，非运行时依赖）
 
 | 路径 | 说明 |
 |---|---|
@@ -436,13 +242,13 @@ tab4 是这条链的**读侧**，只有 14 行，业务上和 tab3 是一件事�
 | `results_rolling.json` | Tab5 第三段四张滚动表 + 第四段横向对比读它（BUG-025：2026-08-18 从 app.py 硬编码导出，33 行 × 338 格与原字面量逐格相等） |
 | `results.json` / `results_single.json` / `results.md` / `compare3.md` | 中间产物与文字报告，应用不读 |
 
-## 3.5 `strategy/` — 策略文档
+### 9.5 `strategy/` — 策略文档
 
 | 路径 | 说明 |
 |---|---|
 | `strategy/core-strategy.md` | 策略说明**唯一事实源**。Tab6 启动时读它直接渲染（BUG-026 已修，内嵌副本已删） |
 
-## 3.6 `deploy/` — 部署与外发
+### 9.6 `deploy/` — 部署与外发
 
 > **2026-08-17 已清理**：Docker 那套（`Dockerfile` / `docker-compose.yml` / `nginx.conf` / `setup_user.sh` / `streamlit-config.toml`）已删除 —— 它从未成功构建过一次（自 `574c7a7` 初始提交起一行未改），却被标为"唯一事实源"。
 > 取回：`git show 574c7a7:deploy/Dockerfile`。删除理由与「将来重启 Docker 的必守清单」见 `deploy/DEPLOY.md` 第 5 节；对应的问题记录是 `BUG-012`（连带 `BUG-005` / `BUG-013` / `BUG-014`）。
@@ -453,30 +259,59 @@ tab4 是这条链的**读侧**，只有 14 行，业务上和 tab3 是一件事�
 | `start-dca-tunnel.bat` | ✅ 活的 | ngrok 外发。**只能写 ASCII** —— cmd 按 OEM 码页（936）读批处理，UTF-8 中文注释会被当乱码命令执行。中文说明写进 DEPLOY.md |
 | `bin/ngrok.exe` | ✅ 33 MB | **不入库**，删了只能重下。脚本靠 `%~dp0bin\ngrok.exe` 相对定位 |
 
-## 3.7 `docs/` 与 `.streamlit/`
+### 9.7 `docs/` 与 `.streamlit/`
 
 | 路径 | 说明 | 入库 |
 |---|---|:---:|
-| `docs/ARCHITECTURE.md` | **本文件**。架构唯一事实源 | ✅ |
+| `docs/README.md` | **文档门户**：全部说明文件的索引（活/冻标注、读者、更新时机） | ✅ |
+| `docs/ARCHITECTURE.md` | **本文件**。顶层架构唯一事实源 | ✅ |
+| `docs/ARCHITECTURE-DETAIL.md` | **架构详设**：实现细节、设计动机、踩坑记录 | ✅ |
 | `docs/BUGLIST.md` | **问题台账**。每条走「梳理 → 1对1确认 → 修复 → 验证」四段 | ✅ |
 | `docs/plans/` | 计划与历史审计存档（`app-split-design.md` = app.py 拆分 6 刀方案；`project-audit-2026-08-17.md` = 原始审计快照） | ✅ |
 | `.streamlit/config.toml` | 主题配色 | ✅ |
 | `.streamlit/secrets.toml` | **GCP 服务账号凭据**，2600 字节 | ❌ |
 | `.streamlit/secrets.toml.example` | 模板 | ✅ |
 
-## 3.8 日志体系 —— 三层分野与 `logs/`
+（行数复核于 2026-08-18）
+
+## 10. 数据口径与线上地址
+
+**数据口径**：
+
+- **交易本位**：USDT（标识 `"U"`）
+- **代码**：标普500 → `SPY`，纳指100 → `QQQ`，黄金 → `XAUT`
+- **估值**：SPY/QQQ 用 Yahoo 实时价 × USD/CNY；XAUT 用 `XAUT-USD` × U/CNY
+- **月度预算**：默认 30000 RMB，可按月覆盖（`data/budget_overrides.json`）
+- **中性权重**：SP500 35% / NDX100 45% / 黄金 20%
+
+**线上地址**：
+
+| 用途 | 地址 |
+|---|---|
+| 生产 | https://dca365.streamlit.app/ |
+| ngrok 临时外发 | https://sudoku-manhood-argue.ngrok-free.dev |
+
+平台侧必须配的三项（`share.streamlit.io` → 应用 ⋮ → Settings）：
+
+- **Secrets** —— GCP 凭据，内容同本机 `.streamlit/secrets.toml`。**不在 git 里**，换机器/重建应用要手动贴
+- **General → App URL** —— 自定义子域 `dca365`
+- **Sharing → public** —— 否则访问者要先登录有权限的 Streamlit 账号，家人打不开
+
+> 应用是 public 的，意味着**应用内的「名字 + PIN」门闸是唯一防线**。→ `BUG-003`、`BUG-004`
+
+## 11. 日志体系 —— 三层分野
 
 | 层 | 内容 | 落点 | 入库 |
 |---|---|---|:---:|
 | 机器流水 | 每个 commit 的精确时刻（epoch 存于 `.git/logs/`，人读格式用 `git log --date=format-local`） | git 自身 | — |
 | 改动日志 | 人读版流水：每 commit 一行、**带 HH:MM:SS 时刻**（取自 git，非手写） | 根目录 `CHANGELOG.md`，由 `scripts/changelog.py` 生成/校验 | ✅ |
-| 运行日志 | 应用运行时事件（登录、同步、抓取）——**尚未实现**，→ `BUG-017` | `logs/`（2026-08-18 拍板落点；`*.log` 不入库） | ❌ |
+| 运行日志 | 应用运行时事件（登录、同步、抓取）——**尚未实现**，→ `BUG-017` | `logs/`（2026-08-18 拍板落点；`*.log` 不入库，`.gitkeep` 占位） | ❌ |
 
-⚠️ `logs/` 落点只对**本机 / 长期部署**有意义：Streamlit Cloud 容器重启即丢文件系统，届时运行日志需另配持久化（那是 BUG-017 实现时要解的题）。目录由 `logs/.gitkeep` 占位入库。
+⚠️ `logs/` 落点只对**本机 / 长期部署**有意义：Streamlit Cloud 容器重启即丢文件系统，届时运行日志需另配持久化（那是 BUG-017 实现时要解的题）。
 
 ---
 
-# 变更记录
+# 变更记录（只记顶层架构变更；细节变动见 CHANGELOG.md 与详设）
 
 | 日期 | 改了什么 | 为什么 |
 |---|---|---|
@@ -487,4 +322,5 @@ tab4 是这条链的**读侧**，只有 14 行，业务上和 tab3 是一件事�
 | 2026-08-18 | **BUG-026+021 修复**：`strategy/core-strategy.md` 全量重写为 184 行合并版（技术骨架 + 原 Tab6 独有的家人友好开场、§4 闭环图、§8 回测结论诚实版、§12 隐私真话版）；`app.py` Tab6 删掉 75 行内嵌副本改为读文件渲染（1967–1974），app.py 2041→1974 行 | 同一份策略说明两个副本必然漂移（026）；隐私声明写的是"数据不上传任何地方"，实际全部存 Google Sheets（021）。现在 Tab6 直接渲染唯一事实源，改文档即改页面 |
 | 2026-08-18 | **BUG-023 修复**：删三处死定义——`verify_user`（storage.py，全项目零调用）、`append_csv`（app.py，定义后从未调用）、`OBS_CSV`（app.py，定义后从未使用）；孤儿 `GLD.csv` 从仓库移除（git 可取回）。storage.py 603→594 行、app.py 1974→1964 行、公开接口 20→19、模块级全局 9→8、行情缓存 7→6 个文件 | 死物让人误以为功能还在，顺着改会改到空气；孤儿文件不留中间态。修复路径与 GLD 删除均经用户拍板 |
 | 2026-08-18 | **BUG-025 修复**：Tab5 五块硬编码回测数据（sp500/ndx/gold/hs300 四张滚动表 + 四标的横向对比，共 33 行 × 338 格）AST 无损导出为 `backtest/results_rolling.json`；app.py 改为统一读文件 + 缺失时 warning 优雅降级；结尾 caption 从失效的 `backtest-dca-5y/` 改指 `backtest/`。app.py 1964→1559 行（tab5 638→233 行） | 代码仓库不放数据：改回测不再触发代码部署；单一供数方式消除"两个事实源哪个新"的问题 |
-| 2026-08-18 | **日志体系落成（用户拍板）**：① CHANGELOG.md 全量回填时刻——每条 `HH:MM:SS` 取自 git commit 时间，组内改按时刻新在上；② 新增 `scripts/changelog.py`（`add <hash>` 生成行、`--check` 校验 29 个 commit 全覆盖且时刻一致）；③ 新建 `logs/` 目录定为**运行日志**落点（`*.log` 不入库，`.gitkeep` 占位；Cloud 容器重启即失的限制已写入 §3.8）；§3.8 新增"日志三层分野" | 用户在 `.git/logs/refs/heads/main` 里只看到 epoch 秒数、人读层 CHANGELOG 又只有日期——"没有时间戳"的真相是机器层有、人读层缺。脚本化维护让漏行/错时刻在机制上不可能 |
+| 2026-08-18 | **日志体系落成（用户拍板）**：① CHANGELOG.md 全量回填时刻——每条 `HH:MM:SS` 取自 git commit 时间，组内改按时刻新在上；② 新增 `scripts/changelog.py`（`add <hash>` 生成行、`--check` 校验 commit 全覆盖且时刻一致）；③ 新建 `logs/` 目录定为**运行日志**落点（`*.log` 不入库，`.gitkeep` 占位；Cloud 容器重启即失的限制已写入本文 §11） | 用户在 `.git/logs/refs/heads/main` 里只看到 epoch 秒数、人读层 CHANGELOG 又只有日期——"没有时间戳"的真相是机器层有、人读层缺。脚本化维护让漏行/错时刻在机制上不可能 |
+| 2026-08-18 | **本文拆分为「概要 + 详设」两份**：实现细节（重跑模型深挖、subprocess/Sheets/增量缓存的动机与代价、认证两段式、全局耦合实测、storage 接口表、tab5 段界、引擎接口）移入 [ARCHITECTURE-DETAIL.md](ARCHITECTURE-DETAIL.md)；本文保留技术栈、架构图、数据流、业务链路、渲染时序、tab 职责、目录说明、数据口径。**同期完成全文事实核查，修正 12 处漂移**：① §1.1 谎称"requirements.txt 声明了 Python 版本下限"（实际从未声明）；② session_state 键数 11→**10**（原文自相矛盾，自己列的名单就是 10 个）；③ 渲染时序大改——侧边栏实为 755–1032（原写 732–993）、tab 声明实为 1033–1043（原写 994–1005）、认证门闸实为 281–583 共 303 行（原写 281–556/327 行，区间与行数不自洽）；④ 六处行号漂移（subprocess 调用、append 读改写、_SHEET_CACHE、增量抓取块等）；⑤ 全局耦合用量表整体重测（八全局按十区分桶，BUG-023/025 术后未重测导致的漂移）；⑥ 引擎行数 930→**938**（原文 §2.1 与 §3.2 自相矛盾）；⑦ .dockerignore 13→16 行；⑧ 根目录表补 CHANGELOG.md、docs 表补 docs/README.md 门户 | 用户发现 §1.1 的 Python 版本错误后要求全文严审。教训：**行号是文档腐坏的头号来源**（12 处错里 9 处是行号/计数），从此立规——行号必须锚点双写 + 节末标复核日期。拆分原则：同一事实只写一处；概要只写稳定事实，顶层变更才更新本文 |

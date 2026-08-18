@@ -43,7 +43,8 @@ sp500-nasdaq100-gold-dca/
 │   └── results*.json / results.md / compare3.md   # Tab5「回测结果」读这里
 ├── docs/
 │   ├── README.md             # 文档门户：全部说明文件的索引（活/冻标注、读者、更新时机）
-│   ├── ARCHITECTURE.md       # 架构唯一事实源（架构变动必须同期更新）
+│   ├── ARCHITECTURE.md       # 顶层架构唯一事实源（概要版，仅顶层变动同期更新）
+│   ├── ARCHITECTURE-DETAIL.md # 架构详设：实现细节/设计动机/踩坑/耦合实测（行为变更同期更新）
 │   ├── BUGLIST.md            # 问题唯一事实源（逐条确认后才可修复）
 │   └── plans/                # 计划、设计与历史审计快照
 ├── deploy/                   # 部署与外发（Docker 那套已于 2026-08-17 删除，见 DEPLOY.md 第 5 节）
@@ -134,7 +135,7 @@ cd X:/coding/projects/sp500-nasdaq100-gold-dca
 7. **`deploy/start-dca-tunnel.bat` 只能写 ASCII**——cmd 按 OEM 码页（936）读批处理，UTF-8 中文注释会被当乱码命令执行。中文说明写进 `deploy/DEPLOY.md`。
 8. **全项目零绝对路径**，保持这个性质，搬目录才不会断。（⚠️ `backtest/*.py` 三个脚本目前违反这条，写死了已失效的 `~/.claude/skills/...`，待修）
 9. **提交信息用 Conventional Commits**（`feat:` / `fix:` / `refactor:` / `chore:`）。
-10. **动手前先读 `docs/ARCHITECTURE.md` 与 `docs/BUGLIST.md`** —— 前者是架构唯一事实源，后者是问题唯一事实源。`BUGLIST.md` 中每条问题必须先完成“1 对 1 确认修复路径”并回填确认记录，才允许修改真实逻辑；修复后必须回填实际改动、修复日期和真实验证结果。
+10. **动手前先读 `docs/ARCHITECTURE.md` 与 `docs/BUGLIST.md`** —— 前者是顶层架构唯一事实源（改实现细节另读 `docs/ARCHITECTURE-DETAIL.md`），后者是问题唯一事实源。`BUGLIST.md` 中每条问题必须先完成“1 对 1 确认修复路径”并回填确认记录，才允许修改真实逻辑；修复后必须回填实际改动、修复日期和真实验证结果。
 11. **行为变更的 commit 必须同期核对相关活文档** —— 活/冻清单见 `docs/README.md`（文档门户）。活文档头部标 `【活·更新时机：…】`，冻文档（`docs/plans/`、`backtest/`）标 `【冻】`、只增不改、不回改。
 12. **每个 commit 同期在 `CHANGELOG.md` 追加一行**（`HH:MM:SS [类型] 一句话（hash；关联编号）`，按日期分组新在上、组内按时刻新在上）——这是全量改动的人读版流水；架构级变更另记 ARCHITECTURE 变更记录、问题生命周期另记 BUGLIST，三处粒度不同不重复。**时刻取自 git commit 时间，不手写**：`.venv/Scripts/python.exe scripts/changelog.py add <hash>` 生成行草稿，收尾跑 `--check` 校验每个 commit 都有行且时刻正确（手滑漏行/错时刻会被它拦下）。尾随约定：commit 自身那行由下一个 commit 携带入库。
 

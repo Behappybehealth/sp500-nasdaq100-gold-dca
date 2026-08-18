@@ -7,7 +7,8 @@
 
 | 文件 | 读者 | 更新时机 | 一句话 |
 |---|---|---|---|
-| [ARCHITECTURE.md](ARCHITECTURE.md) | 开发 / AI | 架构变动同期 | 架构唯一事实源：三层一边界、数据流、目录职责 |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | 所有人（含非技术） | 仅顶层架构变动同期 | 顶层架构唯一事实源（概要版）：技术栈、架构图、数据流、业务链路、6 tab、目录说明 |
+| [ARCHITECTURE-DETAIL.md](ARCHITECTURE-DETAIL.md) | 开发 / AI | 行为变更同期 | 架构详设：实现细节、设计动机与代价、踩坑记录、全局耦合实测 |
 | [BUGLIST.md](BUGLIST.md) | 开发 / AI | 确认门四段推进 | 问题唯一事实源（每条须 1 对 1 确认后才可修） |
 | [策略说明](../strategy/core-strategy.md) | 所有人 | 策略调整同期 | 三资产动态定投策略完整文档 |
 | [部署与外发指南](../deploy/DEPLOY.md) | 部署者 | 部署方式变动同期 | 只写真实在用的 Cloud / 本机 / ngrok 三条路径 |
