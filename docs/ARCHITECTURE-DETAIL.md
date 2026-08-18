@@ -148,7 +148,7 @@ Python 版本只活在两处事实里：本机 `.venv` 实装 **3.14.4**，以�
 
 ---
 
-## 6. 认证链深挖（app.py:49–351，303 行）
+## 6. 认证链深挖（app.py:44–346，303 行）
 
 三阶段状态机，全部走 `st.session_state`：
 
@@ -158,7 +158,7 @@ Python 版本只活在两处事实里：本机 `.venv` 实装 **3.14.4**，以�
 | `activate` | 账号存在但未激活 | 首次设 PIN → `storage.set_pin()` |
 | `bootstrap` | users 表为空 | 首个注册者自动成为 admin → `storage.create_user()` |
 
-区间构成：登录/激活/自举页渲染函数 `_render_login_page()` 定义于 :49；fail-closed 认证模式判断在 :197 一带（`DCA_AUTH_MODE=local` 才进单机模式）；门闸执行在 :338–340（`with _login_ph.container(): _render_login_page(...)` + `st.stop()`）；:342–350 是登录成功后的**会话首同步**（`storage.sync_local(CURRENT_USER)`，同步失败不阻塞但给可见警告）。
+区间构成：登录/激活/自举页渲染函数 `_render_login_page()` 定义于 :44；fail-closed 认证模式判断在 :192 一带（`DCA_AUTH_MODE=local` 才进单机模式）；门闸执行在 :333–335（`with _login_ph.container(): _render_login_page(...)` + `st.stop()`）；:337–345 是登录成功后的**会话首同步**（`storage.sync_local(CURRENT_USER)`，同步失败不阻塞但给可见警告）。
 
 **两段式设计（踩过 3 轮坑，不要动）：** 点击那一趟**零网络 I/O**（用户名单取 session 缓存），把意图写进 `session_state["_auth"]` → `ph.empty()` 把登录页从 DOM 里**真删除**（不是遮住）→ 挂 `show_auth_mask` → `st.rerun()`。下一趟才在遮罩后面做全部网络工作。
 
@@ -183,7 +183,7 @@ Python 版本只活在两处事实里：本机 `.venv` 实装 **3.14.4**，以�
          (result×9 dec×6 ms×4)  (pf×8)        (result×3 dec×3)
 ```
 
-服务函数已随 BUG-020 刀 2 搬至 `src/services/`（`run_model` model.py:19、`parse_wide_table` model.py:42、`fetch_xau_spot` quotes.py:18、`fetch_btc` quotes.py:64、`_load_json` curves.py:19、`load_price_series` curves.py:28、`portfolio_curve` curves.py:44；全部显式收 `paths: Paths` 参数，`Paths` 定义于 `src/context.py`）；执行点在侧边栏 :413（`# ---- 先运行模型 ----` 标记在 :408）。下游 tab1/tab2 已随刀 4 拆至 `src/tabs/today.py`、`src/tabs/holdings.py`，tab3 已随刀 5 拆至 `src/tabs/records.py`（result/dec/ms/pf 等数据全部由 app.py 以显式参数传入 render()）。
+服务函数已随 BUG-020 刀 2 搬至 `src/services/`（`run_model` model.py:19、`parse_wide_table` model.py:42、`fetch_xau_spot` quotes.py:18、`fetch_btc` quotes.py:64、`_load_json` curves.py:19、`load_price_series` curves.py:28、`portfolio_curve` curves.py:44；全部显式收 `paths: Paths` 参数，`Paths` 定义于 `src/context.py`）；执行点已随刀 6 搬至 `src/ui/sidebar.py` render() 内（首跑 :130、`# ---- 先运行模型 ----` 标记 :125、金额重跑 :237），app.py 侧仅剩 :354 一行调用，结果收口为 `Decision` 返回值（`src/context.py`）后解包。下游 tab1/tab2 已随刀 4 拆至 `src/tabs/today.py`、`src/tabs/holdings.py`，tab3 已随刀 5 拆至 `src/tabs/records.py`（result/dec/ms/pf 等数据全部由 app.py 以显式参数传入 render()）。
 
 **模型会跑两次**：侧栏先 `run_model(None)` 自动定额；若用户手填了金额（`amount_in > 0`），再 `run_model(amount_in)` 整体重跑一遍子进程。→ `BUG-024`
 
