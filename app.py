@@ -13,6 +13,7 @@ import argparse as _argparse
 import contextlib
 import csv
 import json
+import os
 import subprocess
 import sys
 from datetime import date
@@ -320,7 +321,7 @@ def _render_login_page(names, ph):
                 reg_pin = st.text_input(
                     "密码",
                     type="password",
-                    placeholder="请设置 PIN（4-8 位，记牢）",
+                    placeholder="请设置 PIN（6-8 位，记牢）",
                     label_visibility="collapsed",
                 )
                 reg_pin2 = st.text_input(
@@ -335,7 +336,7 @@ def _render_login_page(names, ph):
                     elif reg_pin != reg_pin2:
                         st.error("两次输入的 PIN 不一致")
                     elif not (4 <= len(reg_pin or "") <= 8):
-                        st.error("PIN 需要 4-8 位")
+                        st.error("PIN 需要 6-8 位")
                     else:
                         st.session_state["_auth"] = {
                             "stage": "bootstrap",
@@ -361,7 +362,7 @@ def _render_login_page(names, ph):
                 act_pin = st.text_input(
                     "密码",
                     type="password",
-                    placeholder="请设置 PIN（4-8 位，记牢）",
+                    placeholder="请设置 PIN（6-8 位，记牢）",
                     label_visibility="collapsed",
                 )
                 act_pin2 = st.text_input(
@@ -374,7 +375,7 @@ def _render_login_page(names, ph):
                     if act_pin != act_pin2:
                         st.error("两次输入的 PIN 不一致")
                     elif not (4 <= len(act_pin or "") <= 8):
-                        st.error("PIN 需要 4-8 位")
+                        st.error("PIN 需要 6-8 位")
                     else:
                         st.session_state["_auth"] = {
                             "stage": "activate",
@@ -426,9 +427,25 @@ def _render_login_page(names, ph):
         )
 
 
-# ---- 用户门闸：Sheets 云端模式必须 名字+PIN 登录；本地 CSV 模式直进 ----
+# ---- 认证模式（BUG-003 fail-closed）：默认 sheets；只有显式 DCA_AUTH_MODE=local 才进单机模式 ----
+# 原则：安全策略必须是显式声明的，「读不到凭据」永远不等于「不需要登录」。
+AUTH_MODE = os.environ.get("DCA_AUTH_MODE", "sheets").strip().lower()
 CURRENT_USER = "local"
-if storage.sheets_enabled():
+if AUTH_MODE == "local":
+    st.warning("⚠️ 单机模式（DCA_AUTH_MODE=local）：未启用登录，数据仅存在本机 CSV。", icon="⚠️")
+elif storage.sheets_status() != "ok":
+    if storage.sheets_status() == "error":
+        st.error(
+            "⛔ 配置损坏：读取 secrets 时出错。为安全起见已停止（fail-closed）。"
+            "请检查 .streamlit/secrets.toml 或 Cloud 后台的 secrets 配置。"
+        )
+    else:
+        st.error(
+            "⛔ 配置缺失：当前要求云端模式（默认 AUTH_MODE=sheets）但未配置 Google 凭据。"
+            "请配置 secrets，或显式设置环境变量 DCA_AUTH_MODE=local 进入单机模式。"
+        )
+    st.stop()
+else:  # sheets 就绪 → 名字+PIN 门闸
     if "user" not in st.session_state:
         _login_ph = (
             st.empty()
@@ -469,6 +486,10 @@ if storage.sheets_enabled():
                     st.session_state["_login_err"] = "账号不存在，请联系管理员开通"
                 elif _status == "bad_pin":
                     st.session_state["_login_err"] = "账号或密码不对"
+                elif _status == "locked":
+                    st.session_state["_login_err"] = (
+                        "失败次数过多，账号已锁定，请 15 分钟后重试"
+                    )
                 else:
                     st.session_state["_login_err"] = "网络异常，请稍后重试"
                 st.rerun()
@@ -539,7 +560,12 @@ if storage.sheets_enabled():
         # —— 登录页渲染：名单走会话缓存，本页运行零网络请求 ——
         names = st.session_state.get("_names")
         if names is None:
-            names = storage.list_users()  # 仅每会话首次加载触网一次
+            try:
+                names = storage.list_users()  # 仅每会话首次加载触网一次
+            except Exception:
+                # BUG-002：读不出名单绝不能渲染登录/自举表单——否则访客看到的就是"创建管理员"
+                st.error("☁️ 云端存储暂时不可用，请稍后刷新重试。")
+                st.stop()
             st.session_state["_names"] = names
         # 登录页整体挂进固定容器：提交趟/校验趟里容器保持为空 → 上一趟登录页被整体摘除
         with _login_ph.container():
@@ -548,19 +574,26 @@ if storage.sheets_enabled():
     CURRENT_USER = st.session_state["user"]
     if not st.session_state.get("synced"):
         _ld = show_sync_mask("正在同步云端数据…", "首次进入稍等几秒")
-        storage.sync_local(CURRENT_USER)  # 每会话首次进入同步一次云端数据到本地缓存
+        try:
+            storage.sync_local(CURRENT_USER)  # 每会话首次进入同步一次云端数据到本地缓存
+        except Exception:
+            # 同步失败不阻塞进入（侧栏🔄可重同步），但必须可见——否则建议会基于陈旧缓存静默出错
+            st.warning("⚠️ 云端同步失败，本次建议基于本地缓存，可能不是最新。请稍后点侧栏 🔄 重试。")
         st.session_state["synced"] = True
         _ld.empty()
 
 
 @st.cache_data(ttl=900, show_spinner=False)  # 加载提示由下方自定义浮动组件负责
-def run_model(amount: float | None) -> dict:
+def run_model(amount: float | None, user: str) -> dict:
+    """user 必须进缓存键：否则 A 的结果会被 B 直接命中（BUG-001 串号）。"""
     cmd = [
         sys.executable,
         str(CODE_DIR / "scripts" / "dca_calculator.py"),
         "--base-dir",
         str(BASE),
     ]
+    if user != "local":  # 多用户模式：引擎从 data/users/<user>/ 读记账数据
+        cmd += ["--user", user]
     if amount:
         cmd += ["--amount", str(amount)]
     out = subprocess.run(
@@ -752,28 +785,40 @@ if CURRENT_USER != "local":
                         key=f"btn_rst_{_u}",
                         help="清空 PIN，对方下次登录重新自己设置",
                     ):
-                        storage.reset_pin(_u)
-                        st.rerun()
+                        try:
+                            storage.reset_pin(_u)
+                        except Exception as _e:
+                            st.error(f"重置失败：云端存储暂时不可用（{_e}），未做任何改动。")
+                        else:
+                            st.rerun()
                     if _r3.button("删除", key=f"btn_del_{_u}"):
-                        storage.delete_user(_u)
-                        st.rerun()
+                        try:
+                            storage.delete_user(_u)
+                        except Exception as _e:
+                            st.error(f"删除失败：云端存储暂时不可用（{_e}），未做任何改动。")
+                        else:
+                            st.rerun()
             st.markdown("---")
             with st.form("admin_add_user"):
                 _nn = st.text_input("新用户名字")
                 if st.form_submit_button("添加账号", use_container_width=True):
-                    _ok, _msg = storage.admin_add_user(_nn)
-                    if _ok:
-                        st.success(f"已添加：{_nn}（待激活，对方首次登录自己设 PIN）")
-                        st.rerun()
+                    try:
+                        _ok, _msg = storage.admin_add_user(_nn)
+                    except Exception as _e:
+                        st.error(f"添加失败：云端存储暂时不可用（{_e}），未做任何改动。")
                     else:
-                        st.error(_msg)
+                        if _ok:
+                            st.success(f"已添加：{_nn}（待激活，对方首次登录自己设 PIN）")
+                            st.rerun()
+                        else:
+                            st.error(_msg)
 
 # ---- 先运行模型（后续展示用）----
 # amount_in 在下方②区定义；首次运行时取 None（自动）
 amount_in = 0.0
 _ld = show_loading("正在更新行情并计算今日决策…", "标普500 · 纳指100 · 黄金 · 比特币")
 try:
-    result = run_model(None)
+    result = run_model(None, CURRENT_USER)
 except Exception as e:
     _ld.empty()
     st.error(f"模型运行失败：{e}")
@@ -912,7 +957,7 @@ with _col_r:
         st.rerun()
 # 用户输入了非零金额 → 用实际金额重跑模型
 if amount_in > 0:
-    result = run_model(amount_in)
+    result = run_model(amount_in, CURRENT_USER)
     dec = result["decision"]
     ms = result["monthly_budget_status"]
     pf = result["portfolio"]
@@ -956,9 +1001,13 @@ with _col_s:
         except (TypeError, ValueError):
             st.error("预算金额无效，未保存")
         else:
-            storage.set_override(CURRENT_USER, date.today().strftime("%Y-%m"), _bval)
-            st.cache_data.clear()
-            st.rerun()
+            try:
+                storage.set_override(CURRENT_USER, date.today().strftime("%Y-%m"), _bval)
+            except Exception as _e:
+                st.error(f"预算保存失败：云端存储暂时不可用（{_e}）。数据未被覆盖，请稍后重试。")
+            else:
+                st.cache_data.clear()
+                st.rerun()
 
 src = ms.get("budget_source", "default")
 src_txt = (
@@ -1214,11 +1263,15 @@ with tab3:
         )
         b1, b2 = st.columns(2)
         if b1.button("✅ 确认写入", use_container_width=True):
-            storage.append_row("transactions", CURRENT_USER, p)
-            st.session_state.pop("pending_tx")
-            st.cache_data.clear()
-            st.success("已写入成交记录")
-            st.rerun()
+            try:
+                storage.append_row("transactions", CURRENT_USER, p)
+            except Exception as _e:
+                st.error(f"写入失败：云端存储暂时不可用（{_e}）。历史数据未被覆盖，请稍后重试。")
+            else:
+                st.session_state.pop("pending_tx")
+                st.cache_data.clear()
+                st.success("已写入成交记录")
+                st.rerun()
         if b2.button("❌ 取消", use_container_width=True):
             st.session_state.pop("pending_tx")
             st.rerun()
@@ -1248,12 +1301,16 @@ with tab3:
             f"请确认写入观察记录：{json.dumps(st.session_state['pending_obs'], ensure_ascii=False)}"
         )
         if st.button("✅ 确认写入观察", use_container_width=True):
-            storage.append_row(
-                "observations", CURRENT_USER, st.session_state.pop("pending_obs")
-            )
-            st.cache_data.clear()
-            st.success("已写入观察记录")
-            st.rerun()
+            try:
+                storage.append_row(
+                    "observations", CURRENT_USER, st.session_state.pop("pending_obs")
+                )
+            except Exception as _e:
+                st.error(f"写入失败：云端存储暂时不可用（{_e}）。历史数据未被覆盖，请稍后重试。")
+            else:
+                st.cache_data.clear()
+                st.success("已写入观察记录")
+                st.rerun()
 
 with tab4:
     st.subheader("成交记录")

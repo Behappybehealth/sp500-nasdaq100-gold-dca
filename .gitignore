@@ -3,6 +3,8 @@ data/transactions.csv
 data/observations.csv
 data/budget_overrides.json
 data/*.localbak
+# 多用户模式下 sync_local 的每用户落盘缓存（BUG-001 修复后产生）
+data/users/
 
 # ---- 密钥 ----
 .streamlit/secrets.toml

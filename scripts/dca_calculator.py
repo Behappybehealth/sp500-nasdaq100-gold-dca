@@ -61,14 +61,16 @@ def read_json(path: Path) -> dict:
     return config
 
 
-def resolve_monthly_budget(config: dict, base_dir: Path, today: date) -> tuple:
-    """每月预算：data/budget_overrides.json 按月起算持久生效
+def resolve_monthly_budget(config: dict, base_dir: Path, today: date, record_dir: Optional[Path] = None) -> tuple:
+    """每月预算：budget_overrides.json 按月起算持久生效
     （{"2026-08": 45000} 表示 2026-08 起每月 45000，直到更新的月份键出现）。
+    record_dir 指定记账数据目录（多用户模式为 data/users/<user>/），缺省读 base_dir/data/。
     返回 (effective_budget, source)。"""
     default = float(config.get("monthly_budget_rmb", DEFAULT_CONFIG["monthly_budget_rmb"]))
     month = today.strftime("%Y-%m")
+    ov_dir = record_dir if record_dir is not None else base_dir / "data"
     try:
-        overrides = json.loads((base_dir / "data" / "budget_overrides.json").read_text(encoding="utf-8"))
+        overrides = json.loads((ov_dir / "budget_overrides.json").read_text(encoding="utf-8"))
     except Exception:
         return default, "default"
     keys = [k for k in overrides if isinstance(k, str) and k <= month]
@@ -817,12 +819,18 @@ def main() -> None:
     parser.add_argument("--amount", type=float, default=None, help="本次基准金额RMB；不指定时按行情档位阶梯 0/1500/3000/5000/7000 决定")
     parser.add_argument("--base-dir", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--history-years", type=int, default=10)
+    parser.add_argument("--user", default=None, help="多用户模式：记账数据从 data/users/<user>/ 读取（config 与行情缓存保持共享）")
     args = parser.parse_args()
+
+    if args.user and ("/" in args.user or "\\" in args.user or ".." in args.user):
+        parser.error("非法用户名：不允许包含路径分隔符或 '..'")
 
     base_dir = args.base_dir
     config = read_json(base_dir / "data" / "config.json")
-    transactions = read_transactions(base_dir / "data" / "transactions.csv")
-    observations = read_observations(base_dir / "data" / "observations.csv")
+    # BUG-001：多用户模式下记账数据按用户分目录，行情缓存/策略配置保持共享
+    record_dir = base_dir / "data" / "users" / args.user if args.user else base_dir / "data"
+    transactions = read_transactions(record_dir / "transactions.csv")
+    observations = read_observations(record_dir / "observations.csv")
     last_observation = observations[-1] if observations else None
     assets = config.get("assets", DEFAULT_CONFIG["assets"])
     symbols = []
@@ -857,7 +865,7 @@ def main() -> None:
     month_dates = [tx.date for tx in transactions if tx.date.startswith(month_prefix)]
     month_dates += [r.get("date", "") for r in observations if r.get("date", "").startswith(month_prefix)]
     month_start = min(month_dates) if month_dates else None
-    monthly_budget, budget_source = resolve_monthly_budget(config, base_dir, date.today())
+    monthly_budget, budget_source = resolve_monthly_budget(config, base_dir, date.today(), record_dir)
     month_status = monthly_budget_status(
         transactions,
         monthly_budget,
