@@ -52,7 +52,7 @@ app.py  ──启动一个全新的 Python 程序──→  scripts/dca_calculat
         （app.py 读这段文字，转成数据用）
 ```
 
-用代码看就是 `run_model()` 内（app.py:586 定义，subprocess 调用在 :598）：
+用代码看就是 `run_model()` 内（src/services/model.py:19 定义，subprocess 调用在 :31；BUG-020 刀 2 前在 app.py:586/:598）：
 
 ```python
 cmd = [sys.executable, "scripts/dca_calculator.py", "--base-dir", str(BASE)]
@@ -148,7 +148,7 @@ Python 版本只活在两处事实里：本机 `.venv` 实装 **3.14.4**，以�
 
 ---
 
-## 6. 认证链深挖（app.py:281–583，303 行）
+## 6. 认证链深挖（app.py:269–571，303 行）
 
 三阶段状态机，全部走 `st.session_state`：
 
@@ -158,7 +158,7 @@ Python 版本只活在两处事实里：本机 `.venv` 实装 **3.14.4**，以�
 | `activate` | 账号存在但未激活 | 首次设 PIN → `storage.set_pin()` |
 | `bootstrap` | users 表为空 | 首个注册者自动成为 admin → `storage.create_user()` |
 
-区间构成：登录/激活/自举页渲染函数 `_render_login_page()` 定义于 :281；fail-closed 认证模式判断在 :429 一带（`DCA_AUTH_MODE=local` 才进单机模式）；门闸执行在 :570–573（`with _login_ph.container(): _render_login_page(...)` + `st.stop()`）；:574–583 是登录成功后的**会话首同步**（`storage.sync_local(CURRENT_USER)`，同步失败不阻塞但给可见警告）。
+区间构成：登录/激活/自举页渲染函数 `_render_login_page()` 定义于 :269；fail-closed 认证模式判断在 :417 一带（`DCA_AUTH_MODE=local` 才进单机模式）；门闸执行在 :558–560（`with _login_ph.container(): _render_login_page(...)` + `st.stop()`）；:562–570 是登录成功后的**会话首同步**（`storage.sync_local(CURRENT_USER)`，同步失败不阻塞但给可见警告）。
 
 **两段式设计（踩过 3 轮坑，不要动）：** 点击那一趟**零网络 I/O**（用户名单取 session 缓存），把意图写进 `session_state["_auth"]` → `ph.empty()` 把登录页从 DOM 里**真删除**（不是遮住）→ 挂 `show_auth_mask` → `st.rerun()`。下一趟才在遮罩后面做全部网络工作。
 
@@ -183,7 +183,7 @@ Python 版本只活在两处事实里：本机 `.venv` 实装 **3.14.4**，以�
          (result×9 dec×6 ms×4)  (pf×8)        (result×3 dec×3)
 ```
 
-服务函数定义集中在 app.py:585–754（`run_model` :586、`parse_wide_table` :609、`_load_json` :615、`fetch_xau_spot` :624、`fetch_btc` :668、`load_price_series` :695、`portfolio_curve` :711）；执行点在侧边栏 :806 一带（`# ---- 先运行模型 ----` 标记）。
+服务函数已随 BUG-020 刀 2 搬至 `src/services/`（`run_model` model.py:19、`parse_wide_table` model.py:42、`fetch_xau_spot` quotes.py:18、`fetch_btc` quotes.py:64、`_load_json` curves.py:19、`load_price_series` curves.py:28、`portfolio_curve` curves.py:44；全部显式收 `paths: Paths` 参数，`Paths` 定义于 `src/context.py`）；执行点在侧边栏 :633（`# ---- 先运行模型 ----` 标记在 :628）。
 
 **模型会跑两次**：侧栏先 `run_model(None)` 自动定额；若用户手填了金额（`amount_in > 0`），再 `run_model(amount_in)` 整体重跑一遍子进程。→ `BUG-024`
 
@@ -193,6 +193,8 @@ Python 版本只活在两处事实里：本机 `.venv` 实装 **3.14.4**，以�
 
 ## 8. 全局耦合实测清单
 
+> ⚠️ **拆分前基线**（1559 行版 app.py，2026-08-18 上午实测）。BUG-020 刀 2 后「服务」列的用量已随函数搬入 `src/services/`（改用显式 `paths` 参数），app.py 侧相应减少；每刀推进后本表应重测，刀 7 收口时出终版。
+>
 > 口径：`\b名字\b` 在 app.py 的出现次数（含注释提及），按结构区分桶。分区边界见概要版 §6（渲染时序）。2026-08-18 重测——上一版数字在 BUG-023/025 两次手术后已漂移，本次全部重算。
 
 **模块级全局 8 个**，作用域比想象的窄得多：
@@ -248,13 +250,13 @@ Python 版本只活在两处事实里：本机 `.venv` 实装 **3.14.4**，以�
 
 | 段 | 行区间 | 行数 | 数据来源 |
 |---|---|---:|---|
-| 一、三策略对比 | 1325–1409 | 85 | ✅ 读 `results_compare3.json` |
-| 二、为什么定额等比最高 | 1410–1422 | 13 | 纯 markdown |
-| 三、单品种滚动回测（含四张子表） | 1423–1514 | 92 | ✅ 读 `results_single_compare.json` + `results_rolling.json` |
-| 四、四标的横向对比 | 1515–1520 | 6 | ✅ 读 `results_rolling.json` |
-| 五、综合结论 | 1521–1551 | 31 | 纯 markdown |
+| 一、三策略对比 | 1147–1231 | 85 | ✅ 读 `results_compare3.json` |
+| 二、为什么定额等比最高 | 1232–1244 | 13 | 纯 markdown |
+| 三、单品种滚动回测（含四张子表） | 1245–1336 | 92 | ✅ 读 `results_single_compare.json` + `results_rolling.json` |
+| 四、四标的横向对比 | 1337–1342 | 6 | ✅ 读 `results_rolling.json` |
+| 五、综合结论 | 1343–1373 | 31 | 纯 markdown |
 
-历史上后五张表曾把 415 行数据硬写在代码里，2026-08-18 已导出 `results_rolling.json`（BUG-025），现在全 tab 统一从文件读数；文件缺失时 warning 优雅降级（加载器 `_load_json`，app.py:615）。
+历史上后五张表曾把 415 行数据硬写在代码里，2026-08-18 已导出 `results_rolling.json`（BUG-025），现在全 tab 统一从文件读数；文件缺失时 warning 优雅降级（加载器 `_load_json`，src/services/curves.py:19）。
 
 （行号复核于 2026-08-18）
 
@@ -266,7 +268,7 @@ Python 版本只活在两处事实里：本机 `.venv` 实装 **3.14.4**，以�
 
 **输入文件**：`data/config.json`、`data/market_history/`、记账三件套——无 `--user` 时读 `data/{transactions,observations}.csv` + `data/budget_overrides.json`，有 `--user` 时读 `data/users/<user>/` 下同名文件。
 
-**输出**：print 一大段 JSON（:934），**15 个顶层键**——字面量构造 14 个（:918–931：`as_of` / `input_amount_rmb` / `effective_amount_rmb` / `usdcny` / `usdtcny` / `monthly_budget_status` / `config` / `has_local_transactions` / `last_records` / `since_last_record` / `markets` / `portfolio` / `decision` / `suggested_weights`），随后 :933 追加 `wide_table_markdown`（由 `render_wide_table()` :720 生成，app.py 侧 `parse_wide_table()` :609 解析回 DataFrame）。
+**输出**：print 一大段 JSON（:934），**15 个顶层键**——字面量构造 14 个（:918–931：`as_of` / `input_amount_rmb` / `effective_amount_rmb` / `usdcny` / `usdtcny` / `monthly_budget_status` / `config` / `has_local_transactions` / `last_records` / `since_last_record` / `markets` / `portfolio` / `decision` / `suggested_weights`），随后 :933 追加 `wide_table_markdown`（由 `render_wide_table()` :720 生成，app.py 侧 `parse_wide_table()` 解析回 DataFrame，src/services/model.py:42）。
 
 单独跑它：
 

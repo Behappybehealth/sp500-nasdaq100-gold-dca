@@ -7,6 +7,7 @@
 
 ## 2026-08-18
 
+- 16:54:51 [文档] 架构说明拆分为概要+详设两份，全文严审修正 12 处漂移（`1b6f3c7`）
 - 16:10:11 [功能] CHANGELOG 全量回填时刻 + changelog.py 生成/校验 + logs/ 定为运行日志落点（`9618fe2`）
 - 15:42:03 [重构] Tab5 五块硬编码表导出 results_rolling.json，caption 改指 backtest/（`77ea4a6`；BUG-025）
 - 15:26:44 [重构] 删死代码 verify_user/append_csv/OBS_CSV，孤儿 GLD.csv 出库（git 可取回）（`76fa527`；BUG-023）

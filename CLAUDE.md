@@ -21,8 +21,11 @@
 
 ```
 sp500-nasdaq100-gold-dca/
-├── app.py                    # Streamlit 主程序（⚠️ 1559 行，待拆分）
+├── app.py                    # Streamlit 主程序（⚠️ 1381 行，拆分进行中：BUG-020 刀 2/7 已搬出服务层）
 ├── storage.py                # 存储层：Google Sheets 优先，本地 CSV 回退（594 行；含写前快照、PBKDF2 认证）
+├── src/                      # app.py 拆分新家（BUG-020，7 刀方案逐刀外搬中）
+│   ├── context.py            # 启动上下文：Paths / Decision / build_paths（73 行；code_dir 按 parent.parent 定位）
+│   └── services/             # 服务层：model.py 模型调用（45）/ quotes.py 行情抓取（87）/ curves.py 曲线数据（85）
 ├── CHANGELOG.md              # 改动日志：每个 commit 一行带时刻（人读版流水，见第 12 条；scripts/changelog.py 维护）
 ├── start-app.bat             # 本机双击启动 Streamlit
 ├── logs/                     # 运行日志约定落点（*.log 不入库；Cloud 容器重启即失，实现见 BUG-017）
@@ -63,6 +66,9 @@ sp500-nasdaq100-gold-dca/
 ```
 app.py（UI + 业务逻辑，耦合较紧）
    │
+   ├── import ──────→ src/services/（模型调用 / 行情抓取 / 曲线数据；BUG-020 刀 2 已落，
+   │                       函数显式收 src/context.Paths，不读 app.py 模块级全局）
+   │
    ├── subprocess ──→ scripts/dca_calculator.py（纯计算，完全独立）
    │                       └── 读 data/*.csv + data/config.json
    │                       └── 抓 Yahoo Chart 行情（带缓存增量）
@@ -81,7 +87,7 @@ app.py（UI + 业务逻辑，耦合较紧）
 
 | 问题 | 现状 | 计划 |
 |---|---|---|
-| **app.py 过长** | 1559 行，UI + 认证 + 业务 + 数据抓取混在一起 | 拆成 `src/ui/`、`src/tabs/`、`src/services/` |
+| **app.py 过长** | 1381 行（原 1559；服务层已搬 `src/services/`），CSS + 认证 + 侧栏 + 6 tab 仍混在一起 | 7 刀拆分中（BUG-020）：已完成 2 刀，余 CSS/遮罩 → 5 个只读 tab → 记账 tab → 侧栏 → 认证收口 |
 | 状态管理分散 | `st.session_state` 多处读写 | 集中管理 |
 
 **拆分方案（草案，动手前需重新核对行数与依赖）：**
@@ -100,10 +106,7 @@ src/
 │   ├── history.py         # Tab4 历史
 │   ├── backtest.py        # Tab5 回测结果
 │   └── strategy_doc.py    # Tab6 策略文档
-└── services/
-    ├── model_runner.py    # 调用 dca_calculator 子进程
-    ├── market_quote.py    # 东财 XAU / BTC 行情
-    └── recorder.py        # 交易记录写入
+└── services/              # ✅ 刀 2 已落（实装名为 model.py 模型调用 / quotes.py 行情 / curves.py 曲线）
 ```
 
 ---

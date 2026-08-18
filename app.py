@@ -9,44 +9,32 @@
 多用户：配置 .streamlit/secrets.toml 的 [connections.gsheets] 后自动启用云端存储 + 名字/PIN 门闸
 """
 
-import argparse as _argparse
 import contextlib
-import csv
 import json
 import os
-import subprocess
-import sys
 from datetime import date
-from pathlib import Path
 
 import pandas as pd
 import storage  # 存储层：Google Sheets 优先，本地 CSV 回退
 import streamlit as st
 
-# ---- 路径：代码 vs 数据分离 ----
-CODE_DIR = Path(__file__).resolve().parent  # 代码目录（scripts/ 在这里）
+from src.context import build_paths
+from src.services.curves import _load_json, load_price_series, portfolio_curve
+from src.services.model import parse_wide_table, run_model
+from src.services.quotes import fetch_btc, fetch_xau_spot
 
-# 解析 --base-dir（Streamlit 用 -- 分隔自定义参数）
-_ap = _argparse.ArgumentParser()
-_ap.add_argument("--base-dir", default=None, help="用户独立数据目录（多用户部署时用）")
-_args, _ = _ap.parse_known_args()
-BASE = Path(_args.base_dir).resolve() if _args.base_dir else CODE_DIR
-DATA_DIR = BASE / "data"
-DATA_DIR.mkdir(parents=True, exist_ok=True)
-
+# ---- 路径：代码 vs 数据分离（启动逻辑已收编 src/context.py，BUG-020 刀 2）----
+_paths = build_paths()
+# 过渡桥：未搬走的段（认证/侧栏/tabs）仍引用模块级全局，随后续刀次逐刀收敛
+CODE_DIR = _paths.code_dir
+BASE = _paths.base
+DATA_DIR = _paths.data_dir
+TX_CSV = _paths.tx_csv
+CONFIG = _paths.config
+ASSETS = _paths.assets
+BACKTEST_DIR = _paths.backtest_dir
 
 storage.init(DATA_DIR)
-
-TX_CSV = DATA_DIR / "transactions.csv"
-try:
-    CONFIG = json.loads((DATA_DIR / "config.json").read_text(encoding="utf-8"))
-except (json.JSONDecodeError, OSError) as _e:
-    raise SystemExit(f"缺少或损坏的 data/config.json：{_e}") from None
-ASSETS = CONFIG["assets"]
-# 回测结果：优先用户数据目录下的 backtest/（多用户部署可各自覆盖），否则用仓库自带那份。
-# 不要再用相对代码目录上跳的路径 —— 那会跟着代码搬家而失效。
-_BT_OVERRIDE = BASE / "backtest"
-BACKTEST_DIR = _BT_OVERRIDE if _BT_OVERRIDE.exists() else CODE_DIR / "backtest"
 
 st.set_page_config(page_title="模拟定投决策台", layout="wide", page_icon="📈")
 
@@ -582,175 +570,9 @@ else:  # sheets 就绪 → 名字+PIN 门闸
         _ld.empty()
 
 
-@st.cache_data(ttl=900, show_spinner=False)  # 加载提示由下方自定义浮动组件负责
-def run_model(amount: float | None, user: str) -> dict:
-    """user 必须进缓存键：否则 A 的结果会被 B 直接命中（BUG-001 串号）。"""
-    cmd = [
-        sys.executable,
-        str(CODE_DIR / "scripts" / "dca_calculator.py"),
-        "--base-dir",
-        str(BASE),
-    ]
-    if user != "local":  # 多用户模式：引擎从 data/users/<user>/ 读记账数据
-        cmd += ["--user", user]
-    if amount:
-        cmd += ["--amount", str(amount)]
-    out = subprocess.run(
-        cmd, capture_output=True, text=True, encoding="utf-8", timeout=180
-    )
-    if out.returncode != 0:
-        raise RuntimeError(out.stderr or "calculator failed")
-    try:
-        return json.loads(out.stdout)
-    except json.JSONDecodeError as _e:
-        raise RuntimeError(f"计算器输出解析失败：{_e}") from None
-
-
-def parse_wide_table(md: str) -> pd.DataFrame:
-    lines = [ln for ln in md.splitlines() if ln.startswith("|")]
-    rows = [[c.strip() for c in ln.strip("|").split("|")] for ln in lines]
-    return pd.DataFrame(rows[2:], columns=rows[0])
-
-
-def _load_json(path: Path):
-    """读取 JSON 文件；损坏/读取失败返回 None，由调用方决定跳过展示。"""
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
-        return None
-
-
-@st.cache_data(ttl=900, show_spinner=False)
-def fetch_xau_spot():
-    """黄金/美元现货（东财 122.XAU）。东财对 urllib 断连且偶发限流：
-    curl 抓取 + 失败重试 + 落盘最近一次成功值兜底。返回 None 表示彻底失败。"""
-    url = "https://push2.eastmoney.com/api/qt/stock/get?secid=122.XAU&fields=f43,f57,f58,f60,f169,f170,f86"
-    for _ in range(3):
-        try:
-            out = subprocess.run(
-                [
-                    "curl",
-                    "-s",
-                    "--max-time",
-                    "8",
-                    "-H",
-                    "User-Agent: Mozilla/5.0",
-                    "-H",
-                    "Referer: https://quote.eastmoney.com/",
-                    url,
-                ],
-                capture_output=True,
-                timeout=12,
-            )
-            d = json.loads(out.stdout.decode("utf-8")).get("data") or {}
-            if d.get("f43"):
-                rec = {
-                    "price": d["f43"] / 100,
-                    "chg_pct": d.get("f170", 0) / 10000,
-                    "ts": d.get("f86"),
-                }
-                with contextlib.suppress(Exception):
-                    (DATA_DIR / "xau_spot_last.json").write_text(
-                        json.dumps(rec), encoding="utf-8"
-                    )
-                return rec
-        except Exception:
-            pass
-    try:  # 用最后一次成功值兜底，标记缓存
-        last = json.loads((DATA_DIR / "xau_spot_last.json").read_text(encoding="utf-8"))
-        last["stale"] = True
-        return last
-    except Exception:
-        return None
-
-
-@st.cache_data(ttl=900, show_spinner=False)
-def fetch_btc():
-    """比特币实时行情（Yahoo BTC-USD）。失败返回 None。"""
-    import urllib.request
-
-    try:
-        url = "https://query1.finance.yahoo.com/v8/finance/chart/BTC-USD?range=5d&interval=1d&includePrePost=false"
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        r = (data.get("chart", {}).get("result") or [None])[0]
-        if not r:
-            return None
-        meta = r.get("meta", {})
-        price = meta.get("regularMarketPrice")
-        if not price:
-            return None
-        prev = meta.get("chartPreviousClose") or price
-        return {
-            "price": float(price),
-            "chg_pct": float(price) / float(prev) - 1,
-            "ts": meta.get("regularMarketTime"),
-        }
-    except Exception:
-        return None
-
-
-@st.cache_data(ttl=900, show_spinner=False)
-def load_price_series():
-    """读取缓存行情，用于组合曲线与图表。"""
-    scripts_dir = str(CODE_DIR / "scripts")
-    if scripts_dir not in sys.path:
-        sys.path.insert(0, scripts_dir)
-    import dca_calculator as dca  # type: ignore[import-not-found]  # scripts/ 运行时才加入 sys.path，静态分析解析不到
-
-    cache_dir = DATA_DIR / "market_history"
-    series = {}
-    for sym in ["SPY", "QQQ", "XAUT-USD"]:
-        closes = dca.load_cached_closes(dca.cache_file_for(cache_dir, sym))
-        if closes:
-            series[sym] = closes
-    return series
-
-
-def portfolio_curve(result: dict):
-    """按成交记录重建每日 投入 vs 市值 曲线。"""
-    if not TX_CSV.exists() or TX_CSV.stat().st_size == 0:
-        return None
-    rows = list(csv.DictReader(TX_CSV.open("r", encoding="utf-8-sig")))
-    if not rows:
-        return None
-    series = load_price_series()
-    asset_sym = {"sp500": "SPY", "nasdaq100": "QQQ", "gold": "XAUT-USD"}
-    fx_map = {
-        "sp500": result["usdcny"],
-        "nasdaq100": result["usdcny"],
-        "gold": result.get("usdtcny", result["usdcny"]),
-    }
-    days = sorted({d for s in series.values() for d in s})
-    first = min(r["date"] for r in rows)
-    days = [d for d in days if d >= first]
-    out = []
-    shares = {"sp500": 0.0, "nasdaq100": 0.0, "gold": 0.0}
-    invested = 0.0
-    tx_by_date = {}
-    for r in rows:
-        tx_by_date.setdefault(r["date"], []).append(r)
-    for d in days:
-        for r in tx_by_date.get(d, []):
-            a = r["asset"]
-            sign = -1.0 if r["action"] == "sell" else 1.0
-            try:
-                shares[a] = shares.get(a, 0.0) + sign * float(r["shares"] or 0)
-                invested += sign * float(r["amount_rmb"] or 0)
-            except (TypeError, ValueError):
-                continue  # 单笔坏行跳过，不拖垮整条曲线
-        value = 0.0
-        for a, sym in asset_sym.items():
-            s = series.get(sym, {})
-            eligible = [x for x in s if x <= d]
-            if eligible and shares.get(a):
-                value += shares[a] * s[max(eligible)] * fx_map[a]
-        out.append(
-            {"日期": d, "累计投入": round(invested, 0), "组合市值": round(value, 0)}
-        )
-    return pd.DataFrame(out).set_index("日期")
-
+# ---- 服务函数已搬至 src/services/（BUG-020 刀 2）：
+# run_model / parse_wide_table → services/model.py；fetch_xau_spot / fetch_btc → services/quotes.py；
+# _load_json / load_price_series / portfolio_curve → services/curves.py。调用点显式传 _paths。
 
 # ---------------- 侧边栏 ----------------
 st.sidebar.title("📈 模拟定投决策台")
@@ -808,7 +630,7 @@ if CURRENT_USER != "local":
 amount_in = 0.0
 _ld = show_loading("正在更新行情并计算今日决策…", "标普500 · 纳指100 · 黄金 · 比特币")
 try:
-    result = run_model(None, CURRENT_USER)
+    result = run_model(None, CURRENT_USER, _paths)
 except Exception as e:
     _ld.empty()
     st.error(f"模型运行失败：{e}")
@@ -859,7 +681,7 @@ st.sidebar.markdown(
     "**📡 实时行情**" + ("（全部正常）" if all_ok else "（⚠️ 部分异常）")
 )
 quote_times = []
-xau = fetch_xau_spot()
+xau = fetch_xau_spot(_paths)
 btc = fetch_btc()
 for name, sym in QUOTE_ROWS:
     if sym == "BTC":
@@ -947,7 +769,7 @@ with _col_r:
         st.rerun()
 # 用户输入了非零金额 → 用实际金额重跑模型
 if amount_in > 0:
-    result = run_model(amount_in, CURRENT_USER)
+    result = run_model(amount_in, CURRENT_USER, _paths)
     dec = result["decision"]
     ms = result["monthly_budget_status"]
     pf = result["portfolio"]
@@ -1124,7 +946,7 @@ with tab1:
 
 with tab2:
     st.subheader("组合市值 vs 累计投入")
-    curve = portfolio_curve(result)
+    curve = portfolio_curve(result, _paths)
     if curve is None:
         st.info("暂无成交记录。记账后这里会显示组合曲线。")
     else:
@@ -1165,7 +987,7 @@ with tab2:
     st.dataframe(pd.DataFrame(wrows), use_container_width=True, hide_index=True)
 
     st.subheader("近一年价格走势（缓存收盘）")
-    series = load_price_series()
+    series = load_price_series(_paths)
     chart_data = {}
     for sym in ["SPY", "QQQ", "XAUT-USD"]:
         s = series.get(sym, {})

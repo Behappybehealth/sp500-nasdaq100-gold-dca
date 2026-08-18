@@ -1,0 +1,87 @@
+# -*- coding: utf-8 -*-
+"""实时行情报价：东财 XAU 现货 + Yahoo BTC。
+
+BUG-020 刀 2 从 app.py:623-691 原样搬入；仅把模块级全局 DATA_DIR 换成显式 paths 参数。
+"""
+from __future__ import annotations
+
+import contextlib
+import json
+import subprocess
+
+import streamlit as st
+
+from ..context import Paths
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def fetch_xau_spot(paths: Paths):
+    """黄金/美元现货（东财 122.XAU）。东财对 urllib 断连且偶发限流：
+    curl 抓取 + 失败重试 + 落盘最近一次成功值兜底。返回 None 表示彻底失败。"""
+    url = "https://push2.eastmoney.com/api/qt/stock/get?secid=122.XAU&fields=f43,f57,f58,f60,f169,f170,f86"
+    for _ in range(3):
+        try:
+            out = subprocess.run(
+                [
+                    "curl",
+                    "-s",
+                    "--max-time",
+                    "8",
+                    "-H",
+                    "User-Agent: Mozilla/5.0",
+                    "-H",
+                    "Referer: https://quote.eastmoney.com/",
+                    url,
+                ],
+                capture_output=True,
+                timeout=12,
+            )
+            d = json.loads(out.stdout.decode("utf-8")).get("data") or {}
+            if d.get("f43"):
+                rec = {
+                    "price": d["f43"] / 100,
+                    "chg_pct": d.get("f170", 0) / 10000,
+                    "ts": d.get("f86"),
+                }
+                with contextlib.suppress(Exception):
+                    (paths.data_dir / "xau_spot_last.json").write_text(
+                        json.dumps(rec), encoding="utf-8"
+                    )
+                return rec
+        except Exception:
+            pass
+    try:  # 用最后一次成功值兜底，标记缓存
+        last = json.loads(
+            (paths.data_dir / "xau_spot_last.json").read_text(encoding="utf-8")
+        )
+        last["stale"] = True
+        return last
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def fetch_btc():
+    """比特币实时行情（Yahoo BTC-USD）。失败返回 None。"""
+    import urllib.request
+
+    try:
+        url = "https://query1.finance.yahoo.com/v8/finance/chart/BTC-USD?range=5d&interval=1d&includePrePost=false"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        r = (data.get("chart", {}).get("result") or [None])[0]
+        if not r:
+            return None
+        meta = r.get("meta", {})
+        price = meta.get("regularMarketPrice")
+        if not price:
+            return None
+        prev = meta.get("chartPreviousClose") or price
+        return {
+            "price": float(price),
+            "chg_pct": float(price) / float(prev) - 1,
+            "ts": meta.get("regularMarketTime"),
+        }
+    except Exception:
+        return None
