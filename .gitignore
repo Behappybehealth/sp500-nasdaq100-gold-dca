@@ -27,6 +27,8 @@ __pycache__/
 # ---- 运行时日志与 PID ----
 *.log
 *.pid
+# 运行日志目录内容（BUG-017 落点；目录本身由 logs/.gitkeep 占位入库）
+logs/*.log
 
 # ---- IDE ----
 .idea/

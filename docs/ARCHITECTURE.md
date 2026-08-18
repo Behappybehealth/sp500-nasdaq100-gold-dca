@@ -398,6 +398,7 @@ tab4 是这条链的**读侧**，只有 14 行，业务上和 tab3 是一件事�
 | 路径 | 行数 | 说明 |
 |---|---:|---|
 | `scripts/dca_calculator.py` | 930 | **策略大脑**。完全独立可单跑，不依赖 Streamlit。输入 = CSV + config，输出 = JSON（15 个顶层键） |
+| `scripts/changelog.py` | ~115 | CHANGELOG 维护工具：`add <hash>` 从 git 取提交时刻生成行草稿；`--check` 校验每个 commit 都有行且时刻与 git 一致（CLAUDE.md 第 12 条的配套） |
 
 单独跑它：
 
@@ -463,6 +464,16 @@ tab4 是这条链的**读侧**，只有 14 行，业务上和 tab3 是一件事�
 | `.streamlit/secrets.toml` | **GCP 服务账号凭据**，2600 字节 | ❌ |
 | `.streamlit/secrets.toml.example` | 模板 | ✅ |
 
+## 3.8 日志体系 —— 三层分野与 `logs/`
+
+| 层 | 内容 | 落点 | 入库 |
+|---|---|---|:---:|
+| 机器流水 | 每个 commit 的精确时刻（epoch 存于 `.git/logs/`，人读格式用 `git log --date=format-local`） | git 自身 | — |
+| 改动日志 | 人读版流水：每 commit 一行、**带 HH:MM:SS 时刻**（取自 git，非手写） | 根目录 `CHANGELOG.md`，由 `scripts/changelog.py` 生成/校验 | ✅ |
+| 运行日志 | 应用运行时事件（登录、同步、抓取）——**尚未实现**，→ `BUG-017` | `logs/`（2026-08-18 拍板落点；`*.log` 不入库） | ❌ |
+
+⚠️ `logs/` 落点只对**本机 / 长期部署**有意义：Streamlit Cloud 容器重启即丢文件系统，届时运行日志需另配持久化（那是 BUG-017 实现时要解的题）。目录由 `logs/.gitkeep` 占位入库。
+
 ---
 
 # 变更记录
@@ -476,3 +487,4 @@ tab4 是这条链的**读侧**，只有 14 行，业务上和 tab3 是一件事�
 | 2026-08-18 | **BUG-026+021 修复**：`strategy/core-strategy.md` 全量重写为 184 行合并版（技术骨架 + 原 Tab6 独有的家人友好开场、§4 闭环图、§8 回测结论诚实版、§12 隐私真话版）；`app.py` Tab6 删掉 75 行内嵌副本改为读文件渲染（1967–1974），app.py 2041→1974 行 | 同一份策略说明两个副本必然漂移（026）；隐私声明写的是"数据不上传任何地方"，实际全部存 Google Sheets（021）。现在 Tab6 直接渲染唯一事实源，改文档即改页面 |
 | 2026-08-18 | **BUG-023 修复**：删三处死定义——`verify_user`（storage.py，全项目零调用）、`append_csv`（app.py，定义后从未调用）、`OBS_CSV`（app.py，定义后从未使用）；孤儿 `GLD.csv` 从仓库移除（git 可取回）。storage.py 603→594 行、app.py 1974→1964 行、公开接口 20→19、模块级全局 9→8、行情缓存 7→6 个文件 | 死物让人误以为功能还在，顺着改会改到空气；孤儿文件不留中间态。修复路径与 GLD 删除均经用户拍板 |
 | 2026-08-18 | **BUG-025 修复**：Tab5 五块硬编码回测数据（sp500/ndx/gold/hs300 四张滚动表 + 四标的横向对比，共 33 行 × 338 格）AST 无损导出为 `backtest/results_rolling.json`；app.py 改为统一读文件 + 缺失时 warning 优雅降级；结尾 caption 从失效的 `backtest-dca-5y/` 改指 `backtest/`。app.py 1964→1559 行（tab5 638→233 行） | 代码仓库不放数据：改回测不再触发代码部署；单一供数方式消除"两个事实源哪个新"的问题 |
+| 2026-08-18 | **日志体系落成（用户拍板）**：① CHANGELOG.md 全量回填时刻——每条 `HH:MM:SS` 取自 git commit 时间，组内改按时刻新在上；② 新增 `scripts/changelog.py`（`add <hash>` 生成行、`--check` 校验 29 个 commit 全覆盖且时刻一致）；③ 新建 `logs/` 目录定为**运行日志**落点（`*.log` 不入库，`.gitkeep` 占位；Cloud 容器重启即失的限制已写入 §3.8）；§3.8 新增"日志三层分野" | 用户在 `.git/logs/refs/heads/main` 里只看到 epoch 秒数、人读层 CHANGELOG 又只有日期——"没有时间戳"的真相是机器层有、人读层缺。脚本化维护让漏行/错时刻在机制上不可能 |

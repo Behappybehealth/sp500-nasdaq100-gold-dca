@@ -23,10 +23,12 @@
 sp500-nasdaq100-gold-dca/
 ├── app.py                    # Streamlit 主程序（⚠️ 1559 行，待拆分）
 ├── storage.py                # 存储层：Google Sheets 优先，本地 CSV 回退（594 行；含写前快照、PBKDF2 认证）
-├── CHANGELOG.md              # 改动日志：每个 commit 一行（人读版流水，见第 12 条）
+├── CHANGELOG.md              # 改动日志：每个 commit 一行带时刻（人读版流水，见第 12 条；scripts/changelog.py 维护）
 ├── start-app.bat             # 本机双击启动 Streamlit
+├── logs/                     # 运行日志约定落点（*.log 不入库；Cloud 容器重启即失，实现见 BUG-017）
 ├── scripts/
-│   └── dca_calculator.py     # 计算引擎（938 行，独立可运行，输出 JSON；--user 读 data/users/<user>/）
+│   ├── dca_calculator.py     # 计算引擎（938 行，独立可运行，输出 JSON；--user 读 data/users/<user>/）
+│   └── changelog.py          # CHANGELOG 维护：add <hash> 生成带时刻的行，--check 校验全覆盖
 ├── data/
 │   ├── config.json           # 策略参数与资产定义
 │   ├── budget_overrides.json # 月度预算覆盖（不入库）
@@ -134,7 +136,7 @@ cd X:/coding/projects/sp500-nasdaq100-gold-dca
 9. **提交信息用 Conventional Commits**（`feat:` / `fix:` / `refactor:` / `chore:`）。
 10. **动手前先读 `docs/ARCHITECTURE.md` 与 `docs/BUGLIST.md`** —— 前者是架构唯一事实源，后者是问题唯一事实源。`BUGLIST.md` 中每条问题必须先完成“1 对 1 确认修复路径”并回填确认记录，才允许修改真实逻辑；修复后必须回填实际改动、修复日期和真实验证结果。
 11. **行为变更的 commit 必须同期核对相关活文档** —— 活/冻清单见 `docs/README.md`（文档门户）。活文档头部标 `【活·更新时机：…】`，冻文档（`docs/plans/`、`backtest/`）标 `【冻】`、只增不改、不回改。
-12. **每个 commit 同期在 `CHANGELOG.md` 追加一行**（`[类型] 一句话（hash；关联编号）`，按日期分组新在上）——这是全量改动的人读版流水；架构级变更另记 ARCHITECTURE 变更记录、问题生命周期另记 BUGLIST，三处粒度不同不重复。
+12. **每个 commit 同期在 `CHANGELOG.md` 追加一行**（`HH:MM:SS [类型] 一句话（hash；关联编号）`，按日期分组新在上、组内按时刻新在上）——这是全量改动的人读版流水；架构级变更另记 ARCHITECTURE 变更记录、问题生命周期另记 BUGLIST，三处粒度不同不重复。**时刻取自 git commit 时间，不手写**：`.venv/Scripts/python.exe scripts/changelog.py add <hash>` 生成行草稿，收尾跑 `--check` 校验每个 commit 都有行且时刻正确（手滑漏行/错时刻会被它拦下）。尾随约定：commit 自身那行由下一个 commit 携带入库。
 
 ---
 
