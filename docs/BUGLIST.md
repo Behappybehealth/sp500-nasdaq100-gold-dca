@@ -27,27 +27,28 @@
 | 指标 | 数值 |
 |---|---:|
 | **登记问题总数** | **26** |
-| ✅ 已修复并验证 | **4** |
+| ✅ 已修复并验证 | **8** |
 | 🟡 已确认待修 | 0 |
-| 🔴 待 1 对 1 确认 | **22** |
+| 🔴 待 1 对 1 确认 | **18** |
 | ⚪ 判定不修 | 0 |
-| **修复率** | **15.4 %**（4 / 26） |
+| **修复率** | **30.8 %**（8 / 26） |
 
 ## 按等级分布
 
 | 等级 | 判据 | 总数 | ✅已修 | 🔴待确认 | 完成度 |
 |---|---|---:|---:|---:|---:|
-| **P0** | 数据会丢/会串号，或鉴权会失效。**不需要外部触发** | 5 | 1 | 4 | 20 % |
+| **P0** | 数据会丢/会串号，或鉴权会失效。**不需要外部触发** | 5 | 5 | 0 | 100 % |
 | **P1** | 会给出错误的钱数，或让部署/运维在关键时刻失败 | 10 | 3 | 7 | 30 % |
 | **P2** | 长期负债，不会立刻出事但会持续加重 | 11 | 0 | 11 | 0 % |
-| **合计** | | **26** | **4** | **22** | **15.4 %** |
+| **合计** | | **26** | **8** | **18** | **30.8 %** |
 
 ## 按日期的修复记录
 
 | 日期 | 当日新登记 | 当日修复 | 修复的编号 | 一句话 |
 |---|---:|---:|---|---|
 | **2026-08-17** | **26** | **4** | `BUG-005` `BUG-012` `BUG-013` `BUG-014` | 全量审计建册；删掉从未跑通的 Docker 那套，一个动作连带解决 4 条 |
-| 累计 | 26 | 4 | | |
+| **2026-08-18** | 0 | **4** | `BUG-001` `BUG-002` `BUG-003` `BUG-004` | P0 清舱：门闸 fail-closed、缓存与落盘按用户隔离、读失败不再伪装空表、PIN 升级 PBKDF2+锁定 |
+| 累计 | 26 | 8 | | |
 
 ## 🔗 连带修复追溯
 
@@ -68,10 +69,10 @@
 
 | 编号 | 等级 | 状态 | 标题 | 主要证据 |
 |---|---|---|---|---|
-| [BUG-001](#bug-001跨用户数据串号) | P0 | 🔴 | 跨用户数据串号 | app.py:556-557 |
-| [BUG-002](#bug-002一次读取失败--全部历史被覆盖) | P0 | 🔴 | 一次读取失败 = 全部历史被覆盖 | storage.py:107-110 |
-| [BUG-003](#bug-003认证是-fail-open-的门闸可以整体消失) | P0 | 🔴 | 认证 fail-open，门闸可整体消失 | app.py:430-431 |
-| [BUG-004](#bug-004pin-的保护强度撑不住公开部署) | P0 | 🔴 | PIN 强度撑不住 public 部署 | storage.py:134-135 |
+| [BUG-001](#bug-001跨用户数据串号) | P0 | ✅ | 跨用户数据串号 | app.py:556-557 |
+| [BUG-002](#bug-002一次读取失败--全部历史被覆盖) | P0 | ✅ | 一次读取失败 = 全部历史被覆盖 | storage.py:107-110 |
+| [BUG-003](#bug-003认证是-fail-open-的门闸可以整体消失) | P0 | ✅ | 认证 fail-open，门闸可整体消失 | app.py:430-431 |
+| [BUG-004](#bug-004pin-的保护强度撑不住公开部署) | P0 | ✅ | PIN 强度撑不住 public 部署 | storage.py:134-135 |
 | [BUG-005](#bug-005google-私钥会被打进-docker-镜像层) | P0 | ✅ | GCP 私钥会被打进镜像层 | 旧 Dockerfile:21 |
 | [BUG-006](#bug-006行情缓存无任何护栏盘中价直接入库) | P1 | 🔴 | 行情缓存无护栏，盘中价入库 | dca_calculator.py:292-317 |
 | [BUG-007](#bug-007两条抓取路径复权口径不一致) | P1 | 🔴 | 两条抓取路径复权口径不一致 | dca_calculator.py:206/338 |
@@ -108,7 +109,7 @@
 
 | 等级 | 状态 | 发现日期 | 确认日期 | 修复日期 | 主要证据 |
 |---|---|---|---|---|---|
-| **P0** | 🔴 待确认 | 2026-08-17 | — | — | [app.py:556-557](../app.py#L556-L557)、[storage.py:368](../storage.py#L368) |
+| **P0** | ✅ 已验证 | 2026-08-17 | 2026-08-18 | 2026-08-18 | [app.py:556-557](../app.py#L556-L557)、[storage.py:368](../storage.py#L368) |
 
 ### ① 现在会发生什么
 
@@ -220,15 +221,26 @@ data/
 
 #### ✅ 确认记录
 
-> 待 1 对 1 确认。**未确认前不动代码。** 需要你回答的是上面 ③ 里的方案 A / B。
+**2026-08-18 拍板：方案 A（Cloud 单实例多目录）。** 原话："bug001 选你的推荐方案"。引擎保持纯净、可离线单跑，不动 §1.3 边界。
 
 #### 🔧 实际修复
 
-> 待施工后回填：改了哪些 `file:line`、commit hash。
+- [app.py:587-596](../app.py#L587-L596)：`run_model(amount, user)`——user 进缓存键；`user != "local"` 时子进程命令追加 `--user`
+- [app.py:821](../app.py#L821)、[app.py:960](../app.py#L960)：两个调用点都传 `CURRENT_USER`
+- [scripts/dca_calculator.py:822](../scripts/dca_calculator.py#L822)：新增 `--user` 参数；[:825-826](../scripts/dca_calculator.py#L825-L826) 拒绝路径分隔符与 `..`；[:831-833](../scripts/dca_calculator.py#L831-L833) 记账数据改读 `data/users/<user>/`；[:64-71](../scripts/dca_calculator.py#L64-L71) `resolve_monthly_budget` 加 `record_dir` 第 4 参
+- [storage.py:528-549](../storage.py#L528-L549)：`sync_local` 落盘到 `data/users/<user>/`（每用户独立目录）
+- [.gitignore](../.gitignore)：补 `data/users/`（用户数据不入库）
+- commit：`a1707a6`（引擎/UI/ignore）+ `f02ff22`（sync_local）
 
 #### ✔️ 验证结果
 
-> 待验证后回填：贴 ⑤ 五步的真实输出。
+2026-08-18 实跑（全程在临时目录副本上进行，未污染真实行情缓存）：
+
+- ⑤-5 引擎回归：legacy `--base-dir` 退出码 0、15 个顶层键齐全 ✅
+- 分目录隔离：造 `data/users/_smoke/` 种子（1 笔 1000 元买入 + 月预算 5000）跑 `--user _smoke` → `total_invested_rmb=1000.0`、`monthly_budget_rmb=5000.0`（`budget_source=override:2026-08`）；同一时刻 legacy 跑出 `invested=0 / budget=10000`（data/ 根目录口径）——**两路各读各的** ✅
+- 路径穿越：`--user "../evil"` 与 `--user "a/b"` 均退出码 2，报「非法用户名：不允许包含路径分隔符或 '..'」 ✅
+- AppTest（streamlit 测试框架真实执行 app.py）：local 模式零异常跑完全部主界面 ✅
+- ⑤-1~4（A/B 两人浏览器交替实测缓存不串号）**待用户实测**——机制上缓存键已含 user，假连接测试另证 sync_local 分目录落盘 ✅（43 项全过）
 
 ---
 
@@ -236,7 +248,7 @@ data/
 
 | 等级 | 状态 | 发现日期 | 确认日期 | 修复日期 | 主要证据 |
 |---|---|---|---|---|---|
-| **P0** | 🔴 待确认 | 2026-08-17 | — | — | [storage.py:107-110](../storage.py#L107-L110)、[storage.py:299-307](../storage.py#L299-L307)、[storage.py:378-380](../storage.py#L378-L380) |
+| **P0** | ✅ 已验证 | 2026-08-17 | 2026-08-18 | 2026-08-18 | [storage.py:107-110](../storage.py#L107-L110)、[storage.py:299-307](../storage.py#L299-L307)、[storage.py:378-380](../storage.py#L378-L380) |
 
 ### ① 现在会发生什么
 
@@ -357,15 +369,26 @@ shutil.copy2(path, path.with_suffix(f".{时间戳}.bak"))
 
 #### ✅ 确认记录
 
-> 待 1 对 1 确认。需要你拍板的：第二层快照放**另一个 worksheet**（简单但占同一个表格的配额）还是**本地带时间戳文件**（不占配额但机器一换就没了）还是**两者都做**？
+**2026-08-18 拍板：两者都做。** worksheet 滚动快照（`<表名>_bak`）+ 本地带时间戳轮转 10 份，两层互补。
 
 #### 🔧 实际修复
 
-> 待施工后回填。
+- [storage.py:38-43](../storage.py#L38-L43)：新增 `SheetReadError` / `SheetWriteError` 两个异常
+- [storage.py:142-171](../storage.py#L142-L171)：`_is_missing_ws` 区分「表不存在」与「读取故障」；`_read_ws` 故障一律 `raise SheetReadError`——"empty ≠ error"，原 `except: return 空表` 根除
+- [storage.py:174-202](../storage.py#L174-L202)：`_write_ws` 写前把现内容快照到 `<表名>_bak`（滚动单份）；快照失败 `raise SheetWriteError` **放弃写入**；主写入 `fillna("")`
+- [storage.py:517-525](../storage.py#L517-L525)：`_rotate_backup` 覆盖前带时间戳**复制**留底，滚动保留 10 份（替代旧 .localbak 移动式假保护）
+- [app.py](../app.py) 全部写入点包 try/except、失败可见提示且不 rerun：[:791](../app.py#L791) 重置 PIN / [:798](../app.py#L798) 删用户 / [:808](../app.py#L808) 加账号 / [:1007](../app.py#L1007) 预算 / [:1269](../app.py#L1269)、[:1309](../app.py#L1309) 记账与观察（pop 改到写入成功后才执行）；[:567](../app.py#L567) 名单读取失败拒渲染自举表单；[:581](../app.py#L581) 首次 sync 失败给可见告警
+- commit：`f02ff22`（storage 三层）+ `a1707a6`（app.py 包装）
 
 #### ✔️ 验证结果
 
-> 待验证后回填。⑤ 的第 5 步（恢复演练）必须真跑，不能跳。
+2026-08-18 离线假连接测试（内存模拟 GSheetsConnection，可注入读写故障），43 项全过，本条专项：
+
+- 表不存在 → 返回带表头空表（不报错）✅；读取故障 → 抛 `SheetReadError`（不再伪装空表）✅
+- 首次写新表无需快照 ✅；第二次写 → `transactions_bak` 存写前状态（bak 1 行 / 主表 2 行）✅
+- 快照注入故障 → 抛 `SheetWriteError`，且**主表保持 2 行未被覆写** ✅
+- 本地轮转：覆盖前留底、原件仍在；造 12 份旧备份后轮转 → 剩 ≤10 份 ✅
+- ⑤-5 恢复演练（真跑）：local 模式冒烟把 08-18 盘中价写进了 GC_F/XAUT_USD 两个缓存（顺带再次抓到 BUG-006 活证据），从备份恢复后 `diff -rq` 一致、`git status` 干净 ✅（Sheets `_bak` 端的恢复演练待挑一笔真实数据做，需你配合）
 
 ---
 
@@ -373,7 +396,7 @@ shutil.copy2(path, path.with_suffix(f".{时间戳}.bak"))
 
 | 等级 | 状态 | 发现日期 | 确认日期 | 修复日期 | 主要证据 |
 |---|---|---|---|---|---|
-| **P0** | 🔴 待确认 | 2026-08-17 | — | — | [app.py:430-431](../app.py#L430-L431)、[storage.py:63-68](../storage.py#L63-L68) |
+| **P0** | ✅ 已验证 | 2026-08-17 | 2026-08-18 | 2026-08-18 | [app.py:430-431](../app.py#L430-L431)、[storage.py:63-68](../storage.py#L63-L68) |
 
 ### ① 现在会发生什么
 
@@ -473,15 +496,24 @@ elif AUTH_MODE == "local":
 
 #### ✅ 确认记录
 
-> 待 1 对 1 确认。需要你拍板：`AUTH_MODE` 的默认值取 `sheets`（更安全，但你在本机没配 secrets 时会启动失败）还是靠**环境判定**（Cloud 上强制 `sheets`、`localhost` 允许 `local`）？
+**2026-08-18 拍板：默认 `sheets`（fail-closed）。** 本机没配 secrets 时启动会明拒并提示；要单机必须显式设 `DCA_AUTH_MODE=local`——门闸"消失"从此必须是一个刻意的动作。
 
 #### 🔧 实际修复
 
-> 待施工后回填。
+- [app.py:430-445](../app.py#L430-L445)：门闸重写——`AUTH_MODE` 默认 `sheets`；`local` 才单机（挂黄色警示条）；`error`/`off` 分别报「配置损坏」「配置缺失」后 `st.stop()`
+- [storage.py:96-110](../storage.py#L96-L110)：`sheets_status()` 三态（ok/off/error）+ `sheets_enabled()` 只在 `ok` 时放行
+- [app.py:528](../app.py#L528)、[:567](../app.py#L567)：登录名单走 `list_users_fresh()` 新鲜读，读取故障报「云端存储暂时不可用」并 `st.stop()`——**绝不渲染自举表单**（防"读不出=没用户=随便建号"）
+- commit：`a1707a6`（app.py 门闸）+ `f02ff22`（storage 三态）
 
 #### ✔️ 验证结果
 
-> 待验证后回填。
+2026-08-18 实跑：
+
+- 假连接三态：无 gsheets→`off`、已配置→`ok`、secrets 读异常→`error` 且 `sheets_enabled()=False`（fail-closed）✅
+- 真实 secrets 只读 smoke：`sheets_status=ok`，`list_users()` 返回 `['Owner', 'tt']` ✅
+- AppTest 真实执行 app.py：sheets 模式零异常，门闸渲染（2 个输入框 + 登录页脚）✅；`DCA_AUTH_MODE=local` 模式零异常，直接进主界面（5 个输入框）✅
+- 两种模式 `streamlit run` 启动冒烟：healthz 200，日志零 traceback/exception ✅
+- 浏览器端「配置损坏时看到的拒绝页」观感**待用户实测**
 
 ---
 
@@ -489,7 +521,7 @@ elif AUTH_MODE == "local":
 
 | 等级 | 状态 | 发现日期 | 确认日期 | 修复日期 | 主要证据 |
 |---|---|---|---|---|---|
-| **P0** | 🔴 待确认 | 2026-08-17 | — | — | [storage.py:134-135](../storage.py#L134-L135)、[storage.py:190](../storage.py#L190) |
+| **P0** | ✅ 已验证 | 2026-08-17 | 2026-08-18 | 2026-08-18 | [storage.py:134-135](../storage.py#L134-L135)、[storage.py:190](../storage.py#L190) |
 
 ### ① 现在会发生什么
 
@@ -601,18 +633,30 @@ users 表加两列 `fail_count` / `locked_until`。连续失败 5 次 → 锁 15
 
 #### ✅ 确认记录
 
-> 待 1 对 1 确认。需要你拍板：
-> 1. 用 **PBKDF2**（标准库自带，零新依赖）还是 **argon2**（更强，但要加 `argon2-cffi` 依赖）？
-> 2. PIN 下限提到 6 位 —— **家人要重设 PIN**，你接受吗？还是只对新账号强制？
-> 3. 要不要顺手加"第二因素"？考虑到用户是家人，可能过重。
+**2026-08-18 拍板（两问都是推荐项）：**
+1. **PBKDF2**——标准库自带、零新依赖，20 万迭代（本机实测约 0.073s/次）。
+2. **仅新 PIN 强制 6 位**——旧账号无感：登录成功时自动迁移成 PBKDF2（rehash on login），家人不用重设。
+3. 第二因素：不做（用户是家人，过重）。
 
 #### 🔧 实际修复
 
-> 待施工后回填。
+- [storage.py:73-90](../storage.py#L73-L90)：`USER_FIELDS` 扩为 8 列（+salt/hash_algo/fail_count/locked_until）；常量 `_PBKDF2_ITER=200_000`、`_PIN_MIN=6`、`_LOCK_AFTER=5`、`_LOCK_MINUTES=15`
+- [storage.py:208-227](../storage.py#L208-L227)：`_pin_hash`（旧 sha256 仅留作校验）、`_pin_hash_v2`（PBKDF2+盐）、`_new_pin_record`（`secrets.token_hex(16)` 随机盐）
+- [storage.py:263-311](../storage.py#L263-L311)：`authenticate` 重写——锁定期内对错都拒；失败计数 ≥5 锁 15 分钟；成功清状态；旧格式自动迁移 PBKDF2；返回 `ok|no_user|pending|bad_pin|locked`
+- [storage.py:323-348](../storage.py#L323-L348)、[:386-404](../storage.py#L386-L404)：`create_user`/`set_pin` 强制 6-8 位、写新格式三字段；[:416-428](../storage.py#L416-L428) `reset_pin` 连锁定与算法标记一起清
+- [app.py:489](../app.py#L489)：登录加 `locked` 提示「失败次数过多，账号已锁定，请 15 分钟后重试」；PIN 文案 4-8 位 → 6-8 位（4 处）
+- commit：`f02ff22`（storage）+ `a1707a6`（app.py 提示）
 
 #### ✔️ 验证结果
 
-> 待验证后回填。第 2 步（同 PIN 两账号 key 不同）和第 6 步（旧账号迁移）必须都跑。
+2026-08-18 离线假连接测试 43 项全过，本条专项：
+
+- 5 位 / 9 位新 PIN 被拒，6 位通过 ✅
+- **同 PIN 两账号（alice/carol 都是 123456）：盐不同、哈希不同** ✅；库存哈希可用 v2 校验、与旧 sha256 不等 ✅
+- 错 4 次 `bad_pin` → 第 5 次 `bad_pin` 并落锁 → **锁期内正确 PIN 也返回 `locked`** ✅；把 locked_until 拨到过去 → 正常登录且计数清零 ✅
+- **旧格式迁移**：手工造 sha256_v1 账号 erin → 登录 `ok`，读回已是 `pbkdf2_v1` + 有盐 + v2 可校验，再登录仍 `ok` ✅
+- `set_pin` 5 位拒/6 位过；`reset_pin` 清五字段后账号回 `pending` ✅
+- 真实 Sheets 上的登录/锁定/迁移链路：假连接已证逻辑，**浏览器端实操待用户实测**
 
 ---
 

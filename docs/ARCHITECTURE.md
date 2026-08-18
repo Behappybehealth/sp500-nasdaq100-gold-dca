@@ -26,7 +26,7 @@
 | 数据存储 | **Google Sheets**（`st-gsheets-connection` + `gspread 5.12.4`） | 把一个 Google 表格当数据库用，见 §1.4 |
 | 存储回退 | 本地 CSV 文件 | 没配 Google 凭据时自动降级成单机模式 |
 | 行情数据 | Yahoo Finance Chart v8 接口（`urllib` 直连）+ `yfinance 1.6.0` 兜底 + 东方财富 push2（`curl` 子进程） | 三个来源，**都没有 API key，都是非官方接口** |
-| 用户认证 | 自己写的"名字 + PIN" | PIN 用 SHA256 哈希后存在 Google Sheets 的 users 表里 |
+| 用户认证 | 自己写的"名字 + PIN" | PIN 用 PBKDF2-HMAC-SHA256（20 万迭代 + 每账号随机盐）存在 Google Sheets 的 users 表里；旧 SHA256 账号登录成功时自动迁移 |
 | 计算引擎 | 独立 Python 脚本 + **subprocess** | 见 §1.3 |
 | 部署（生产） | **Streamlit Community Cloud** | 推送到 GitHub main 分支自动重新部署 |
 | 临时外发 | ngrok 固定域名 | 本机开着时把 8501 端口发到公网 |
@@ -111,10 +111,11 @@ return json.loads(out.stdout)          # 把对方打印的 JSON 转成 Python �
 
 | 工作表 | 字段 |
 |---|---|
-| `users` | `name, pin_hash, role, created_at` |
+| `users` | `name, pin_hash, salt, hash_algo, role, fail_count, locked_until, created_at`（旧 4 列行由 `_read_ws` 补空串兼容） |
 | `transactions` | 成交记录，含 `user` 列 |
 | `observations` | 跳过/观察记录，含 `user` 列 |
 | `budget_overrides` | 月度预算覆盖，含 `user` 列 |
+| `<任意表>_bak` | 写前快照（滚动单份）：`_write_ws` 覆写主表前先把现内容推到这里，快照失败则放弃写入（BUG-002 修复） |
 
 所有数据表都带 `user` 列做行级隔离。另有**进程内全局 8 秒短缓存** `_SHEET_CACHE`（storage.py:96–97），`_read_ws(..., fresh=True)` 可绕过它强制新鲜读。
 
@@ -204,7 +205,7 @@ gspread>=5.8.0,<6        本机实装 5.12.4  ← 唯一有上界的
    浏览器（用户）  ←───→ │  Streamlit Community Cloud      │
                         │  一个 Python 进程服务所有用户     │
                         │                                 │
-                        │    app.py（1984 行）             │
+                        │    app.py（2041 行）             │
                         │    ├─ 全局 CSS                   │
                         │    ├─ 登录门闸（名字+PIN）         │
                         │    ├─ 侧边栏（在这里跑模型）       │
@@ -216,19 +217,20 @@ gspread>=5.8.0,<6        本机实装 5.12.4  ← 唯一有上界的
                             ▼                  ▼
         ┌───────────────────────────┐   ┌──────────────────┐
         │ scripts/dca_calculator.py │   │   storage.py     │
-        │ 计算引擎（930 行）         │   │  存储层（442 行） │
+        │ 计算引擎（938 行）         │   │  存储层（603 行） │
         │                           │   │                  │
         │ 读 data/config.json       │   │ 优先 Google Sheets│
-        │ 读 data/transactions.csv  │◄──┤ 无凭据→本地 CSV   │
-        │ 读 data/market_history/   │ 把云端数据           │
-        │ 抓 Yahoo / 东财行情        │ 落盘成 CSV           │
+        │ 读记账数据（--user 时      │◄──┤ 无凭据→本地 CSV   │
+        │  读 data/users/<user>/）  │ 把云端数据落盘到      │
+        │ 读 data/market_history/   │ data/users/<user>/   │
+        │ 抓 Yahoo / 东财行情        │ （每用户独立目录）     │
         │ 输出 JSON 到标准输出        │                     │
         └───────────┬───────────────┘   └────────┬─────────┘
                     │                            │
                     ▼                            ▼
         ┌────────────────────┐        ┌──────────────────────┐
         │ Yahoo Chart v8     │        │  Google Sheets       │
-        │ 东方财富 push2      │        │  4 个工作表：         │
+        │ 东方财富 push2      │        │  4 个主表 + _bak 快照 │
         │ （无 key、无额度保证）│        │  users / transactions │
         └────────────────────┘        │  observations /       │
                                       │  budget_overrides     │
@@ -242,23 +244,26 @@ gspread>=5.8.0,<6        本机实装 5.12.4  ← 唯一有上界的
 ```
 ① 用户输入名字 + PIN 点登录
       ↓
-② storage.authenticate() 去 Google Sheets 的 users 表比对 PIN 的哈希值
-   （一次新鲜读完成「存在性 / 激活态 / PIN」三重校验，并顺手返回最新用户名列表刷新会话缓存）
+② storage.authenticate() 去 Google Sheets 的 users 表校验
+   （一次新鲜读完成「锁定 / 存在性 / 激活态 / PIN」四重判断：
+     锁定期内对错都拒；连续失败 5 次锁 15 分钟；旧 sha256 账号
+     验证通过即自动迁移为 PBKDF2；顺手返回最新用户名列表刷新会话缓存）
       ↓ 通过
 ③ storage.sync_local(用户名)
-      把 Google Sheets 里【这个用户】的成交记录，写成本地 data/transactions.csv
-      ↑↑↑ 注意：写的是同一个文件路径，不分用户  → BUG-001
+      把 Google Sheets 里【这个用户】的成交记录，写到本地
+      data/users/<用户名>/ （每用户独立目录，覆盖前带时间戳轮转留底 10 份）
       ↓
-④ 侧边栏调用 run_model(None)
-      → 启动子进程 dca_calculator.py --base-dir <项目目录>
+④ 侧边栏调用 run_model(None, CURRENT_USER)   ← 缓存键含用户身份
+      → 启动子进程 dca_calculator.py --base-dir <项目目录> --user <用户名>
       ↓
-⑤ 引擎读 data/transactions.csv（刚才写的）+ data/config.json
+⑤ 引擎读 data/users/<用户名>/transactions.csv + data/config.json
+      （config 与行情缓存保持共享；记账数据按用户分目录）
       → 增量抓行情（只抓缓存里缺的那几天）
       → 算评分、算金额、算比例
       → 把结果 print 成一大段 JSON
       ↓
 ⑥ app.py 收下 JSON，拆成 result / dec / ms / pf 四个变量
-      → 结果被 st.cache_data 缓存 900 秒，缓存键只有「金额」  → BUG-001
+      → 结果被 st.cache_data 缓存 900 秒，缓存键 =（金额, 用户）
       ↓
 ⑦ 6 个 Tab 依次渲染，直接用上面那四个变量
       ↓
@@ -277,7 +282,7 @@ gspread>=5.8.0,<6        本机实装 5.12.4  ← 唯一有上界的
 ⑤ 557–731 定义服务函数（run_model / 行情 / 曲线）
 ⑥ 732–993 渲染侧边栏 ←── 副作用：在这里跑模型，产出 result/dec/ms/pf
 ⑦ 994–1005 声明 6 个 tab
-⑧ 1006–1984 依次渲染 6 个 tab ←── 消费 ⑥ 产出的变量
+⑧ 1044–2041 依次渲染 6 个 tab ←── 消费 ⑥ 产出的变量
 ```
 
 **关键点：⑥ 既是 UI 又是业务入口。** 侧边栏渲染的过程中调用 `run_model()`，把决策结果留在模块级作用域，下游 6 个 tab 直接引用。这就是为什么"把 tab 搬出去"必须先解决"结果怎么传进去"。
@@ -334,7 +339,7 @@ tab4 是这条链的**读侧**，只有 14 行，业务上和 tab3 是一件事�
 | ✍️ 记账 | 1150–1257 | 108 | 回报成交 / 主动跳过，二次确认后落库 | result, dec, ASSETS, CURRENT_USER |
 | 📜 历史记录 | 1258–1271 | 14 | 回读 transactions / observations | CURRENT_USER |
 | 🧪 回测结果 | 1272–1909 | **638** | 5 段静态回测报告（见下） | BACKTEST_DIR |
-| 📖 策略说明 | 1910–1984 | 75 | 一大段硬编码 markdown | 无 |
+| 📖 策略说明 | 1968–2041 | 74 | 一大段硬编码 markdown | 无 |
 
 **tab5 内部构成**（最大的一块，占全文件 32%）：
 
@@ -372,7 +377,7 @@ tab4 是这条链的**读侧**，只有 14 行，业务上和 tab3 是一件事�
 
 **session_state key 11 个**：`synced`(5) `user`(4) `_names`(4) `_login_err`(4) `_auth`(3) `pending_tx`(2) `activating`(2) `pending_obs` `_boot_err` `_act_err`，另有 13 处 `.pop()` / 6 处 `.get()` / 1 处 `.clear()`。其中 8 个属认证链、3 个属记账链，**没有跨链共享**。
 
-**storage 接口 18 个函数**（`sync_local`×4, `read_rows`×2, `list_users`×2, `is_admin`×2, `append_row`×2, 其余各 1）—— 已是干净边界。
+**storage 接口 20 个公开函数**（BUG-001~004 修复新增 `sheets_status` / `list_users_fresh`；`sync_local`×4, `read_rows`×2, `list_users`×2, `is_admin`×2, `append_row`×2, 其余各 1）—— 已是干净边界。
 
 ---
 
@@ -382,8 +387,8 @@ tab4 是这条链的**读侧**，只有 14 行，业务上和 tab3 是一件事�
 
 | 路径 | 行数 | 是什么 | 谁读它 | 入库 |
 |---|---:|---|---|:---:|
-| `app.py` | 1984 | Streamlit 主程序。CSS + 登录 + 侧边栏 + 6 个 Tab 全在里面 | Streamlit 直接执行 | ✅ |
-| `storage.py` | 442 | 存储层。所有 Google Sheets 读写都走它 | `app.py` import | ✅ |
+| `app.py` | 2041 | Streamlit 主程序。CSS + 登录 + 侧边栏 + 6 个 Tab 全在里面 | Streamlit 直接执行 | ✅ |
+| `storage.py` | 603 | 存储层。所有 Google Sheets 读写都走它（含写前快照、PBKDF2 认证） | `app.py` import | ✅ |
 | `requirements.txt` | 6 | 依赖清单。全是 `>=` 不钉版本 | Cloud 装依赖时 | ✅ |
 | `start-app.bat` | — | 本机双击启动 | 你 | ✅ |
 | `CLAUDE.md` | — | 给 AI 编程助手的项目说明 | AI 助手 | ✅ |
@@ -403,18 +408,19 @@ tab4 是这条链的**读侧**，只有 14 行，业务上和 tab3 是一件事�
 .venv/Scripts/python.exe scripts/dca_calculator.py --amount 5000 --base-dir .
 ```
 
-**参数只有三个**：`--amount`、`--base-dir`、`--history-years`（没有 `--no-refresh`）。
-**引擎读的文件**：`data/budget_overrides.json`(:71)、`data/config.json`(:823)、`data/transactions.csv`(:824)、`data/observations.csv`(:825)、`data/market_history/`(:842)。
+**参数四个**：`--amount`、`--base-dir`、`--history-years`、`--user`（多用户模式：记账数据从 `data/users/<user>/` 读取，config 与行情缓存保持共享；含路径穿越防护。没有 `--no-refresh`）。
+**引擎读的文件**：`data/config.json`、`data/market_history/`、记账三件套——无 `--user` 时读 `data/{transactions,observations}.csv` + `data/budget_overrides.json`，有 `--user` 时读 `data/users/<user>/` 下同名文件。
 
 ## 3.3 `data/` — 数据目录（引擎唯一的数据来源）
 
 | 路径 | 是什么 | 入库 | 说明 |
 |---|---|:---:|---|
 | `data/config.json` | 策略参数与资产定义（权重、区间、评分系数） | ✅ | 改策略参数改这里 |
-| `data/transactions.csv` | **成交记录**（真实持仓的账本） | ❌ | 云端模式下由 `sync_local` 从 Sheets 覆写生成 |
+| `data/users/<用户>/` | **云端模式的每用户落盘缓存**（transactions/observations/budget_overrides） | ❌ | 由 `sync_local` 从 Sheets 覆写生成；覆盖前带时间戳轮转留底 10 份（`*.YYYYMMDD-HHMMSS.localbak`） |
+| `data/transactions.csv` | **成交记录**（真实持仓的账本） | ❌ | 仅本地单机模式使用；云端模式已改 `data/users/<user>/` |
 | `data/observations.csv` | 跳过/观察记录 | ❌ | 同上 |
 | `data/budget_overrides.json` | 按月覆盖预算 | ❌ | 同上 |
-| `data/*.localbak` | "备份"文件 | ❌ | ⚠️ 只在第一次同步时生成过一次，是**假保护** → `BUG-002` |
+| `data/*.localbak` | 轮转留底文件 | ❌ | 2026-08-18 起为带时间戳的真轮转（旧"只留一份"假保护已随 BUG-002 修复移除） |
 | `data/market_history/*.csv` | **行情缓存**，7 个文件，两列（`date,close`） | ✅ | **入库是刻意的** —— 让 Cloud 部署不用冷启动重抓十年数据 |
 
 **行情缓存 7 个文件**：`_GSPC.csv`（标普指数）、`SPY.csv`（标普 ETF）、`_NDX.csv`（纳指）、`QQQ.csv`（纳指 ETF）、`GC_F.csv`（黄金期货）、`XAUT_USD.csv`（黄金代币）、`GLD.csv`（**孤儿** —— 已不在抓取名单，冻结在 2026-08-10）。
@@ -434,7 +440,7 @@ tab4 是这条链的**读侧**，只有 14 行，业务上和 tab3 是一件事�
 
 | 路径 | 说明 |
 |---|---|
-| `strategy/core-strategy.md` | 策略详细文档。**应用完全不读它**（`grep strategy app.py` 零命中）。Tab6 显示的是**另一份硬编码在 app.py:1910–1984 的 markdown** |
+| `strategy/core-strategy.md` | 策略详细文档。**应用完全不读它**（`grep strategy app.py` 零命中）。Tab6 显示的是**另一份硬编码在 app.py:1968–2041 的 markdown** |
 
 **后果**：同一份策略说明存在两个副本，会各自漂移。→ `BUG-026`
 
@@ -469,3 +475,4 @@ tab4 是这条链的**读侧**，只有 14 行，业务上和 tab3 是一件事�
 | 2026-08-17 | **首版建立。** 从 `docs/plans/architecture-and-p0-explained.md` 拆出架构部分；问题部分转入 [BUGLIST.md](BUGLIST.md)（原文一条不丢，全部按 `BUG-0XX` 编号登记） | 一份文档同时讲架构和缺陷，两者更新节奏不同，必然漂移 |
 | 2026-08-17 | 记录三处**已修正的文档不实**：① CLAUDE.md 与旧 DEPLOY.md 都称 Tab6 读 `strategy/core-strategy.md`，实测 `grep strategy app.py` **零命中**；② 旧 Dockerfile 声明 `python:3.12-slim`，本机实测 **Python 3.14.4**；③ 旧 DEPLOY.md 称"每个用户有独立容器和数据目录，完全隔离"，实际所有用户共用一个 `data/transactions.csv` 和一块进程级缓存 | 文档说的和代码做的不一致，比没有文档更危险 |
 | 2026-08-17 | `deploy/` 删除 5 个 Docker 死文件（`Dockerfile` / `docker-compose.yml` / `nginx.conf` / `setup_user.sh` / `streamlit-config.toml`），§3.6 改写 | **主修 `BUG-012`**（Docker 那套从未成功构建过，自初始提交零迭代，却被标为"唯一事实源"）。**因为下面三个问题的成因全部落在被删的文件里，同一个动作连带修复了**：`BUG-005`（GCP 私钥被 `Dockerfile:21` 的 `COPY .streamlit/` 打进镜像层）、`BUG-013`（容器隔离与应用内登录两套多用户实现互相抵消）、`BUG-014`（`setup_user.sh:90` 的 sed 会把 nginx location 插到 server 块外面，加一个用户炸掉所有用户）。四条记录连带关系与验证结果都在 BUGLIST 里，**一条都没删** |
+| 2026-08-18 | **P0 清舱（BUG-001~004，commit `a1707a6` + `f02ff22`）**：① 认证门闸 fail-closed——`AUTH_MODE` 默认 `sheets`，secrets 缺失/损坏即拒启动，单机必须显式 `DCA_AUTH_MODE=local`；② 多租户隔离补齐另一半——`run_model` 缓存键含用户、引擎新增 `--user` 读 `data/users/<user>/`、`sync_local` 分目录落盘；③ 存储层 "empty ≠ error"——读故障抛 `SheetReadError`、写前快照 `<表名>_bak`（快照失败放弃写入）、本地轮转留底 10 份；④ PIN 升级 PBKDF2+随机盐、连续失败 5 次锁 15 分钟、旧 sha256 账号登录自动迁移、新 PIN 强制 6-8 位 | 四条 P0 全部经 1 对 1 确认后施工，43 项离线假连接测试全过 + 引擎双模式回归 + AppTest 双模式冒烟；确认记录/改动清单/验证输出均已回填 BUGLIST |

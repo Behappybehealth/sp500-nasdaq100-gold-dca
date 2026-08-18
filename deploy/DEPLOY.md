@@ -52,6 +52,17 @@ cd X:/coding/projects/sp500-nasdaq100-gold-dca
 # 或双击项目根目录的 start-app.bat
 ```
 
+**认证模式（2026-08-18 起，fail-closed）**：默认要求云端模式——没配 secrets 会**拒绝启动**并提示原因。本机已配 `.streamlit/secrets.toml` 则无感（照常登录）。要在**无凭据的机器**上跑单机版，必须显式设置：
+
+```bash
+# Git Bash:
+DCA_AUTH_MODE=local .venv/Scripts/streamlit run app.py
+:: cmd:
+:: set DCA_AUTH_MODE=local && .venv\Scripts\streamlit run app.py
+```
+
+单机模式不登录、数据只存本机 CSV，页面顶部有黄色警示条。
+
 单跑计算引擎（不起网页）：
 
 ```bash
