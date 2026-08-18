@@ -206,7 +206,7 @@ gspread>=5.8.0,<6        本机实装 5.12.4  ← 唯一有上界的
    浏览器（用户）  ←───→ │  Streamlit Community Cloud      │
                         │  一个 Python 进程服务所有用户     │
                         │                                 │
-                        │    app.py（1974 行）             │
+                        │    app.py（1964 行）             │
                         │    ├─ 全局 CSS                   │
                         │    ├─ 登录门闸（名字+PIN）         │
                         │    ├─ 侧边栏（在这里跑模型）       │
@@ -218,7 +218,7 @@ gspread>=5.8.0,<6        本机实装 5.12.4  ← 唯一有上界的
                             ▼                  ▼
         ┌───────────────────────────┐   ┌──────────────────┐
         │ scripts/dca_calculator.py │   │   storage.py     │
-        │ 计算引擎（938 行）         │   │  存储层（603 行） │
+        │ 计算引擎（938 行）         │   │  存储层（594 行） │
         │                           │   │                  │
         │ 读 data/config.json       │   │ 优先 Google Sheets│
         │ 读记账数据（--user 时      │◄──┤ 无凭据→本地 CSV   │
@@ -283,7 +283,7 @@ gspread>=5.8.0,<6        本机实装 5.12.4  ← 唯一有上界的
 ⑤ 557–731 定义服务函数（run_model / 行情 / 曲线）
 ⑥ 732–993 渲染侧边栏 ←── 副作用：在这里跑模型，产出 result/dec/ms/pf
 ⑦ 994–1005 声明 6 个 tab
-⑧ 1044–1974 依次渲染 6 个 tab ←── 消费 ⑥ 产出的变量
+⑧ 1034–1964 依次渲染 6 个 tab ←── 消费 ⑥ 产出的变量
 ```
 
 **关键点：⑥ 既是 UI 又是业务入口。** 侧边栏渲染的过程中调用 `run_model()`，把决策结果留在模块级作用域，下游 6 个 tab 直接引用。这就是为什么"把 tab 搬出去"必须先解决"结果怎么传进去"。
@@ -335,12 +335,12 @@ tab4 是这条链的**读侧**，只有 14 行，业务上和 tab3 是一件事�
 
 | tab | 行区间 | 行数 | 业务职责 | 依赖 |
 |---|---|---:|---|---|
-| 🎯 今日模拟 | 1055–1134 | 80 | 今日建议金额/部署系数/三资产分配/三档执行方案 | result, dec, ms, ASSETS |
-| 📊 持仓与曲线 | 1135–1198 | 64 | 持仓汇总、估值、浮盈亏、XIRR、净值曲线 | pf, ASSETS |
-| ✍️ 记账 | 1199–1314 | 116 | 回报成交 / 主动跳过，二次确认后落库 | result, dec, ASSETS, CURRENT_USER |
-| 📜 历史记录 | 1315–1328 | 14 | 回读 transactions / observations | CURRENT_USER |
-| 🧪 回测结果 | 1329–1966 | **638** | 5 段静态回测报告（见下） | BACKTEST_DIR |
-| 📖 策略说明 | 1967–1974 | 8 | 读 `strategy/core-strategy.md` 渲染（唯一事实源，BUG-026 已修） | CODE_DIR |
+| 🎯 今日模拟 | 1045–1124 | 80 | 今日建议金额/部署系数/三资产分配/三档执行方案 | result, dec, ms, ASSETS |
+| 📊 持仓与曲线 | 1125–1188 | 64 | 持仓汇总、估值、浮盈亏、XIRR、净值曲线 | pf, ASSETS |
+| ✍️ 记账 | 1189–1304 | 116 | 回报成交 / 主动跳过，二次确认后落库 | result, dec, ASSETS, CURRENT_USER |
+| 📜 历史记录 | 1305–1318 | 14 | 回读 transactions / observations | CURRENT_USER |
+| 🧪 回测结果 | 1319–1956 | **638** | 5 段静态回测报告（见下） | BACKTEST_DIR |
+| 📖 策略说明 | 1957–1964 | 8 | 读 `strategy/core-strategy.md` 渲染（唯一事实源，BUG-026 已修） | CODE_DIR |
 
 （行区间 2026-08-18 复核）
 
@@ -362,7 +362,7 @@ tab4 是这条链的**读侧**，只有 14 行，业务上和 tab3 是一件事�
 
 ## 2.6 全局耦合清单（实测，不是估计）
 
-**模块级全局 9 个**，作用域比想象的窄得多：
+**模块级全局 8 个**，作用域比想象的窄得多：
 
 | 全局 | 总用量 | 侧栏 | tab1 | tab2 | tab3 | tab4 | tab5 | tab6 | 归属判定 |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---|
@@ -374,13 +374,12 @@ tab4 是这条链的**读侧**，只有 14 行，业务上和 tab3 是一件事�
 | `CONFIG` | 3 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 配置 |
 | `TX_CSV` | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | **纯服务层** |
 | `BACKTEST_DIR` | 3 | 0 | 0 | 0 | 0 | 0 | 2 | 0 | **只 tab5 用** |
-| `OBS_CSV` | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | **死代码** |
 
 `DATA_DIR / CODE_DIR / BASE / TX_CSV` 在**任何 UI 代码里都是 0 次** —— 它们只被服务函数用。这意味着 UI 层根本不需要看见路径。
 
 **session_state key 11 个**：`synced`(5) `user`(4) `_names`(4) `_login_err`(4) `_auth`(3) `pending_tx`(2) `activating`(2) `pending_obs` `_boot_err` `_act_err`，另有 13 处 `.pop()` / 6 处 `.get()` / 1 处 `.clear()`。其中 8 个属认证链、3 个属记账链，**没有跨链共享**。
 
-**storage 接口 20 个公开函数**（BUG-001~004 修复新增 `sheets_status` / `list_users_fresh`；`sync_local`×4, `read_rows`×2, `list_users`×2, `is_admin`×2, `append_row`×2, 其余各 1）—— 已是干净边界。
+**storage 接口 19 个公开函数**（BUG-001~004 修复新增 `sheets_status` / `list_users_fresh`；`sync_local`×4, `read_rows`×2, `list_users`×2, `is_admin`×2, `append_row`×2, 其余各 1）—— 已是干净边界。
 
 ---
 
@@ -390,8 +389,8 @@ tab4 是这条链的**读侧**，只有 14 行，业务上和 tab3 是一件事�
 
 | 路径 | 行数 | 是什么 | 谁读它 | 入库 |
 |---|---:|---|---|:---:|
-| `app.py` | 1974 | Streamlit 主程序。CSS + 登录 + 侧边栏 + 6 个 Tab 全在里面 | Streamlit 直接执行 | ✅ |
-| `storage.py` | 603 | 存储层。所有 Google Sheets 读写都走它（含写前快照、PBKDF2 认证） | `app.py` import | ✅ |
+| `app.py` | 1964 | Streamlit 主程序。CSS + 登录 + 侧边栏 + 6 个 Tab 全在里面 | Streamlit 直接执行 | ✅ |
+| `storage.py` | 594 | 存储层。所有 Google Sheets 读写都走它（含写前快照、PBKDF2 认证） | `app.py` import | ✅ |
 | `requirements.txt` | 6 | 依赖清单。全是 `>=` 不钉版本 | Cloud 装依赖时 | ✅ |
 | `start-app.bat` | — | 本机双击启动 | 你 | ✅ |
 | `CLAUDE.md` | — | 给 AI 编程助手的项目说明 | AI 助手 | ✅ |
@@ -424,9 +423,9 @@ tab4 是这条链的**读侧**，只有 14 行，业务上和 tab3 是一件事�
 | `data/observations.csv` | 跳过/观察记录 | ❌ | 同上 |
 | `data/budget_overrides.json` | 按月覆盖预算 | ❌ | 同上 |
 | `data/*.localbak` | 轮转留底文件 | ❌ | 2026-08-18 起为带时间戳的真轮转（旧"只留一份"假保护已随 BUG-002 修复移除） |
-| `data/market_history/*.csv` | **行情缓存**，7 个文件，两列（`date,close`） | ✅ | **入库是刻意的** —— 让 Cloud 部署不用冷启动重抓十年数据 |
+| `data/market_history/*.csv` | **行情缓存**，6 个文件，两列（`date,close`） | ✅ | **入库是刻意的** —— 让 Cloud 部署不用冷启动重抓十年数据 |
 
-**行情缓存 7 个文件**：`_GSPC.csv`（标普指数）、`SPY.csv`（标普 ETF）、`_NDX.csv`（纳指）、`QQQ.csv`（纳指 ETF）、`GC_F.csv`（黄金期货）、`XAUT_USD.csv`（黄金代币）、`GLD.csv`（**孤儿** —— 已不在抓取名单，冻结在 2026-08-10）。
+**行情缓存 6 个文件**：`_GSPC.csv`（标普指数）、`SPY.csv`（标普 ETF）、`_NDX.csv`（纳指）、`QQQ.csv`（纳指 ETF）、`GC_F.csv`（黄金期货）、`XAUT_USD.csv`（黄金代币）。孤儿 `GLD.csv`（不在抓取名单、冻结在 2026-08-10）已于 2026-08-18 从仓库移除（BUG-023），取回：`git show f1ed967:data/market_history/GLD.csv`。
 
 > ⚠️ **这是本仓库最宝贵的资产**（增量十年历史）。"能重下"≠"可以丢"。别删。→ `BUG-006`
 
@@ -478,3 +477,4 @@ tab4 是这条链的**读侧**，只有 14 行，业务上和 tab3 是一件事�
 | 2026-08-17 | `deploy/` 删除 5 个 Docker 死文件（`Dockerfile` / `docker-compose.yml` / `nginx.conf` / `setup_user.sh` / `streamlit-config.toml`），§3.6 改写 | **主修 `BUG-012`**（Docker 那套从未成功构建过，自初始提交零迭代，却被标为"唯一事实源"）。**因为下面三个问题的成因全部落在被删的文件里，同一个动作连带修复了**：`BUG-005`（GCP 私钥被 `Dockerfile:21` 的 `COPY .streamlit/` 打进镜像层）、`BUG-013`（容器隔离与应用内登录两套多用户实现互相抵消）、`BUG-014`（`setup_user.sh:90` 的 sed 会把 nginx location 插到 server 块外面，加一个用户炸掉所有用户）。四条记录连带关系与验证结果都在 BUGLIST 里，**一条都没删** |
 | 2026-08-18 | **P0 清舱（BUG-001~004，commit `a1707a6` + `f02ff22`）**：① 认证门闸 fail-closed——`AUTH_MODE` 默认 `sheets`，secrets 缺失/损坏即拒启动，单机必须显式 `DCA_AUTH_MODE=local`；② 多租户隔离补齐另一半——`run_model` 缓存键含用户、引擎新增 `--user` 读 `data/users/<user>/`、`sync_local` 分目录落盘；③ 存储层 "empty ≠ error"——读故障抛 `SheetReadError`、写前快照 `<表名>_bak`（快照失败放弃写入）、本地轮转留底 10 份；④ PIN 升级 PBKDF2+随机盐、连续失败 5 次锁 15 分钟、旧 sha256 账号登录自动迁移、新 PIN 强制 6-8 位 | 四条 P0 全部经 1 对 1 确认后施工，43 项离线假连接测试全过 + 引擎双模式回归 + AppTest 双模式冒烟；确认记录/改动清单/验证输出均已回填 BUGLIST |
 | 2026-08-18 | **BUG-026+021 修复**：`strategy/core-strategy.md` 全量重写为 184 行合并版（技术骨架 + 原 Tab6 独有的家人友好开场、§4 闭环图、§8 回测结论诚实版、§12 隐私真话版）；`app.py` Tab6 删掉 75 行内嵌副本改为读文件渲染（1967–1974），app.py 2041→1974 行 | 同一份策略说明两个副本必然漂移（026）；隐私声明写的是"数据不上传任何地方"，实际全部存 Google Sheets（021）。现在 Tab6 直接渲染唯一事实源，改文档即改页面 |
+| 2026-08-18 | **BUG-023 修复**：删三处死定义——`verify_user`（storage.py，全项目零调用）、`append_csv`（app.py，定义后从未调用）、`OBS_CSV`（app.py，定义后从未使用）；孤儿 `GLD.csv` 从仓库移除（git 可取回）。storage.py 603→594 行、app.py 1974→1964 行、公开接口 20→19、模块级全局 9→8、行情缓存 7→6 个文件 | 死物让人误以为功能还在，顺着改会改到空气；孤儿文件不留中间态。修复路径与 GLD 删除均经用户拍板 |

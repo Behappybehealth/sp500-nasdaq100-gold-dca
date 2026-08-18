@@ -311,15 +311,6 @@ def authenticate(name: str, pin: str):
     return "ok", stored, names
 
 
-def verify_user(name: str, pin: str) -> bool:
-    df = _read_ws("users", USER_FIELDS)
-    hit = df[_match_user(df, name)]
-    if hit.empty:
-        return False
-    stored = hit.iloc[0]["name"]
-    return hit.iloc[0]["pin_hash"] == _pin_hash(stored, pin)
-
-
 def create_user(name: str, pin: str, pin_confirm: str, role: str = "user"):
     """返回 (ok, msg)。名字唯一（不区分大小写）；新 PIN 强制 6-8 位。role: user|admin"""
     name = (name or "").strip()

@@ -38,7 +38,6 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 storage.init(DATA_DIR)
 
 TX_CSV = DATA_DIR / "transactions.csv"
-OBS_CSV = DATA_DIR / "observations.csv"
 try:
     CONFIG = json.loads((DATA_DIR / "config.json").read_text(encoding="utf-8"))
 except (json.JSONDecodeError, OSError) as _e:
@@ -611,15 +610,6 @@ def parse_wide_table(md: str) -> pd.DataFrame:
     lines = [ln for ln in md.splitlines() if ln.startswith("|")]
     rows = [[c.strip() for c in ln.strip("|").split("|")] for ln in lines]
     return pd.DataFrame(rows[2:], columns=rows[0])
-
-
-def append_csv(path: Path, fieldnames: list, row: dict) -> None:
-    exists = path.exists() and path.stat().st_size > 0
-    with path.open("a", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=fieldnames)
-        if not exists:
-            w.writeheader()
-        w.writerow(row)
 
 
 def _load_json(path: Path):
