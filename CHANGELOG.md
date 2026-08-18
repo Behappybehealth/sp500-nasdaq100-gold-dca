@@ -14,6 +14,7 @@
 - [文档] 新建 docs/README.md 文档门户，活/冻标注机制落地；README 修三处过时（`79828ac`）
 - [文档] 建立 CHANGELOG.md 改动日志，回填全部 25 个历史 commit（`2b869b0`）
 - [修复] Tab6 删 75 行内嵌副本改读 core-strategy.md 渲染（唯一事实源），§12 隐私声明改实话（`f1ed967`；BUG-026/021）
+- [重构] 删死代码 verify_user/append_csv/OBS_CSV，孤儿 GLD.csv 出库（git 可取回）（`76fa527`；BUG-023）
 - [数据] 08-17 黄金收盘定稿，剔除 08-18 未收盘前沿行（`569ae3d`）
 - [文档] 台账回填 BUG-005/012 的 commit 落点（`859ef1e`）
 

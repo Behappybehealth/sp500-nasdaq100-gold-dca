@@ -206,7 +206,7 @@ gspread>=5.8.0,<6        本机实装 5.12.4  ← 唯一有上界的
    浏览器（用户）  ←───→ │  Streamlit Community Cloud      │
                         │  一个 Python 进程服务所有用户     │
                         │                                 │
-                        │    app.py（1964 行）             │
+                        │    app.py（1559 行）             │
                         │    ├─ 全局 CSS                   │
                         │    ├─ 登录门闸（名字+PIN）         │
                         │    ├─ 侧边栏（在这里跑模型）       │
@@ -283,7 +283,7 @@ gspread>=5.8.0,<6        本机实装 5.12.4  ← 唯一有上界的
 ⑤ 557–731 定义服务函数（run_model / 行情 / 曲线）
 ⑥ 732–993 渲染侧边栏 ←── 副作用：在这里跑模型，产出 result/dec/ms/pf
 ⑦ 994–1005 声明 6 个 tab
-⑧ 1034–1964 依次渲染 6 个 tab ←── 消费 ⑥ 产出的变量
+⑧ 1034–1559 依次渲染 6 个 tab ←── 消费 ⑥ 产出的变量
 ```
 
 **关键点：⑥ 既是 UI 又是业务入口。** 侧边栏渲染的过程中调用 `run_model()`，把决策结果留在模块级作用域，下游 6 个 tab 直接引用。这就是为什么"把 tab 搬出去"必须先解决"结果怎么传进去"。
@@ -339,26 +339,22 @@ tab4 是这条链的**读侧**，只有 14 行，业务上和 tab3 是一件事�
 | 📊 持仓与曲线 | 1125–1188 | 64 | 持仓汇总、估值、浮盈亏、XIRR、净值曲线 | pf, ASSETS |
 | ✍️ 记账 | 1189–1304 | 116 | 回报成交 / 主动跳过，二次确认后落库 | result, dec, ASSETS, CURRENT_USER |
 | 📜 历史记录 | 1305–1318 | 14 | 回读 transactions / observations | CURRENT_USER |
-| 🧪 回测结果 | 1319–1956 | **638** | 5 段静态回测报告（见下） | BACKTEST_DIR |
-| 📖 策略说明 | 1957–1964 | 8 | 读 `strategy/core-strategy.md` 渲染（唯一事实源，BUG-026 已修） | CODE_DIR |
+| 🧪 回测结果 | 1319–1551 | **233** | 5 段静态回测报告（全部读 `backtest/*.json`，BUG-025 已修） | BACKTEST_DIR |
+| 📖 策略说明 | 1552–1559 | 8 | 读 `strategy/core-strategy.md` 渲染（唯一事实源，BUG-026 已修） | CODE_DIR |
 
 （行区间 2026-08-18 复核）
 
-**tab5 内部构成**（最大的一块，占全文件 32%）：
+**tab5 内部构成**：
 
 | 段 | 行区间 | 行数 | 数据来源 |
 |---|---|---:|---|
-| 一、三策略对比 | 1272–1362 | 91 | ✅ 读 `results_compare3.json` |
-| 二、为什么定额等比最高 | 1363–1375 | 13 | 纯 markdown |
-| 三、单品种动态vs固定 | 1376–1428 | 53 | ✅ 读 `results_single_compare.json` |
-| ├ 标普500 滚动表 | 1429–1525 | 97 | ❌ **硬编码 dict 字面量** |
-| ├ 纳指100 滚动表 | 1526–1632 | 107 | ❌ **硬编码** |
-| ├ 黄金 滚动表 | 1633–1731 | 99 | ❌ **硬编码** |
-| └ 沪深300 滚动表 | 1732–1833 | 102 | ❌ **硬编码** |
-| 四、四标的横向对比 | 1834–1877 | 44 | ❌ **硬编码** |
-| 五、综合结论 | 1878–1909 | 32 | 纯 markdown |
+| 一、三策略对比 | 1327–1410 | 84 | ✅ 读 `results_compare3.json` |
+| 二、为什么定额等比最高 | 1412–1424 | 13 | 纯 markdown |
+| 三、单品种滚动回测（含四张子表） | 1425–1514 | 90 | ✅ 读 `results_single_compare.json` + `results_rolling.json` |
+| 四、四标的横向对比 | 1516–1520 | 5 | ✅ 读 `results_rolling.json` |
+| 五、综合结论 | 1522–1551 | 30 | 纯 markdown |
 
-同一个 tab 里两种写法并存：前两段读 JSON，后五张表把 **415 行数据硬写在代码里**。→ `BUG-025`
+历史上后五张表曾把 415 行数据硬写在代码里，2026-08-18 已导出 `results_rolling.json`（BUG-025），现在全 tab 统一从文件读数。
 
 ## 2.6 全局耦合清单（实测，不是估计）
 
@@ -389,7 +385,7 @@ tab4 是这条链的**读侧**，只有 14 行，业务上和 tab3 是一件事�
 
 | 路径 | 行数 | 是什么 | 谁读它 | 入库 |
 |---|---:|---|---|:---:|
-| `app.py` | 1964 | Streamlit 主程序。CSS + 登录 + 侧边栏 + 6 个 Tab 全在里面 | Streamlit 直接执行 | ✅ |
+| `app.py` | 1559 | Streamlit 主程序。CSS + 登录 + 侧边栏 + 6 个 Tab 全在里面 | Streamlit 直接执行 | ✅ |
 | `storage.py` | 594 | 存储层。所有 Google Sheets 读写都走它（含写前快照、PBKDF2 认证） | `app.py` import | ✅ |
 | `requirements.txt` | 6 | 依赖清单。全是 `>=` 不钉版本 | Cloud 装依赖时 | ✅ |
 | `start-app.bat` | — | 本机双击启动 | 你 | ✅ |
@@ -436,6 +432,7 @@ tab4 是这条链的**读侧**，只有 14 行，业务上和 tab3 是一件事�
 | `backtest_dca.py` / `backtest_single.py` / `backtest_compare3.py` | 回测脚本。⚠️ 全部写死旧绝对路径 `C:\Users\xiezhibo\.claude\skills\...`，现在跑不起来 → `BUG-015` |
 | `results_compare3.json` | Tab5 第一段读它（三策略对比） |
 | `results_single_compare.json` | Tab5 第三段读它（单品种动态 vs 固定） |
+| `results_rolling.json` | Tab5 第三段四张滚动表 + 第四段横向对比读它（BUG-025：2026-08-18 从 app.py 硬编码导出，33 行 × 338 格与原字面量逐格相等） |
 | `results.json` / `results_single.json` / `results.md` / `compare3.md` | 中间产物与文字报告，应用不读 |
 
 ## 3.5 `strategy/` — 策略文档
@@ -478,3 +475,4 @@ tab4 是这条链的**读侧**，只有 14 行，业务上和 tab3 是一件事�
 | 2026-08-18 | **P0 清舱（BUG-001~004，commit `a1707a6` + `f02ff22`）**：① 认证门闸 fail-closed——`AUTH_MODE` 默认 `sheets`，secrets 缺失/损坏即拒启动，单机必须显式 `DCA_AUTH_MODE=local`；② 多租户隔离补齐另一半——`run_model` 缓存键含用户、引擎新增 `--user` 读 `data/users/<user>/`、`sync_local` 分目录落盘；③ 存储层 "empty ≠ error"——读故障抛 `SheetReadError`、写前快照 `<表名>_bak`（快照失败放弃写入）、本地轮转留底 10 份；④ PIN 升级 PBKDF2+随机盐、连续失败 5 次锁 15 分钟、旧 sha256 账号登录自动迁移、新 PIN 强制 6-8 位 | 四条 P0 全部经 1 对 1 确认后施工，43 项离线假连接测试全过 + 引擎双模式回归 + AppTest 双模式冒烟；确认记录/改动清单/验证输出均已回填 BUGLIST |
 | 2026-08-18 | **BUG-026+021 修复**：`strategy/core-strategy.md` 全量重写为 184 行合并版（技术骨架 + 原 Tab6 独有的家人友好开场、§4 闭环图、§8 回测结论诚实版、§12 隐私真话版）；`app.py` Tab6 删掉 75 行内嵌副本改为读文件渲染（1967–1974），app.py 2041→1974 行 | 同一份策略说明两个副本必然漂移（026）；隐私声明写的是"数据不上传任何地方"，实际全部存 Google Sheets（021）。现在 Tab6 直接渲染唯一事实源，改文档即改页面 |
 | 2026-08-18 | **BUG-023 修复**：删三处死定义——`verify_user`（storage.py，全项目零调用）、`append_csv`（app.py，定义后从未调用）、`OBS_CSV`（app.py，定义后从未使用）；孤儿 `GLD.csv` 从仓库移除（git 可取回）。storage.py 603→594 行、app.py 1974→1964 行、公开接口 20→19、模块级全局 9→8、行情缓存 7→6 个文件 | 死物让人误以为功能还在，顺着改会改到空气；孤儿文件不留中间态。修复路径与 GLD 删除均经用户拍板 |
+| 2026-08-18 | **BUG-025 修复**：Tab5 五块硬编码回测数据（sp500/ndx/gold/hs300 四张滚动表 + 四标的横向对比，共 33 行 × 338 格）AST 无损导出为 `backtest/results_rolling.json`；app.py 改为统一读文件 + 缺失时 warning 优雅降级；结尾 caption 从失效的 `backtest-dca-5y/` 改指 `backtest/`。app.py 1964→1559 行（tab5 638→233 行） | 代码仓库不放数据：改回测不再触发代码部署；单一供数方式消除"两个事实源哪个新"的问题 |

@@ -21,7 +21,7 @@
 
 ```
 sp500-nasdaq100-gold-dca/
-├── app.py                    # Streamlit 主程序（⚠️ 1964 行，待拆分）
+├── app.py                    # Streamlit 主程序（⚠️ 1559 行，待拆分）
 ├── storage.py                # 存储层：Google Sheets 优先，本地 CSV 回退（594 行；含写前快照、PBKDF2 认证）
 ├── CHANGELOG.md              # 改动日志：每个 commit 一行（人读版流水，见第 12 条）
 ├── start-app.bat             # 本机双击启动 Streamlit
@@ -78,7 +78,7 @@ app.py（UI + 业务逻辑，耦合较紧）
 
 | 问题 | 现状 | 计划 |
 |---|---|---|
-| **app.py 过长** | 1964 行，UI + 认证 + 业务 + 数据抓取混在一起 | 拆成 `src/ui/`、`src/tabs/`、`src/services/` |
+| **app.py 过长** | 1559 行，UI + 认证 + 业务 + 数据抓取混在一起 | 拆成 `src/ui/`、`src/tabs/`、`src/services/` |
 | 状态管理分散 | `st.session_state` 多处读写 | 集中管理 |
 
 **拆分方案（草案，动手前需重新核对行数与依赖）：**
