@@ -206,7 +206,7 @@ gspread>=5.8.0,<6        本机实装 5.12.4  ← 唯一有上界的
    浏览器（用户）  ←───→ │  Streamlit Community Cloud      │
                         │  一个 Python 进程服务所有用户     │
                         │                                 │
-                        │    app.py（2041 行）             │
+                        │    app.py（1974 行）             │
                         │    ├─ 全局 CSS                   │
                         │    ├─ 登录门闸（名字+PIN）         │
                         │    ├─ 侧边栏（在这里跑模型）       │
@@ -283,7 +283,7 @@ gspread>=5.8.0,<6        本机实装 5.12.4  ← 唯一有上界的
 ⑤ 557–731 定义服务函数（run_model / 行情 / 曲线）
 ⑥ 732–993 渲染侧边栏 ←── 副作用：在这里跑模型，产出 result/dec/ms/pf
 ⑦ 994–1005 声明 6 个 tab
-⑧ 1044–2041 依次渲染 6 个 tab ←── 消费 ⑥ 产出的变量
+⑧ 1044–1974 依次渲染 6 个 tab ←── 消费 ⑥ 产出的变量
 ```
 
 **关键点：⑥ 既是 UI 又是业务入口。** 侧边栏渲染的过程中调用 `run_model()`，把决策结果留在模块级作用域，下游 6 个 tab 直接引用。这就是为什么"把 tab 搬出去"必须先解决"结果怎么传进去"。
@@ -335,12 +335,14 @@ tab4 是这条链的**读侧**，只有 14 行，业务上和 tab3 是一件事�
 
 | tab | 行区间 | 行数 | 业务职责 | 依赖 |
 |---|---|---:|---|---|
-| 🎯 今日模拟 | 1006–1085 | 80 | 今日建议金额/部署系数/三资产分配/三档执行方案 | result, dec, ms, ASSETS |
-| 📊 持仓与曲线 | 1086–1149 | 64 | 持仓汇总、估值、浮盈亏、XIRR、净值曲线 | pf, ASSETS |
-| ✍️ 记账 | 1150–1257 | 108 | 回报成交 / 主动跳过，二次确认后落库 | result, dec, ASSETS, CURRENT_USER |
-| 📜 历史记录 | 1258–1271 | 14 | 回读 transactions / observations | CURRENT_USER |
-| 🧪 回测结果 | 1272–1909 | **638** | 5 段静态回测报告（见下） | BACKTEST_DIR |
-| 📖 策略说明 | 1968–2041 | 74 | 一大段硬编码 markdown | 无 |
+| 🎯 今日模拟 | 1055–1134 | 80 | 今日建议金额/部署系数/三资产分配/三档执行方案 | result, dec, ms, ASSETS |
+| 📊 持仓与曲线 | 1135–1198 | 64 | 持仓汇总、估值、浮盈亏、XIRR、净值曲线 | pf, ASSETS |
+| ✍️ 记账 | 1199–1314 | 116 | 回报成交 / 主动跳过，二次确认后落库 | result, dec, ASSETS, CURRENT_USER |
+| 📜 历史记录 | 1315–1328 | 14 | 回读 transactions / observations | CURRENT_USER |
+| 🧪 回测结果 | 1329–1966 | **638** | 5 段静态回测报告（见下） | BACKTEST_DIR |
+| 📖 策略说明 | 1967–1974 | 8 | 读 `strategy/core-strategy.md` 渲染（唯一事实源，BUG-026 已修） | CODE_DIR |
+
+（行区间 2026-08-18 复核）
 
 **tab5 内部构成**（最大的一块，占全文件 32%）：
 
@@ -388,7 +390,7 @@ tab4 是这条链的**读侧**，只有 14 行，业务上和 tab3 是一件事�
 
 | 路径 | 行数 | 是什么 | 谁读它 | 入库 |
 |---|---:|---|---|:---:|
-| `app.py` | 2041 | Streamlit 主程序。CSS + 登录 + 侧边栏 + 6 个 Tab 全在里面 | Streamlit 直接执行 | ✅ |
+| `app.py` | 1974 | Streamlit 主程序。CSS + 登录 + 侧边栏 + 6 个 Tab 全在里面 | Streamlit 直接执行 | ✅ |
 | `storage.py` | 603 | 存储层。所有 Google Sheets 读写都走它（含写前快照、PBKDF2 认证） | `app.py` import | ✅ |
 | `requirements.txt` | 6 | 依赖清单。全是 `>=` 不钉版本 | Cloud 装依赖时 | ✅ |
 | `start-app.bat` | — | 本机双击启动 | 你 | ✅ |
@@ -437,13 +439,11 @@ tab4 是这条链的**读侧**，只有 14 行，业务上和 tab3 是一件事�
 | `results_single_compare.json` | Tab5 第三段读它（单品种动态 vs 固定） |
 | `results.json` / `results_single.json` / `results.md` / `compare3.md` | 中间产物与文字报告，应用不读 |
 
-## 3.5 `strategy/` — ⚠️ 名不副实
+## 3.5 `strategy/` — 策略文档
 
 | 路径 | 说明 |
 |---|---|
-| `strategy/core-strategy.md` | 策略详细文档。**应用完全不读它**（`grep strategy app.py` 零命中）。Tab6 显示的是**另一份硬编码在 app.py:1968–2041 的 markdown** |
-
-**后果**：同一份策略说明存在两个副本，会各自漂移。→ `BUG-026`
+| `strategy/core-strategy.md` | 策略说明**唯一事实源**。Tab6 启动时读它直接渲染（BUG-026 已修，内嵌副本已删） |
 
 ## 3.6 `deploy/` — 部署与外发
 
@@ -477,3 +477,4 @@ tab4 是这条链的**读侧**，只有 14 行，业务上和 tab3 是一件事�
 | 2026-08-17 | 记录三处**已修正的文档不实**：① CLAUDE.md 与旧 DEPLOY.md 都称 Tab6 读 `strategy/core-strategy.md`，实测 `grep strategy app.py` **零命中**；② 旧 Dockerfile 声明 `python:3.12-slim`，本机实测 **Python 3.14.4**；③ 旧 DEPLOY.md 称"每个用户有独立容器和数据目录，完全隔离"，实际所有用户共用一个 `data/transactions.csv` 和一块进程级缓存 | 文档说的和代码做的不一致，比没有文档更危险 |
 | 2026-08-17 | `deploy/` 删除 5 个 Docker 死文件（`Dockerfile` / `docker-compose.yml` / `nginx.conf` / `setup_user.sh` / `streamlit-config.toml`），§3.6 改写 | **主修 `BUG-012`**（Docker 那套从未成功构建过，自初始提交零迭代，却被标为"唯一事实源"）。**因为下面三个问题的成因全部落在被删的文件里，同一个动作连带修复了**：`BUG-005`（GCP 私钥被 `Dockerfile:21` 的 `COPY .streamlit/` 打进镜像层）、`BUG-013`（容器隔离与应用内登录两套多用户实现互相抵消）、`BUG-014`（`setup_user.sh:90` 的 sed 会把 nginx location 插到 server 块外面，加一个用户炸掉所有用户）。四条记录连带关系与验证结果都在 BUGLIST 里，**一条都没删** |
 | 2026-08-18 | **P0 清舱（BUG-001~004，commit `a1707a6` + `f02ff22`）**：① 认证门闸 fail-closed——`AUTH_MODE` 默认 `sheets`，secrets 缺失/损坏即拒启动，单机必须显式 `DCA_AUTH_MODE=local`；② 多租户隔离补齐另一半——`run_model` 缓存键含用户、引擎新增 `--user` 读 `data/users/<user>/`、`sync_local` 分目录落盘；③ 存储层 "empty ≠ error"——读故障抛 `SheetReadError`、写前快照 `<表名>_bak`（快照失败放弃写入）、本地轮转留底 10 份；④ PIN 升级 PBKDF2+随机盐、连续失败 5 次锁 15 分钟、旧 sha256 账号登录自动迁移、新 PIN 强制 6-8 位 | 四条 P0 全部经 1 对 1 确认后施工，43 项离线假连接测试全过 + 引擎双模式回归 + AppTest 双模式冒烟；确认记录/改动清单/验证输出均已回填 BUGLIST |
+| 2026-08-18 | **BUG-026+021 修复**：`strategy/core-strategy.md` 全量重写为 184 行合并版（技术骨架 + 原 Tab6 独有的家人友好开场、§4 闭环图、§8 回测结论诚实版、§12 隐私真话版）；`app.py` Tab6 删掉 75 行内嵌副本改为读文件渲染（1967–1974），app.py 2041→1974 行 | 同一份策略说明两个副本必然漂移（026）；隐私声明写的是"数据不上传任何地方"，实际全部存 Google Sheets（021）。现在 Tab6 直接渲染唯一事实源，改文档即改页面 |

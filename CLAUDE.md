@@ -21,7 +21,7 @@
 
 ```
 sp500-nasdaq100-gold-dca/
-├── app.py                    # Streamlit 主程序（⚠️ 2041 行，待拆分）
+├── app.py                    # Streamlit 主程序（⚠️ 1974 行，待拆分）
 ├── storage.py                # 存储层：Google Sheets 优先，本地 CSV 回退（603 行；含写前快照、PBKDF2 认证）
 ├── CHANGELOG.md              # 改动日志：每个 commit 一行（人读版流水，见第 12 条）
 ├── start-app.bat             # 本机双击启动 Streamlit
@@ -35,7 +35,7 @@ sp500-nasdaq100-gold-dca/
 │   ├── users/                # 云端模式每用户落盘缓存（不入库，sync_local 生成，覆盖前轮转留底 10 份）
 │   └── market_history/       # 行情缓存（date,close 两列，增量更新，7 个 csv）
 ├── strategy/
-│   └── core-strategy.md      # 策略详细文档（⚠️ 应用不读它，Tab6 的内容硬编码在 app.py:1968-2041，两份会各自漂移）
+│   └── core-strategy.md      # 策略说明唯一事实源（Tab6 启动时读它渲染，改文档即改页面）
 ├── backtest/                 # 一次性回测脚本 + 结果（2026-08-11 跑完，非运行时依赖）
 │   ├── backtest_dca.py / backtest_single.py / backtest_compare3.py  # ⚠️ 硬编码旧绝对路径，现在跑不起来
 │   └── results*.json / results.md / compare3.md   # Tab5「回测结果」读这里
@@ -78,7 +78,7 @@ app.py（UI + 业务逻辑，耦合较紧）
 
 | 问题 | 现状 | 计划 |
 |---|---|---|
-| **app.py 过长** | 2041 行，UI + 认证 + 业务 + 数据抓取混在一起 | 拆成 `src/ui/`、`src/tabs/`、`src/services/` |
+| **app.py 过长** | 1974 行，UI + 认证 + 业务 + 数据抓取混在一起 | 拆成 `src/ui/`、`src/tabs/`、`src/services/` |
 | 状态管理分散 | `st.session_state` 多处读写 | 集中管理 |
 
 **拆分方案（草案，动手前需重新核对行数与依赖）：**
