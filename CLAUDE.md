@@ -21,13 +21,13 @@
 
 ```
 sp500-nasdaq100-gold-dca/
-├── app.py                    # Streamlit 主程序（⚠️ 777 行，拆分进行中：BUG-020 已落 4/7 刀；剩记账 tab/侧栏/认证）
+├── app.py                    # Streamlit 主程序（⚠️ 663 行，拆分进行中：BUG-020 已落 5/7 刀；剩侧栏/认证）
 ├── storage.py                # 存储层：Google Sheets 优先，本地 CSV 回退（594 行；含写前快照、PBKDF2 认证）
 ├── src/                      # app.py 拆分新家（BUG-020，7 刀方案逐刀外搬中）
 │   ├── context.py            # 启动上下文：Paths / Decision / build_paths（73 行；code_dir 按 parent.parent 定位）
 │   ├── services/             # 服务层：model.py 模型调用（45）/ quotes.py 行情抓取（87）/ curves.py 曲线数据（85）
 │   ├── ui/                   # 样式与遮罩：styles.py 全局 CSS（186）/ overlays.py 三遮罩（60）
-│   └── tabs/                 # 只读 tab 渲染：today(94)/holdings(81)/history(29)/backtest(249)/strategy_doc(21)，各暴露 render(tab, ...)
+│   └── tabs/                 # 六个 tab 渲染：today(94)/holdings(81)/records(132，记账写链)/history(29)/backtest(249)/strategy_doc(21)，各暴露 render(tab, ...)
 ├── CHANGELOG.md              # 改动日志：每个 commit 一行带时刻（人读版流水，见第 12 条；scripts/changelog.py 维护）
 ├── start-app.bat             # 本机双击启动 Streamlit
 ├── logs/                     # 运行日志约定落点（*.log 不入库；Cloud 容器重启即失，实现见 BUG-017）
@@ -69,7 +69,7 @@ sp500-nasdaq100-gold-dca/
 app.py（UI + 业务逻辑，耦合较紧）
    │
    ├── import ──────→ src/（BUG-020 逐刀外搬：services 模型/行情/曲线、ui 样式/遮罩、
-   │                       tabs 五个只读 tab；函数显式收 src/context.Paths 等参数，
+   │                       tabs 全部六个 tab；函数显式收 src/context.Paths 等参数，
    │                       不读 app.py 模块级全局）
    │
    ├── subprocess ──→ scripts/dca_calculator.py（纯计算，完全独立）
@@ -90,7 +90,7 @@ app.py（UI + 业务逻辑，耦合较紧）
 
 | 问题 | 现状 | 计划 |
 |---|---|---|
-| **app.py 过长** | 777 行（原 1559；服务层 + CSS/遮罩 + 五个只读 tab 已搬 `src/`），认证 + 侧栏 + 记账 tab 仍混在一起 | 7 刀拆分中（BUG-020）：已落 4 刀，余 记账 tab → 侧栏 → 认证收口 |
+| **app.py 过长** | 663 行（原 1559；服务层 + CSS/遮罩 + 全部六个 tab 已搬 `src/`），认证 + 侧栏仍混在一起 | 7 刀拆分中（BUG-020）：已落 5 刀，余 侧栏 → 认证收口 |
 | 状态管理分散 | `st.session_state` 多处读写 | 集中管理 |
 
 **拆分方案（草案，动手前需重新核对行数与依赖）：**
