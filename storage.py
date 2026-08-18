@@ -1,28 +1,46 @@
 # -*- coding: utf-8 -*-
 """存储层：Google Sheets（云端多用户）优先，未配置 secrets 时回退本地 CSV（单机开发）。
 
-工作表结构（同一个 Google 表格，4 个 worksheet，所有数据表带 user 列做隔离）：
-- users:            name, pin_hash, created_at
+工作表结构（同一个 Google 表格，所有数据表带 user 列做隔离）：
+- users:            name, pin_hash, salt, hash_algo, role, fail_count, locked_until, created_at
 - transactions:     user, date, action, asset, symbol, currency, amount_rmb, price, shares, fee_rmb, fx_rate, notes
 - observations:     user, date, action, total_suggested_rmb, user_amount_rmb, decision_level, sp500_weight, ndx100_weight, gold_weight, reason, notes
 - budget_overrides: user, month, budget_rmb
+- <任意表>_bak:      写前快照（滚动单份，覆写前自动留底，见 _write_ws）
 
 设计要点：
 - Sheets 是唯一事实源；本地 CSV/JSON 只是给 dca_calculator 子进程用的同步缓存。
-- 写操作 = 先写 Sheets 再同步到本地缓存；sync_local() 会把云端该用户的数据落盘。
+- 写操作 = 先写 Sheets 再同步到本地缓存；sync_local() 会把云端该用户的数据落盘到 data/users/<user>/。
 - 回退模式（无 secrets）行为与旧版完全一致：纯本地 CSV，无用户概念。
+- 读失败与空表严格区分：读失败抛 SheetReadError，绝不伪装成空表（否则一次网络抖动 = 全表被覆写）。
+- 认证 fail-closed：PIN 用 PBKDF2+随机盐（旧 sha256 账号登录时自动迁移），连续失败 5 次锁 15 分钟。
 - 注意：Sheets 连接基于整表 read/update，并发写存在理论上的竞态；本工具面向极小团队，可接受。
 """
 
 import csv
 import hashlib
 import json
+import secrets
+import shutil
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
+
+try:
+    from gspread.exceptions import WorksheetNotFound as _WsNotFound
+except Exception:  # pragma: no cover - gspread 是 st-gsheets-connection 的硬依赖，本地纯 CSV 模式可能没装
+    _WsNotFound = None  # type: ignore[assignment]
+
+
+class SheetReadError(RuntimeError):
+    """Sheets 读取失败（网络/配额/凭据）。与「表真的是空的」严格区分——上层绝不可把它当空表继续写。"""
+
+
+class SheetWriteError(RuntimeError):
+    """Sheets 写入或写前快照失败（含快照失败触发的放弃写入）。"""
 
 TX_FIELDS = [
     "user",
@@ -52,20 +70,44 @@ OBS_FIELDS = [
     "notes",
 ]
 OVR_FIELDS = ["user", "month", "budget_rmb"]
-USER_FIELDS = ["name", "pin_hash", "role", "created_at"]
+USER_FIELDS = [
+    "name",
+    "pin_hash",
+    "role",
+    "created_at",
+    "salt",
+    "hash_algo",
+    "fail_count",
+    "locked_until",
+]
 
 TABLES = {"transactions": TX_FIELDS, "observations": OBS_FIELDS}
+
+# PIN 策略（BUG-004）：新 PIN 强制 6-8 位；存量 4-5 位旧账号不受影响，登录成功时自动迁移哈希。
+_PBKDF2_ITER = 200_000  # 2026-08-17 本机实测约 0.073s/次；换部署机应按 0.05-0.3s 目标重新标定
+_PIN_MIN, _PIN_MAX = 6, 8
+_LOCK_AFTER = 5  # 连续失败 5 次锁定
+_LOCK_MINUTES = 15
 
 
 # ---------- 后端探测 ----------
 
 
-def sheets_enabled() -> bool:
-    """secrets 里配置了 [connections.gsheets] 才启用云端模式。"""
+def sheets_status() -> str:
+    """后端三态：'ok' 已配置 / 'off' 未配置（合法单机）/ 'error' secrets 读取异常（配置损坏）。
+
+    「没配」和「读不出来」必须分开：前者是用户选的本地模式，后者是故障——
+    安全相关的判断只许信 'ok'（fail-closed，BUG-003）。"""
     try:
-        return "gsheets" in st.secrets.get("connections", {})
+        conns = st.secrets.get("connections", {})
     except Exception:
-        return False
+        return "error"
+    return "ok" if "gsheets" in conns else "off"
+
+
+def sheets_enabled() -> bool:
+    """secrets 里配置了 [connections.gsheets] 才启用云端模式；读取异常一律按未启用（不再静默吞错，状态可查 sheets_status）。"""
+    return sheets_status() == "ok"
 
 
 @st.cache_resource
@@ -97,8 +139,16 @@ _SHEET_CACHE: dict = {}
 _SHEET_CACHE_TTL = 8.0
 
 
+def _is_missing_ws(exc: Exception) -> bool:
+    """worksheet 不存在（首次使用还没建表）= 合法的空表，区别于读取故障。"""
+    return (_WsNotFound is not None and isinstance(exc, _WsNotFound)) or (
+        "WorksheetNotFound" in type(exc).__name__
+    )
+
+
 def _read_ws(name: str, fields: list, fresh: bool = False) -> pd.DataFrame:
-    """读整个 worksheet；不存在或为空时返回带表头的空表。fresh=True 绕过 8 秒短缓存强制新鲜读。"""
+    """读整个 worksheet；表不存在或为空时返回带表头的空表；读取故障抛 SheetReadError（BUG-002：绝不让"我不知道"伪装成"没有"）。
+    fresh=True 绕过 8 秒短缓存强制新鲜读。"""
     if fresh:
         _SHEET_CACHE.pop(name, None)
     _hit = _SHEET_CACHE.get(name)
@@ -106,8 +156,10 @@ def _read_ws(name: str, fields: list, fresh: bool = False) -> pd.DataFrame:
         return _hit[1].copy()
     try:
         df = _conn().read(worksheet=name, ttl=0)
-    except Exception:
-        return pd.DataFrame(columns=fields)
+    except Exception as e:
+        if _is_missing_ws(e):
+            return pd.DataFrame(columns=fields)
+        raise SheetReadError(f"读取工作表 {name} 失败：{e}") from e
     if df is None or df.empty:
         return pd.DataFrame(columns=fields)
     df = df.dropna(how="all")
@@ -120,19 +172,73 @@ def _read_ws(name: str, fields: list, fresh: bool = False) -> pd.DataFrame:
 
 
 def _write_ws(name: str, df: pd.DataFrame) -> None:
+    """整表覆写。写前先把当前内容快照到 <name>_bak（滚动单份，BUG-002 第二层）；
+    快照失败则放弃写入（fail-closed：宁可不写，不可无备份覆写）。"""
     _SHEET_CACHE.pop(name, None)  # 写后即时失效，下一次读拿最新
+    conn = _conn()
     try:
-        _conn().update(worksheet=name, data=df)
+        cur = conn.read(worksheet=name, ttl=0)
+    except Exception as e:
+        if _is_missing_ws(e):
+            cur = None  # 首次写这张表，没有可快照的内容
+        else:
+            raise SheetWriteError(f"写前读取 {name} 失败，已放弃写入：{e}") from e
+    if cur is not None and not cur.dropna(how="all").empty:
+        bak = f"{name}_bak"
+        try:
+            try:
+                conn.update(worksheet=bak, data=cur)
+            except Exception:
+                conn.create(worksheet=bak, data=cur)
+        except Exception as e:
+            raise SheetWriteError(f"写前快照 {bak} 失败，已放弃写入 {name}：{e}") from e
+        _SHEET_CACHE.pop(bak, None)
+    try:
+        conn.update(worksheet=name, data=df.fillna(""))
     except Exception:
-        # worksheet 不存在 → 创建
-        _conn().create(worksheet=name, data=df)
+        try:
+            conn.create(worksheet=name, data=df.fillna(""))
+        except Exception as e:
+            raise SheetWriteError(f"写入工作表 {name} 失败：{e}") from e
 
 
 # ---------- 用户（名字 + PIN）----------
 
 
 def _pin_hash(name: str, pin: str) -> str:
+    """旧格式（sha256_v1）：单轮 SHA256 无随机盐，仅为校验存量账号保留；新账号一律走 _new_pin_record。"""
     return hashlib.sha256(f"dca::{name.strip()}::{pin}".encode()).hexdigest()
+
+
+def _pin_hash_v2(pin: str, salt_hex: str) -> str:
+    """PBKDF2-HMAC-SHA256 + 每账号随机盐。慢是刻意的：把离线穷举成本抬高 20 万倍。"""
+    return hashlib.pbkdf2_hmac(
+        "sha256", pin.encode(), bytes.fromhex(salt_hex), _PBKDF2_ITER
+    ).hex()
+
+
+def _new_pin_record(pin: str) -> dict:
+    """新 PIN 的三字段（每账号独立随机盐；盐不需要保密，只需不可预测）。"""
+    salt = secrets.token_hex(16)
+    return {
+        "pin_hash": _pin_hash_v2(pin, salt),
+        "salt": salt,
+        "hash_algo": "pbkdf2_v1",
+    }
+
+
+def _parse_ts(s) -> "datetime | None":
+    try:
+        return datetime.fromisoformat(str(s))
+    except (TypeError, ValueError):
+        return None
+
+
+def _fail_count_of(row) -> int:
+    try:
+        return int(float(row.get("fail_count") or 0))
+    except (TypeError, ValueError):
+        return 0
 
 
 def _match_user(df: pd.DataFrame, name: str):
@@ -155,19 +261,53 @@ def list_users_fresh() -> list:
 
 
 def authenticate(name: str, pin: str):
-    """登录校验：一次新鲜读取 users 表完成 存在性/激活态/PIN 三重判断。
-    返回 (status, canon_name, names)；status ∈ ok|no_user|pending|bad_pin，
-    names 为这次新鲜读到的用户名列表（调用方拿来刷新会话缓存）。"""
+    """登录校验：一次新鲜读取 users 表完成 锁定/存在性/激活态/PIN 四重判断。
+    返回 (status, canon_name, names)；status ∈ ok|no_user|pending|bad_pin|locked，
+    names 为这次新鲜读到的用户名列表（调用方拿来刷新会话缓存）。
+    旧格式（sha256_v1）账号验证通过即自动迁移为 pbkdf2_v1（用户无感知）。"""
     df = _read_ws("users", USER_FIELDS, fresh=True)
     names = [n for n in df["name"].tolist() if n]
-    hit = df[_match_user(df, name)]
-    if hit.empty:
+    hit = _match_user(df, name)
+    if not hit.any():
         return "no_user", None, names
-    stored = hit.iloc[0]["name"]
-    if not hit.iloc[0]["pin_hash"]:
+    idx = df.index[hit][0]
+    row = df.loc[idx]
+    stored = row["name"]
+    # 锁定期内的账号无论 PIN 对错一律拒绝（限速是本层的第二道闸）
+    locked_until = _parse_ts(row.get("locked_until", ""))
+    if locked_until and datetime.now(timezone.utc) < locked_until:
+        return "locked", stored, names
+    if not row["pin_hash"]:
         return "pending", stored, names
-    if hit.iloc[0]["pin_hash"] != _pin_hash(stored, pin):
+    algo = row.get("hash_algo") or "sha256_v1"  # 空 = 旧格式账号
+    if algo == "sha256_v1":
+        ok = row["pin_hash"] == _pin_hash(stored, pin)
+    else:
+        ok = bool(row.get("salt")) and row["pin_hash"] == _pin_hash_v2(
+            pin, row["salt"]
+        )
+    if not ok:
+        fails = _fail_count_of(row) + 1
+        df.loc[idx, "fail_count"] = str(fails)
+        if fails >= _LOCK_AFTER:
+            df.loc[idx, "locked_until"] = (
+                datetime.now(timezone.utc) + timedelta(minutes=_LOCK_MINUTES)
+            ).isoformat(timespec="seconds")
+            df.loc[idx, "fail_count"] = "0"
+        _write_ws("users", df)
         return "bad_pin", stored, names
+    # 成功：清失败状态；旧格式顺手迁移成 PBKDF2（rehash on login）
+    dirty = False
+    if row.get("fail_count") or row.get("locked_until"):
+        df.loc[idx, "fail_count"] = ""
+        df.loc[idx, "locked_until"] = ""
+        dirty = True
+    if algo == "sha256_v1":
+        for k, v in _new_pin_record(pin).items():
+            df.loc[idx, k] = v
+        dirty = True
+    if dirty:
+        _write_ws("users", df)
     return "ok", stored, names
 
 
@@ -181,14 +321,14 @@ def verify_user(name: str, pin: str) -> bool:
 
 
 def create_user(name: str, pin: str, pin_confirm: str, role: str = "user"):
-    """返回 (ok, msg)。名字唯一（不区分大小写）；PIN 要求 4-8 位。role: user|admin"""
+    """返回 (ok, msg)。名字唯一（不区分大小写）；新 PIN 强制 6-8 位。role: user|admin"""
     name = (name or "").strip()
     if not name:
         return False, "名字不能为空"
     if pin != pin_confirm:
         return False, "两次输入的 PIN 不一致"
-    if not (4 <= len(pin or "") <= 8):
-        return False, "PIN 需要 4-8 位"
+    if not (_PIN_MIN <= len(pin or "") <= _PIN_MAX):
+        return False, f"PIN 需要 {_PIN_MIN}-{_PIN_MAX} 位"
     df = _read_ws("users", USER_FIELDS)
     if _match_user(df, name).any():
         return False, "这个名字已存在"
@@ -196,9 +336,11 @@ def create_user(name: str, pin: str, pin_confirm: str, role: str = "user"):
         [
             {
                 "name": name,
-                "pin_hash": _pin_hash(name, pin),
+                **_new_pin_record(pin),
                 "role": role,
                 "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                "fail_count": "",
+                "locked_until": "",
             }
         ]
     )
@@ -245,16 +387,19 @@ def set_pin(name: str, pin: str, pin_confirm: str):
     """用户首次激活时自己设置 PIN；仅当账号处于待激活状态才允许。"""
     if pin != pin_confirm:
         return False, "两次输入的 PIN 不一致"
-    if not (4 <= len(pin or "") <= 8):
-        return False, "PIN 需要 4-8 位"
+    if not (_PIN_MIN <= len(pin or "") <= _PIN_MAX):
+        return False, f"PIN 需要 {_PIN_MIN}-{_PIN_MAX} 位"
     df = _read_ws("users", USER_FIELDS)
     hit = _match_user(df, name)
     if not hit.any():
         return False, "用户不存在"
     if df.loc[hit, "pin_hash"].iloc[0]:
         return False, "该账号已激活，请联系管理员重置"
-    stored = df.loc[hit, "name"].iloc[0]
-    df.loc[hit, "pin_hash"] = _pin_hash(stored, pin)
+    rec = _new_pin_record(pin)
+    for k, v in rec.items():
+        df.loc[hit, k] = v
+    df.loc[hit, "fail_count"] = ""
+    df.loc[hit, "locked_until"] = ""
     _write_ws("users", df)
     return True, "ok"
 
@@ -269,12 +414,16 @@ def delete_user(name: str):
 
 
 def reset_pin(name: str):
-    """管理员重置：清空 PIN 回到待激活，用户下次登录重新自己设置。"""
+    """管理员重置：清空 PIN 回到待激活，用户下次登录重新自己设置；同时清掉锁定与旧算法标记。"""
     df = _read_ws("users", USER_FIELDS)
     hit = _match_user(df, name)
     if not hit.any():
         return False, "用户不存在"
     df.loc[hit, "pin_hash"] = ""
+    df.loc[hit, "salt"] = ""
+    df.loc[hit, "hash_algo"] = ""
+    df.loc[hit, "fail_count"] = ""
+    df.loc[hit, "locked_until"] = ""
     _write_ws("users", df)
     return True, "ok"
 
@@ -365,25 +514,37 @@ def set_override(user: str, month: str, budget_rmb: float) -> None:
 # ---------- 云端 → 本地缓存同步（供 dca_calculator 子进程读）----------
 
 
+def _rotate_backup(path: Path, keep: int = 10) -> None:
+    """覆盖前带时间戳**复制**留底（不是移动），滚动保留最近 keep 份（BUG-002 第三层）。"""
+    if not path.exists():
+        return
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    shutil.copy2(path, path.with_name(f"{path.stem}.{ts}.localbak"))
+    olds = sorted(path.parent.glob(f"{path.stem}.*.localbak"))
+    for old in olds[:-keep]:
+        old.unlink()
+
+
 def sync_local(user: str) -> None:
     """把云端该用户的 transactions/observations/budget_overrides 落盘成本地缓存。
 
-    覆盖前先备份一次（.localbak），防止误操作丢本地历史。
+    sheets 模式落在 data/users/<user>/ —— 每用户独立目录，两个用户同时在线也不会互相覆写（BUG-001）；
+    覆盖前先 _rotate_backup 留底。本地模式（无 secrets）不调用本函数。
     """
     if not sheets_enabled():
         return
+    base = _LOCAL_BASE / "users" / user
+    base.mkdir(parents=True, exist_ok=True)
     for table in TABLES:
         rows = read_rows(table, user)
-        path = _local_csv(table)
-        if path.exists() and not path.with_suffix(path.suffix + ".localbak").exists():
-            path.replace(path.with_suffix(path.suffix + ".localbak"))
-            # 备份后原路径会被重新写出
+        path = base / f"{table}.csv"
+        _rotate_backup(path)
         with path.open("w", newline="", encoding="utf-8") as f:
             w = csv.DictWriter(f, fieldnames=TABLES[table])
             w.writeheader()
             w.writerows(rows)
     ov = get_overrides(user)
-    _local_json("budget_overrides.json").write_text(
+    (base / "budget_overrides.json").write_text(
         json.dumps(ov, ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
