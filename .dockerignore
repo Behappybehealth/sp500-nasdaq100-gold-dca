@@ -1,3 +1,11 @@
+# Docker 方案当前未启用 —— deploy/ 下的 Dockerfile / docker-compose.yml /
+# nginx.conf / setup_user.sh 已于 2026-08-17 删除（git 历史里可取回，见 deploy/DEPLOY.md）。
+#
+# 本文件刻意保留：它是「将来谁再写 Dockerfile」时的安全默认。
+# 第一条规则最重要——GCP 私钥绝不能进镜像层，镜像层删不掉，只能不放进去。
+
+.streamlit/secrets.toml
+
 data/
 __pycache__/
 *.pyc

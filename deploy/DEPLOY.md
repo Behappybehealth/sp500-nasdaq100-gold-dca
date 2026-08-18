@@ -1,225 +1,69 @@
-# 📈 模拟定投决策台 · 部署指南
+# 部署与外发指南
 
-> 从零到上线的完整步骤。适用于 Oracle Cloud 永久免费实例、任何 Linux VPS、或本地电脑 + Cloudflare Tunnel。
-
----
-
-## 目录
-
-1. [服务器准备](#1-服务器准备)
-2. [安装 Docker](#2-安装-docker)
-3. [上传代码](#3-上传代码)
-4. [首次构建](#4-首次构建)
-5. [添加用户](#5-添加用户)
-6. [域名与 HTTPS（可选）](#6-域名与-https可选)
-7. [日常运维](#7-日常运维)
-8. [0 费用方案详解](#8-0-费用方案详解)
+> 2026-08-17 重写。**只写真实在用的路径。**
+> 原先那套 Oracle Cloud + Docker + nginx 多容器方案已删除（原因见文末「为什么删掉 Docker 那套」）。
 
 ---
 
-## 1. 服务器准备
+## 1. 三条路径，现状
 
-### Oracle Cloud 永久免费（推荐）
-
-注册地址：https://cloud.oracle.com/signup
-
-免费套餐规格：
-- **4 核 ARM CPU**（Ampere A1）
-- **24 GB 内存**
-- **200 GB 存储**
-- **每月 10 TB 出站流量**
-- **永久免费**，不会过期
-
-选择镜像时选 **Ubuntu 22.04 (aarch64)**。
-
-> ⚠️ 注册需要信用卡验证（不扣费），选 Always Free 资源。
-
-### 其他免费方案
-
-| 平台 | 免费额度 | 有效期 | 备注 |
-|---|---|---|---|
-| Google Cloud | $300 赠金 | 12 个月 | e2-micro 实例 |
-| AWS | t2.micro | 12 个月 | 到期后收费 |
-| Cloudflare Tunnel | 无限流量 | 永久 | 需要一台能开机的电脑 |
+| 路径 | 状态 | 用途 |
+|---|---|---|
+| **Streamlit Community Cloud** | ✅ **生产环境，唯一在线路径** | https://dca365.streamlit.app/ |
+| **本机直跑** | ✅ 开发调试 | `.venv/Scripts/streamlit run app.py` → localhost:8501 |
+| **ngrok 固定域名** | ✅ 临时给人看 | 本机开着时把 8501 发到公网 |
 
 ---
 
-## 2. 安装 Docker
+## 2. Streamlit Community Cloud（生产）
 
-SSH 登录服务器后执行：
+**部署机制：推 `main` 分支即自动重新部署。** 没有额外的构建步骤、没有 Dockerfile 参与。
 
 ```bash
-# 安装 Docker + Docker Compose
-curl -fsSL https://get.docker.com | sh
-
-# 验证
-docker --version
-docker compose version
-
-# 把自己加入 docker 组（免 sudo）
-sudo usermod -aG docker $USER
-# 重新登录 SSH 使组生效
+git push origin main
+# 平台检测到新提交 → 自动拉取 → 装 requirements.txt → 重启应用
 ```
+
+### 需要在平台后台配置的东西
+
+| 配置项 | 位置 | 说明 |
+|---|---|---|
+| **GCP 服务账号凭据** | share.streamlit.io → 应用 ⋮ → Settings → Secrets | 内容同本机 `.streamlit/secrets.toml`。**凭据不在 git 里**，换机器/重建应用时要手动贴进去 |
+| **自定义子域** | Settings → General → App URL | 已设为 `dca365`（2026-08-14 生效） |
+| **公开访问** | Settings → Sharing → public | 必须 public。默认私有会要求访问者先登录有权限的 Streamlit 账号，家人打不开 |
+
+> ⚠️ **应用已 public，意味着应用内的「名字 + PIN」门闸是唯一防线。**
+> 这道门闸目前的失效方向和强度问题见 [`BUG-003`](../docs/BUGLIST.md#bug-003认证是-fail-open-的门闸可以整体消失) / [`BUG-004`](../docs/BUGLIST.md#bug-004pin-的保护强度撑不住公开部署)。
+
+### 已知的平台侧限制
+
+- **时区是 UTC**，用户在 UTC+8。代码里没有任何时区定义，`date.today()` 直接取进程时区 → **北京时间每天 00:00–07:59**，服务端的「今天」仍停在前一天。（[`BUG-008`](../docs/BUGLIST.md#bug-008今天是模糊的--重复投的钱洞)，未修）
+- **单进程服务所有用户**，所以 `st.cache_data` 是全用户共用的。（[`BUG-001`](../docs/BUGLIST.md#bug-001跨用户数据串号)，未修）
+- 平台没有日志留存、没有告警。线上炸了只能等人告诉你。（[`BUG-017`](../docs/BUGLIST.md#bug-017可观测性全空线上炸了只能等人告诉你)，未修）
 
 ---
 
-## 3. 上传代码
+## 3. 本机开发
 
 ```bash
-# 在服务器上创建项目目录
-mkdir -p ~/dca-sim && cd ~/dca-sim
+cd X:/coding/projects/sp500-nasdaq100-gold-dca
+.venv/Scripts/streamlit run app.py
 
-# 从你的电脑上传（在你本地电脑执行）
-scp -r /x/coding/projects/sp500-nasdaq100-gold-dca/*  用户名@服务器IP:~/dca-sim/
-
-# 或者用 Git（推荐，仓库是私有的，需要凭据）
-git clone https://github.com/Behappybehealth/sp500-nasdaq100-gold-dca.git ~/dca-sim
-cd ~/dca-sim
+# 或双击项目根目录的 start-app.bat
 ```
 
-> ⚠️ 走 Git 的话，`.streamlit/secrets.toml`（GCP 凭据）不在库里，必须单独传上去，
-> 否则存储层会回退到本地 CSV，多用户共享数据就失效了。
+单跑计算引擎（不起网页）：
 
-项目目录结构：
+```bash
+.venv/Scripts/python.exe scripts/dca_calculator.py --base-dir .
+```
 
-```
-~/dca-sim/
-├── app.py                  # Streamlit 应用
-├── storage.py              # 存储层（Google Sheets / 本地 CSV）
-├── requirements.txt        # Python 依赖
-├── scripts/
-│   └── dca_calculator.py   # 策略引擎
-├── data/
-│   ├── config.json         # 默认配置
-│   ├── market_history/     # 行情缓存（增量更新，别删）
-│   └── user1/              # 用户数据（部署后生成）
-├── backtest/               # 回测脚本与结果（Tab5 读这里）
-├── strategy/               # 策略文档（Tab6 读这里）
-└── deploy/
-    ├── Dockerfile          # 容器镜像
-    ├── docker-compose.yml  # 多用户编排
-    ├── nginx.conf          # 反向代理
-    ├── setup_user.sh       # 新用户脚本
-    └── streamlit-config.toml
-```
+**本机环境实况（2026-08-17 实测）**：Python 3.14.4 / streamlit 1.61.1 / pandas 3.0.5 / numpy 2.5.2 / yfinance 1.6.0 / gspread 5.12.4。
+`requirements.txt` 里全是无上界的 `>=`（如 `pandas>=2.0.0`），**与实装版本差很远，等于没有可复现性**。（[`BUG-015`](../docs/BUGLIST.md#bug-015零测试零-ci依赖不钉版本回测脚本全是坏的)，未修）
 
 ---
 
-## 4. 首次构建
-
-```bash
-cd ~/dca-sim
-
-# 首次需要初始化一个默认用户（你自己）
-mkdir -p data/me/data/market_history
-cp data/config.json data/me/data/config.json
-echo "date,action,asset,symbol,currency,amount_rmb,price,shares,fee_rmb,fx_rate,notes" > data/me/data/transactions.csv
-echo "date,action,total_suggested_rmb,user_amount_rmb,decision_level,sp500_weight,ndx100_weight,gold_weight,reason,notes" > data/me/data/observations.csv
-
-# 构建镜像（首次约 2-3 分钟）
-docker compose -f deploy/docker-compose.yml build
-
-# 启动
-docker compose -f deploy/docker-compose.yml up -d
-
-# 检查状态
-docker compose -f deploy/docker-compose.yml ps
-```
-
-访问 `http://服务器IP/user1/` 即可看到界面。
-
----
-
-## 5. 添加用户
-
-### 方法 A：自动脚本（推荐）
-
-```bash
-cd ~/dca-sim
-chmod +x deploy/setup_user.sh
-
-# 添加用户 zhangsan，月预算 30000
-./deploy/setup_user.sh zhangsan 30000
-
-# 添加用户 lisi，月预算 45000
-./deploy/setup_user.sh lisi 45000
-```
-
-脚本会自动：创建数据目录 → 复制配置 → 更新 docker-compose → 更新 nginx → 重启服务。
-
-用户访问地址：
-- zhangsan → `http://服务器IP/zhangsan/`
-- lisi → `http://服务器IP/lisi/`
-
-### 方法 B：手动添加
-
-1. 复制 `data/user1/` 目录为 `data/新用户名/`
-2. 编辑 `deploy/docker-compose.yml`，复制 user1 服务块并改名
-3. 编辑 `deploy/nginx.conf`，复制 location 块并改路径
-4. `docker compose -f deploy/docker-compose.yml up -d --build`
-
-### 删除用户
-
-```bash
-# 停止容器
-docker compose -f deploy/docker-compose.yml stop <服务名>
-
-# 删除容器
-docker compose -f deploy/docker-compose.yml rm -f <服务名>
-
-# 手动从 docker-compose.yml 和 nginx.conf 中删除对应块
-# 备份用户数据后删除目录
-mv data/用户名 data/_archived_用户名
-```
-
----
-
-## 6. 域名与 HTTPS（可选）
-
-### 有域名
-
-```bash
-# 1. 在域名 DNS 添加 A 记录指向服务器 IP
-# 2. 安装 certbot
-sudo apt install certbot python3-certbot-nginx
-
-# 3. 修改 nginx.conf 中 server_name 为你的域名
-# 4. 申请证书
-sudo certbot --nginx -d dca.yourdomain.com
-
-# 5. 自动续期（certbot 已配置 cron）
-sudo certbot renew --dry-run
-```
-
-### 无域名（Cloudflare Tunnel）
-
-```bash
-# 1. 注册 Cloudflare 账号（免费）
-# 2. 在服务器上安装 cloudflared
-curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64 -o cloudflared
-chmod +x cloudflared
-sudo mv cloudflared /usr/local/bin/
-
-# 3. 登录
-cloudflared tunnel login
-
-# 4. 创建隧道
-cloudflared tunnel create dca-sim
-
-# 5. 配置隧道
-cat > ~/.cloudflared/config.yml << EOF
-tunnel: dca-sim
-ingress:
-  - hostname: dca-sim.your-subdomain.cfargotunnel.com
-    service: http://localhost:80
-  - service: http_status:404
-EOF
-
-# 6. 启动
-cloudflared tunnel run dca-sim
-```
-
-### 本机临时外发（ngrok 固定域名）
+## 4. ngrok 临时外发
 
 `deploy/start-dca-tunnel.bat` —— 本机开着 Streamlit（8501）时，双击即把它发到公网固定地址
 `https://sudoku-manhood-argue.ngrok-free.dev`。脚本会先查 ngrok 是否已在跑，避免重复启动。
@@ -228,146 +72,73 @@ cloudflared tunnel run dca-sim
 脚本用 `%~dp0bin\ngrok.exe` 相对定位，PATH 作兜底——**全程无绝对路径**，项目搬到哪都能跑。
 换机器只需去 https://ngrok.com/download 重新下一个丢进 `deploy/bin/`。
 
+> ⚠️ **`deploy/bin/ngrok.exe` 不在 git 里，删掉无法从版本库恢复**，只能重新下载。
+
 **唯一留在 C 盘的东西：** ngrok 的 authtoken 在 `%LOCALAPPDATA%\ngrok\ngrok.yml`，
 那是 ngrok 自己写死的配置位置，搬不走。换机器要重跑一次 `ngrok config add-authtoken <token>`。
 
-**改这个 bat 时注意：只能用 ASCII。** cmd.exe 按 OEM 码页（中文 Windows 是 936）读批处理文件，
-UTF-8 中文注释会被误读，cmd 可能把乱码碎片当命令去执行——这个坑只在双击运行时才现形，
-在编辑器里看不出来。中文说明一律写在本文档里，不要写进 bat。
+### 改这个 bat 时注意：只能用 ASCII
 
-这条路子只适合临时给人看，机器一关就断；长期在线走上面的 Cloudflare Tunnel 或 Streamlit Community Cloud。
-（`cloudflared.exe` 本机没配过，已收到 `X:\coding\tools\bin\` 作通用工具备用。）
+cmd.exe 按 OEM 码页（中文 Windows 是 936）读批处理文件，UTF-8 中文注释会被误读，
+cmd 可能把乱码碎片当命令去执行——**这个坑只在双击运行时才现形，在编辑器里看不出来**。
+中文说明一律写在本文档里，不要写进 bat。
 
----
+### 这条路子的边界
 
-## 7. 日常运维
-
-### 查看日志
-
-```bash
-# 所有服务
-docker compose -f deploy/docker-compose.yml logs --tail 50
-
-# 单个用户
-docker logs dca-zhangsan --tail 20
-```
-
-### 更新代码
-
-```bash
-cd ~/dca-sim
-# 上传新代码或 git pull
-docker compose -f deploy/docker-compose.yml up -d --build
-```
-
-### 备份
-
-```bash
-# 备份所有用户数据
-tar -czf backup_$(date +%Y%m%d).tar.gz data/
-
-# 恢复
-tar -xzf backup_20260812.tar.gz
-```
-
-### 资源监控
-
-```bash
-# 查看各容器内存占用
-docker stats --no-stream
-
-# Oracle 免费实例 24GB 内存，每个用户约 200-300MB
-# 理论可支撑 50-80 个并发用户
-```
-
-### 防火墙
-
-```bash
-# Oracle Cloud 需要开放端口
-# 1. 在 Oracle 控制台 → 网络 → 安全列表 → 添加入站规则 TCP 80, 443
-# 2. 服务器本机
-sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 80 -j ACCEPT
-sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 443 -j ACCEPT
-sudo netfilter-persistent save
-```
+机器一关就断，只适合临时给人看。**这个脚本会把 8501 端口发到公网**——运行前确认你真的想让外面的人访问。
 
 ---
 
-## 8. 0 费用方案详解
+## 5. 为什么删掉 Docker 那套
 
-### 方案 A：Oracle Cloud 永久免费（⭐推荐）
+2026-08-17 删除了 `deploy/Dockerfile`、`docker-compose.yml`、`nginx.conf`、`setup_user.sh`、`streamlit-config.toml`。
 
-**适合**：正式运营，需要稳定公网访问
+**理由：它从来没有成功跑过一次。** 铁证是这几个文件自 `574c7a7`（2026-08-12 初始提交）起**一行未改** —— 真跑过的东西不可能零迭代。而它当时被 CLAUDE.md 标为「部署指南（唯一事实源）」，是最危险的一种技术债：**看起来是备用方案，实际是三道死墙**。
 
-| 项目 | 费用 |
+照原文档走会连撞：
+
+| 墙 | 具体问题 |
 |---|---|
-| Oracle Cloud ARM 实例 | ¥0（永久） |
-| 域名（可选） | ¥0~70/年 |
-| HTTPS（Let's Encrypt） | ¥0 |
-| **合计** | **¥0~70/年** |
+| 镜像里没有 `storage.py` | Dockerfile 只 COPY `app.py` / `scripts/` / `.streamlit/`，而 `app.py:22` 就 `import storage` → 启动即 `ModuleNotFoundError`。配上 `restart: unless-stopped` = 无限崩溃重启 |
+| build context 错位 | compose 写 `context: .` + `dockerfile: deploy/Dockerfile`，而文档全程用 `-f deploy/docker-compose.yml` → 解析成 `deploy/deploy/Dockerfile`，构建立刻失败 |
+| 挂载路径对不上 | 文档教你建 `data/me/`，compose 挂的是 `./data/user1` → 容器里读不到 config.json，`SystemExit` |
 
-**注册步骤**：
-1. 访问 https://cloud.oracle.com/signup
-2. 选择 Home Region（建议选日本/韩国/新加坡，国内访问较快）
-3. 创建 Always Free 的 VM.Standard.A1.Flex 实例（4核24G）
-4. 开放安全列表 80/443 端口
-5. SSH 登录后按本文第 2 步开始部署
+**`BUG-012` 的修复动作同时连带解决的真实风险：**
 
-### 方案 B：家里电脑 + Cloudflare Tunnel
+- **GCP 私钥不再会被烤进镜像层。** `.dockerignore` 没排除 `.streamlit/`，而 `Dockerfile:21` COPY 整个目录。镜像层是只读堆叠的，后面 `rm` 掉前面那层还在，**「打包进去再删」是无效的**。没有 Dockerfile = 没有这条外泄路径。
+- **`setup_user.sh` 不会再炸配置。** 它用 `sed "/^}$/r ..."` 插 nginx location 块，而文件里第一个独占一行的 `}` 是 **upstream 块的收尾**，不是 server 块的 → location 被插到 server 块外面 → nginx 报 `location directive is not allowed here`，**完全起不来**。加一个用户 = 所有用户下线。
+- **两套互相抵消的多用户实现收敛成一套。** 原先「一用户一容器一目录」和「应用内登录 + Sheets 行隔离」并存，但所有容器 COPY 的是同一份 service account、指向同一个表格 —— 容器隔离是纯废重量，且 nginx 路径与 Sheets 用户名毫无绑定，任何人从任意 `/xxx/` 路径都能登任何账号。现在只剩应用内登录这一套。
+- **原文档里那句不实陈述一并删掉了**：「用户能互相看到数据吗？不能，每个用户有独立的容器和数据目录，完全隔离。」—— 真实情况是所有用户共用一个 `data/transactions.csv` 和一块进程级缓存（[`BUG-001`](../docs/BUGLIST.md#bug-001跨用户数据串号)）。
 
-**适合**：不想注册云、有闲置电脑/树莓派
+### 将来真要用 Docker 的话
 
-| 项目 | 费用 |
-|---|---|
-| 家里电脑（已有） | ¥0 |
-| Cloudflare Tunnel | ¥0（永久） |
-| 电费 | 忽略不计 |
-| **合计** | **¥0** |
+**取回旧文件：**
 
-**原理**：Cloudflare Tunnel 从你家电脑反向连接到 Cloudflare 全球 CDN，用户通过 Cloudflare 的 URL 访问，不需要公网 IP、不需要端口映射。
+```bash
+git show 574c7a7:deploy/Dockerfile          # 看
+git checkout 574c7a7 -- deploy/Dockerfile   # 取回
+```
 
-**步骤**：
-1. 在家里电脑安装 Docker + 启动服务
-2. 安装 cloudflared
-3. 创建隧道 → 得到一个 `xxx.cfargotunnel.com` 地址
-4. 把这个地址发给用户
+**但建议重写而不是取回**，因为那份有上面三道墙。重写时的必守清单：
 
-### 方案 C：Google Cloud 赠金
-
-**适合**：临时测试，12 个月有效
-
-1. 注册 Google Cloud，获得 $300 赠金
-2. 创建 e2-medium 实例（2核4G）
-3. 12 个月内免费使用
+1. **COPY 清单必须含 `storage.py`**（当年就漏了这个）
+2. **`.streamlit/secrets.toml` 绝不进镜像层**。`.dockerignore` 已经保留并把它列在第一条了 —— 凭据走运行时挂载或环境变量注入
+3. **设 `TZ=Asia/Shanghai`**（当年 Dockerfile 和 compose 都没设，是 [`BUG-008`](../docs/BUGLIST.md#bug-008今天是模糊的--重复投的钱洞) 的一部分成因）
+4. **`FROM` 钉住 digest**，不要用 `python:3.12-slim` 这种浮动 tag。且注意本机已经是 **Python 3.14.4**，pandas 3.0.5 —— 镜像里装 3.12 会得到完全不同的依赖解析
+5. **COPY 要带上 `strategy/`、`backtest/`、`data/market_history/`**，否则 Tab5 是空的、每个用户从冷缓存起步（`.dockerignore` 现在还排除着 `backtest*/` 和 `*.md`，重启 Docker 时要一并复核）
+6. **每用户独立 `--base-dir`**。这个机制在代码里已经就绪（`app.py` 和 `dca_calculator.py` 都支持 `--base-dir`），与 Docker 无关，不需要容器也能用
+7. **`nginx -t` 必须在 reload 之前跑**，且改配置前先备份
 
 ---
 
-## 费用与容量估算
+## 6. 备份现状（⚠️ 缺口）
 
-| 用户数 | Oracle 免费实例 | 每月成本 |
-|---|---|---|
-| 1-10 | 绰绰有余 | ¥0 |
-| 10-30 | 轻松运行 | ¥0 |
-| 30-80 | 接近上限（内存） | ¥0 |
-| 80+ | 需要升级或加机器 | 另算 |
+**线上真正的数据在 Google Sheets，项目目前没有自己可控、自动执行且验证过可恢复的备份。** Google Sheets 的平台版本历史可能是最后一道救命绳，但它不等于本项目已经建立了备份制度。
 
-按 ¥9.9/月定价，**3 个付费用户**就能覆盖一年的域名费用，其余全是利润。
+`storage.py` 自称 Sheets 是「唯一事实源」，但：
 
----
+- 没有项目侧自动导出、命名快照、保留周期和恢复演练；只能被动依赖平台可能提供的版本历史
+- 本地 `data/*.localbak` 是**假保护** —— 判断条件是「备份文件不存在时才备份」，所以它只在第一次同步时生成过一次，永远是最早那一份；而且用的是移动（`replace`）不是复制
+- 一次 Sheets 读取失败就会让整张表被一行覆盖（[`BUG-002`](../docs/BUGLIST.md#bug-002一次读取失败--全部历史被覆盖)），**且没有恢复路径**
 
-## 常见问题
-
-**Q: 用户数据会丢吗？**
-A: 不会。数据在 `data/用户名/` 目录，容器重启不丢数据。建议每周备份一次。
-
-**Q: 用户能互相看到数据吗？**
-A: 不能。每个用户有独立的容器和数据目录，完全隔离。
-
-**Q: 用户自己能看到别人吗？**
-A: 用户只能访问自己的 URL 路径（如 `/zhangsan/`），nginx 只转发到自己的容器。
-
-**Q: 东财行情抓不到怎么办？**
-A: 代码有 3 次重试 + 缓存兜底 + GC=F 期货估算三级 fallback。服务器上装好 curl 即可。
-
-**Q: 可以放在国内服务器吗？**
-A: 可以，但域名需要备案。Oracle Cloud 海外节点不需要备案。
+这是当前最急的缺口之一，完整成因、修复路径与验证标准见 [`BUG-002`](../docs/BUGLIST.md#bug-002一次读取失败--全部历史被覆盖) 和 [`BUG-018`](../docs/BUGLIST.md#bug-018事实源没有项目级可恢复备份)。

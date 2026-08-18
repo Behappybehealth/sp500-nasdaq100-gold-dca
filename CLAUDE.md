@@ -33,17 +33,18 @@ sp500-nasdaq100-gold-dca/
 │   ├── observations.csv      # 跳过/观察记录（不入库）
 │   └── market_history/       # 行情缓存（date,close 两列，增量更新，7 个 csv）
 ├── strategy/
-│   └── core-strategy.md      # 策略详细文档
+│   └── core-strategy.md      # 策略详细文档（⚠️ 应用不读它，Tab6 的内容硬编码在 app.py:1910-1984，两份会各自漂移）
 ├── backtest/                 # 一次性回测脚本 + 结果（2026-08-11 跑完，非运行时依赖）
-│   ├── backtest_dca.py / backtest_single.py / backtest_compare3.py
+│   ├── backtest_dca.py / backtest_single.py / backtest_compare3.py  # ⚠️ 硬编码旧绝对路径，现在跑不起来
 │   └── results*.json / results.md / compare3.md   # Tab5「回测结果」读这里
 ├── docs/
-│   └── plans/                # 历史实现计划（3 份，随机命名，仅存档）
-├── deploy/                   # Docker + nginx 多用户部署
-│   ├── DEPLOY.md             # 部署指南（唯一事实源）
-│   ├── Dockerfile / docker-compose.yml / nginx.conf / setup_user.sh
+│   ├── ARCHITECTURE.md       # 架构唯一事实源（架构变动必须同期更新）
+│   ├── BUGLIST.md            # 问题唯一事实源（逐条确认后才可修复）
+│   └── plans/                # 计划、设计与历史审计快照
+├── deploy/                   # 部署与外发（Docker 那套已于 2026-08-17 删除，见 DEPLOY.md 第 5 节）
+│   ├── DEPLOY.md             # 部署指南：Cloud（生产）/ 本机 / ngrok
 │   ├── start-dca-tunnel.bat  # ngrok 固定域名外发（⚠️ 只能写 ASCII，见 DEPLOY.md）
-│   └── bin/                  # ngrok.exe（33 MB，随项目走但不入库）
+│   └── bin/                  # ngrok.exe（33 MB，随项目走但不入库，删了只能重下）
 └── .streamlit/
     ├── config.toml           # 主题配置
     └── secrets.toml          # GCP 凭据（不入库）
@@ -126,8 +127,9 @@ cd X:/coding/projects/sp500-nasdaq100-gold-dca
 5. **数据文件不入库**（transactions / observations / budget_overrides / secrets），改动它们不需要 commit。
 6. **`deploy/bin/` 不入库但必须留在项目内**，隧道脚本靠 `%~dp0bin\ngrok.exe` 相对定位找它。
 7. **`deploy/start-dca-tunnel.bat` 只能写 ASCII**——cmd 按 OEM 码页（936）读批处理，UTF-8 中文注释会被当乱码命令执行。中文说明写进 `deploy/DEPLOY.md`。
-8. **全项目零绝对路径**，保持这个性质，搬目录才不会断。
+8. **全项目零绝对路径**，保持这个性质，搬目录才不会断。（⚠️ `backtest/*.py` 三个脚本目前违反这条，写死了已失效的 `~/.claude/skills/...`，待修）
 9. **提交信息用 Conventional Commits**（`feat:` / `fix:` / `refactor:` / `chore:`）。
+10. **动手前先读 `docs/ARCHITECTURE.md` 与 `docs/BUGLIST.md`** —— 前者是架构唯一事实源，后者是问题唯一事实源。`BUGLIST.md` 中每条问题必须先完成“1 对 1 确认修复路径”并回填确认记录，才允许修改真实逻辑；修复后必须回填实际改动、修复日期和真实验证结果。
 
 ---
 
