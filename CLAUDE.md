@@ -87,6 +87,24 @@ app.py（UI + 业务逻辑，耦合较紧）
 
 ---
 
+## 技术栈速览
+
+| 层 | 技术 | 改代码时要知道的 |
+|---|---|---|
+| 语言 | Python 3.14.4（`.venv`） | `requirements.txt` 未声明 Python 版本 |
+| UI | Streamlit 1.61.1 | **每次交互整个脚本从头重跑**；`st.cache_data` 全进程共享（缓存键必须含用户）、`st.session_state` 每标签页一份 |
+| 数据 | pandas 3.0.5 + numpy 2.5.2 | pandas 3 是大版本，与 2 有不兼容改动 |
+| 存储 | Google Sheets（gspread 5.12.4），本地 CSV 回退 | 只能整表读、整表写；读写一律走 `storage.py` |
+| 行情 | Yahoo Chart v8（`urllib`）→ yfinance 兜底；东财 push2（`curl`） | 全是非官方接口、无 key；Chart 用原始 close、yfinance 自动复权，两路径口径不一致 |
+| 认证 | 自写「名字 + PIN」 | PBKDF2-HMAC-SHA256（20 万迭代 + 随机盐），fail-closed |
+| 引擎 | 独立脚本 + subprocess | 见上「架构」；行情快照 `quote_snapshot.json` TTL 600s |
+| 部署 | Streamlit Community Cloud（推 main 自动部署） | **容器时区 UTC**：`date.today()` 在北京时间 00:00–07:59 仍停在前一天 |
+| 格式 | ruff | 有格式化痕迹，无 CI 强制 |
+
+全表与版本复核日期见 `docs/ARCHITECTURE.md` §2。
+
+---
+
 ## 已知技术债
 
 | 问题 | 现状 | 计划 |
