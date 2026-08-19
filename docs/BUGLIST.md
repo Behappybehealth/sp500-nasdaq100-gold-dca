@@ -899,7 +899,7 @@ wide_table_markdown 非空 ✅   warnings 数量 = 0 ✅   stderr 为空 ✅
 
 #### 🔧 实际修复
 
-> **2026-08-19 修复（commit 见尾随回填）**：
+> **2026-08-19 修复（commit `d24c946`）**：
 > 1. **新增 `src/dates.py`**：`biz_today()` 固定 UTC+8；引擎侧同规则实现在 [dca_calculator.py:36-53](../scripts/dca_calculator.py#L36-L53)（含 `is_iso_date()`），两处 docstring 互指"必须同改"。
 > 2. **换源 11 处**：引擎 7 处 + UI 4 处全部 `date.today()` → `biz_today()`（records.py 记账默认日期×2、sidebar.py 预算月份×2、holdings.py 近一年窗口顺手统一并清理为 f-string）；dca_action.py 三处默认值改从引擎 import `biz_today`（同目录单一实现，无第三份拷贝）。修复后代码区 `date.today()` 清零（残留仅 docstring 与文档的说明性提及）。
 > 3. **去重**：`storage.append_row(table, user, row, force=False)`——transactions 写入前查 `(user,date,asset,action)`，撞重抛 `ValueError("重复记录：…确认为新一笔请显式覆盖写入")`；records.py 捕获后挂 `tx_dup` 警告 + 「仍要写入（确认是新一笔）」按钮走 `force=True`；dca_action.py 加 `--force` 透传、`ValueError` 原样透出（Skill 据文案决定是否重试）。
