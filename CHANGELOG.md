@@ -5,8 +5,14 @@
 > 格式：按日期分组、新在上（组内也按时刻新在上）；每条 `HH:MM:SS [类型] 一句话（commit hash；关联编号）`。
 > 时刻取自 git commit 时间（本地时区），非手写：用 `scripts/changelog.py add <hash>` 生成行、`--check` 校验全覆盖与时刻正确。一行多 hash 时行首时刻对第一个 hash 负责。
 
+## 2026-08-19
+
+- 14:14:44 [文档] 清扫 BUG-020/001/002/003/012 施工期注释，收敛为常态说明（`7618bf3`）
+- 14:14:27 [修复] 引擎行情快照复用 + 金额输入 form 化，模型不再白跑第二遍（`e3facd7`；BUG-024）
+
 ## 2026-08-18
 
+- 21:43:14 [功能] 新增 dca_action.py 业务动作 CLI，Skill 与 Web 共用 storage 业务层（`38ff559`；BUG-022）
 - 19:59:05 [重构] 认证门闸搬 src/ui/auth.py，app.py 385→78 纯装配层（BUG-020 刀 7/7，拆分收官）（`85f3c3d`）
 - 19:42:59 [重构] 侧边栏搬 src/ui/sidebar.py 返回 Decision，app.py 663→385（`32a17e3`；BUG-020 刀 6/7）
 - 19:25:17 [重构] tab3 记账写链搬 src/tabs/records.py，app.py 777→663（`60f119a`；BUG-020 刀 5/7）
