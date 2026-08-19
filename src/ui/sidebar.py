@@ -7,12 +7,11 @@ _quote_html / _fail_html / current_budget_display 为模块级纯辅助（不闭
 """
 from __future__ import annotations
 
-from datetime import date
-
 import storage
 import streamlit as st
 
 from ..context import Decision, Paths
+from ..dates import biz_today
 from ..services.model import run_model
 from ..services.quotes import fetch_btc, fetch_xau_spot
 from .overlays import show_loading
@@ -52,7 +51,7 @@ def _fail_html(name):
 def current_budget_display(user, config):
     try:
         overrides = storage.get_overrides(user)
-        month = date.today().strftime("%Y-%m")
+        month = biz_today().strftime("%Y-%m")
         keys = [k for k in overrides if isinstance(k, str) and k <= month]
         if keys:
             return float(overrides[max(keys)])
@@ -261,7 +260,7 @@ def render(paths: Paths, user: str) -> Decision:
                 st.error("预算金额无效，未保存")
             else:
                 try:
-                    storage.set_override(user, date.today().strftime("%Y-%m"), _bval)
+                    storage.set_override(user, biz_today().strftime("%Y-%m"), _bval)
                 except Exception as _e:
                     st.error(f"预算保存失败：云端存储暂时不可用（{_e}）。数据未被覆盖，请稍后重试。")
                 else:

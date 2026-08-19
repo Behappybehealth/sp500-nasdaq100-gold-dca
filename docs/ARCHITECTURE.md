@@ -140,6 +140,8 @@ tab3  用户回报成交 → session_state["pending_tx"] 暂存 → 复述确认
 tab4  storage.read_rows() 两张表原样展示
 ```
 
+append_row 对 transactions 默认拦"同日同资产同方向"重复（防时区错位/手滑的重复投），撞重时 UI 挂警告、用户显式点「仍要写入」后 `force=True` 放行；日期默认与业务月份一律取 `biz_today()`（Asia/Shanghai 固定 UTC+8，与容器 UTC 时区解耦），坏格式日期提交即拒收。
+
 tab4（26 行）是这条链的读侧，业务上和 tab3 是一件事。
 
 （行号复核于 2026-08-19）
@@ -166,8 +168,8 @@ tab4（26 行）是这条链的读侧，业务上和 tab3 是一件事。
 | tab | 位置 | 行数 | 业务职责 | 依赖 |
 |---|---|---:|---|---|
 | 🎯 今日模拟 | `src/tabs/today.py` | 93 | 今日建议金额/部署系数/三资产分配/三档执行方案 | render(tab1, result, dec, ms, ASSETS) |
-| 📊 持仓与曲线 | `src/tabs/holdings.py` | 80 | 持仓汇总、估值、浮盈亏、XIRR、净值曲线 | render(tab2, result, pf, ASSETS, _paths, CURRENT_USER) |
-| ✍️ 记账 | `src/tabs/records.py` | 131 | 回报成交 / 主动跳过，二次确认后落库 | render(tab3, result, dec, ASSETS, CURRENT_USER) |
+| 📊 持仓与曲线 | `src/tabs/holdings.py` | 73 | 持仓汇总、估值、浮盈亏、XIRR、净值曲线 | render(tab2, result, pf, ASSETS, _paths, CURRENT_USER) |
+| ✍️ 记账 | `src/tabs/records.py` | 167 | 回报成交 / 主动跳过，二次确认后落库；同日同资产同方向去重，显式确认后放行 | render(tab3, result, dec, ASSETS, CURRENT_USER) |
 | 📜 历史记录 | `src/tabs/history.py` | 26 | 回读 transactions / observations | render(tab4, CURRENT_USER) |
 | 🧪 回测结果 | `src/tabs/backtest.py` | 249 | 5 段静态回测报告（全部读 `backtest/*.json`；内部段界见详设 §10） | render(tab5, BACKTEST_DIR) |
 | 📖 策略说明 | `src/tabs/strategy_doc.py` | 18 | 读 `strategy/core-strategy.md` 渲染（唯一事实源） | render(tab6, CODE_DIR) |
@@ -201,8 +203,8 @@ tab4（26 行）是这条链的读侧，业务上和 tab3 是一件事。
 | 路径 | 行数 | 是什么 | 谁读它 | 入库 |
 |---|---:|---|---|:---:|
 | `app.py` | 66 | Streamlit 主程序，**纯装配层**：import → build_paths → storage.init → 认证一行 → 侧栏一行 → 6 个 tab render 调用 | Streamlit 直接执行 | ✅ |
-| `src/` | 1773 | **业务层**（app.py 只留装配）：`context.py`（73，启动上下文 `Paths`/`Decision`/`build_paths`）+ `services/`（`model.py` 45 模型调用 / `quotes.py` 87 行情抓取 / `curves.py` 85 曲线数据）+ `ui/`（`styles.py` 185 全局 CSS / `overlays.py` 59 三遮罩 / `sidebar.py` 302 侧栏，返回 `Decision` / `auth.py` 328 认证门闸，`require_user()`）+ `tabs/`（`today.py` 93 / `holdings.py` 80 / `records.py` 131 / `history.py` 26 / `backtest.py` 249 / `strategy_doc.py` 18，各暴露 `render(tab, ...)` 显式收参）；不读 app.py 模块级全局 | `app.py` import | ✅ |
-| `storage.py` | 594 | 存储层。所有 Google Sheets 读写都走它（含写前快照、PBKDF2 认证）；19 个公开接口明细见详设 §9 | `app.py` import | ✅ |
+| `src/` | 1835 | **业务层**（app.py 只留装配）：`context.py`（73，启动上下文 `Paths`/`Decision`/`build_paths`）+ `dates.py`（20，业务"今天"唯一定义 `biz_today()`，Asia/Shanghai 固定 UTC+8，与引擎同规则双实现）+ `services/`（`model.py` 45 模型调用 / `quotes.py` 87 行情抓取 / `curves.py` 99 曲线数据）+ `ui/`（`styles.py` 185 全局 CSS / `overlays.py` 59 三遮罩 / `sidebar.py` 301 侧栏，返回 `Decision` / `auth.py` 328 认证门闸，`require_user()`）+ `tabs/`（`today.py` 93 / `holdings.py` 73 / `records.py` 167 / `history.py` 26 / `backtest.py` 249 / `strategy_doc.py` 18，各暴露 `render(tab, ...)` 显式收参）；不读 app.py 模块级全局 | `app.py` import | ✅ |
+| `storage.py` | 612 | 存储层。所有 Google Sheets 读写都走它（含写前快照、PBKDF2 认证、成交同日同资产同方向去重，`force=True` 显式放行）；19 个公开接口明细见详设 §9 | `app.py` import | ✅ |
 | `requirements.txt` | 6 | 依赖清单。只约束包版本且几乎全无上界 | Cloud 装依赖时 | ✅ |
 | `CHANGELOG.md` | — | **全量改动的人读版流水**：每 commit 一行带 `HH:MM:SS` 时刻（取自 git），由 `scripts/changelog.py` 生成/校验 | 人 | ✅ |
 | `start-app.bat` | — | 本机双击启动 | 你 | ✅ |
@@ -214,8 +216,8 @@ tab4（26 行）是这条链的读侧，业务上和 tab3 是一件事。
 
 | 路径 | 行数 | 说明 |
 |---|---:|---|
-| `scripts/dca_calculator.py` | 983 | **策略大脑**。完全独立可单跑，不依赖 Streamlit。输入 = CSV + config，输出 = JSON（16 个顶层键）；行情快照 `data/quote_snapshot.json`（TTL 600 秒）复用抓价结果；参数与键明细见详设 §11 |
-| `scripts/dca_action.py` | 187 | 业务动作 CLI（`record tx` / `record obs` / `override`）：Skill 入口经它与 Web 共用 storage 业务层；shares 可按金额自动换算，sheets 模式写后自动 `sync_local` 刷新落盘缓存 |
+| `scripts/dca_calculator.py` | 1012 | **策略大脑**。完全独立可单跑，不依赖 Streamlit。输入 = CSV + config，输出 = JSON（17 个顶层键）；业务"今天"走 `biz_today()`（与 `src/dates.py` 同规则双实现），坏日期行剔除并输出 `invalid_transactions`；行情快照 `data/quote_snapshot.json`（TTL 600 秒）复用抓价结果；参数与键明细见详设 §11 |
+| `scripts/dca_action.py` | 203 | 业务动作 CLI（`record tx` / `record obs` / `override`）：Skill 入口经它与 Web 共用 storage 业务层；shares 可按金额自动换算，sheets 模式写后自动 `sync_local` 刷新落盘缓存；同日同向撞重报错、`--force` 显式放行 |
 | `scripts/changelog.py` | 115 | CHANGELOG 维护工具：`add <hash>` 从 git 取提交时刻生成行草稿；`--check` 校验每个 commit 都有行且时刻与 git 一致（CLAUDE.md 第 12 条的配套） |
 
 ### 9.3 `data/` — 数据目录（引擎唯一的数据来源）

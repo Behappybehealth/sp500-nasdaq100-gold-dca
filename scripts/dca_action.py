@@ -24,6 +24,8 @@ import sys
 from datetime import date
 from pathlib import Path
 
+from dca_calculator import biz_today  # 同目录直接运行时 scripts/ 在 sys.path[0]；业务"今天"唯一定义
+
 
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
@@ -47,7 +49,7 @@ def _build_parser() -> argparse.ArgumentParser:
     rec_sub = rec.add_subparsers(dest="kind", required=True)
 
     tx = rec_sub.add_parser("tx", help="记一笔成交（买入/卖出）")
-    tx.add_argument("--date", default=str(date.today()))
+    tx.add_argument("--date", default=str(biz_today()))
     tx.add_argument("--action", choices=["buy", "sell"], required=True)
     tx.add_argument("--asset", required=True, help="资产配置键，如 sp500 / nasdaq100 / gold")
     tx.add_argument("--symbol", default=None, help="交易代码；缺省取 config 里该资产的 symbol")
@@ -57,9 +59,14 @@ def _build_parser() -> argparse.ArgumentParser:
     tx.add_argument("--fee", type=float, default=0.0, help="手续费 RMB")
     tx.add_argument("--fx", type=float, default=None, help="汇率（U/CNY 或 USD/CNY）；自动算份额时必填")
     tx.add_argument("--notes", default="")
+    tx.add_argument(
+        "--force",
+        action="store_true",
+        help="同日同资产同方向已有记录时仍写入（确认为新一笔）；缺省遇重复直接报错",
+    )
 
     obs = rec_sub.add_parser("obs", help="记一条观察/跳过")
-    obs.add_argument("--date", default=str(date.today()))
+    obs.add_argument("--date", default=str(biz_today()))
     obs.add_argument("--reason", default="", help="跳过原因（通常带当时信号等级）")
     obs.add_argument("--notes", default="")
     obs.add_argument("--total-suggested", type=float, default=0.0, help="当时建议总金额 RMB")
@@ -70,7 +77,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     ov = sub.add_parser("override", help="设置月度预算覆盖")
     ov.add_argument("--amount", type=float, required=True, help="月预算 RMB")
-    ov.add_argument("--month", default=date.today().strftime("%Y-%m"), help="生效月 YYYY-MM（含）起长期生效")
+    ov.add_argument("--month", default=biz_today().strftime("%Y-%m"), help="生效月 YYYY-MM（含）起长期生效")
 
     return p
 
@@ -96,6 +103,12 @@ def main() -> int:
     backend = "sheets" if storage.sheets_enabled() else "local"
 
     try:
+        if args.cmd == "record" and args.kind in ("tx", "obs"):
+            try:
+                date.fromisoformat(args.date)
+            except ValueError:
+                return _fail(f"--date「{args.date}」不是合法的 YYYY-MM-DD，未写入")
+
         if args.cmd == "record" and args.kind == "tx":
             if args.amount <= 0 or args.price <= 0:
                 return _fail("金额和净值价格必须为正数")
@@ -152,7 +165,7 @@ def main() -> int:
         if table == "budget_overrides":
             storage.set_override(args.user, args.month, args.amount)
         else:
-            storage.append_row(table, args.user, row)
+            storage.append_row(table, args.user, row, force=getattr(args, "force", False))
 
         # 云端写入后刷新本地落盘缓存，下一次引擎复盘才能读到刚写入的记录
         synced = None
@@ -179,6 +192,9 @@ def main() -> int:
             out["row"] = row
         print(json.dumps(out, ensure_ascii=False))
         return 0
+    except ValueError as e:
+        # 去重拦截等业务校验错误：原样透出（Skill 侧据文案决定是否加 --force 重试）
+        return _fail(str(e))
     except Exception as e:
         return _fail(f"{type(e).__name__}: {e}")
 

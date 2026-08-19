@@ -5,12 +5,11 @@
 """
 from __future__ import annotations
 
-from datetime import date
-
 import pandas as pd
 import streamlit as st
 
 from ..context import Paths
+from ..dates import biz_today
 from ..services.curves import load_price_series, portfolio_curve
 
 
@@ -60,17 +59,11 @@ def render(tab, result: dict, pf: dict, assets: dict, paths: Paths, user: str):
         st.subheader("近一年价格走势（缓存收盘）")
         series = load_price_series(paths)
         chart_data = {}
+        _t = biz_today()
+        _window_start = f"{_t.year - 1}-{_t.month:02d}-01"
         for sym in ["SPY", "QQQ", "XAUT-USD"]:
             s = series.get(sym, {})
-            recent = {
-                d: v
-                for d, v in s.items()
-                if d
-                >= str(date.today().year - 1)
-                + "-"
-                + str(date.today().month).zfill(2)
-                + "-01"
-            }
+            recent = {d: v for d, v in s.items() if d >= _window_start}
             if recent:
                 chart_data[sym] = recent
         if chart_data:

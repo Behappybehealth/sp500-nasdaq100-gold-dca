@@ -12,6 +12,8 @@ import streamlit as st
 
 import storage
 
+from ..dates import biz_today
+
 
 def render(tab, result: dict, dec: dict, assets: dict, user: str):
     with tab:
@@ -19,9 +21,15 @@ def render(tab, result: dict, dec: dict, assets: dict, user: str):
         st.caption(
             "流程：填写 → 复述确认 → 写入 transactions.csv（只追加）。建议与成交严格分离。"
         )
+        invalid = result.get("invalid_transactions") or []
+        if invalid:
+            st.warning(
+                f"⚠️ 账本中有 {len(invalid)} 条日期格式非法的记录已被引擎剔除"
+                f"（不计入任何统计）：{invalid}——请修正 transactions.csv 后它们才会重新生效。"
+            )
         with st.form("tx_form"):
             c1, c2, c3 = st.columns(3)
-            tx_date = c1.text_input("日期", value=str(date.today()))
+            tx_date = c1.text_input("日期", value=str(biz_today()))
             tx_asset = c2.selectbox(
                 "资产", list(assets.keys()), format_func=lambda k: assets[k]["name_cn"]
             )
@@ -59,20 +67,25 @@ def render(tab, result: dict, dec: dict, assets: dict, user: str):
             if not tx_amount or not tx_price:
                 st.error("金额和净值价格必填；数量可自动计算。")
             else:
-                shares = tx_shares if tx_shares else round(tx_amount / tx_fx / tx_price, 6)
-                st.session_state["pending_tx"] = {
-                    "date": tx_date,
-                    "action": tx_action,
-                    "asset": tx_asset,
-                    "symbol": tx_symbol,
-                    "currency": "USDT",
-                    "amount_rmb": tx_amount,
-                    "price": tx_price,
-                    "shares": shares,
-                    "fee_rmb": tx_fee,
-                    "fx_rate": tx_fx,
-                    "notes": tx_notes,
-                }
+                try:
+                    date.fromisoformat(tx_date)
+                except ValueError:
+                    st.error(f"日期「{tx_date}」不是合法的 YYYY-MM-DD，未写入。")
+                else:
+                    shares = tx_shares if tx_shares else round(tx_amount / tx_fx / tx_price, 6)
+                    st.session_state["pending_tx"] = {
+                        "date": tx_date,
+                        "action": tx_action,
+                        "asset": tx_asset,
+                        "symbol": tx_symbol,
+                        "currency": "USDT",
+                        "amount_rmb": tx_amount,
+                        "price": tx_price,
+                        "shares": shares,
+                        "fee_rmb": tx_fee,
+                        "fx_rate": tx_fx,
+                        "notes": tx_notes,
+                    }
         if st.session_state.get("pending_tx"):
             p = st.session_state["pending_tx"]
             st.warning(
@@ -83,6 +96,9 @@ def render(tab, result: dict, dec: dict, assets: dict, user: str):
             if b1.button("✅ 确认写入", use_container_width=True):
                 try:
                     storage.append_row("transactions", user, p)
+                except ValueError as _e:
+                    # 同日同资产同方向去重拦截：让用户决定是取消还是确认"这真是新一笔"
+                    st.session_state["tx_dup"] = str(_e)
                 except Exception as _e:
                     st.error(f"写入失败：云端存储暂时不可用（{_e}）。历史数据未被覆盖，请稍后重试。")
                 else:
@@ -91,6 +107,26 @@ def render(tab, result: dict, dec: dict, assets: dict, user: str):
                     st.success("已写入成交记录")
                     st.rerun()
             if b2.button("❌ 取消", use_container_width=True):
+                st.session_state.pop("pending_tx")
+                st.rerun()
+        if st.session_state.get("tx_dup"):
+            st.warning(f"⚠️ {st.session_state['tx_dup']}")
+            d1, d2 = st.columns(2)
+            if d1.button("仍要写入（确认是新一笔）", use_container_width=True):
+                try:
+                    storage.append_row(
+                        "transactions", user, st.session_state["pending_tx"], force=True
+                    )
+                except Exception as _e:
+                    st.error(f"写入失败：云端存储暂时不可用（{_e}）。历史数据未被覆盖，请稍后重试。")
+                else:
+                    st.session_state.pop("pending_tx")
+                    st.session_state.pop("tx_dup")
+                    st.cache_data.clear()
+                    st.success("已写入成交记录（已确认为新一笔）")
+                    st.rerun()
+            if d2.button("❌ 取消写入", use_container_width=True, key="btn_dup_cancel"):
+                st.session_state.pop("tx_dup")
                 st.session_state.pop("pending_tx")
                 st.rerun()
 
@@ -103,7 +139,7 @@ def render(tab, result: dict, dec: dict, assets: dict, user: str):
         if obs_submit:
             w = result["suggested_weights"]
             st.session_state["pending_obs"] = {
-                "date": str(date.today()),
+                "date": str(biz_today()),
                 "action": "observe",
                 "total_suggested_rmb": dec["suggested_amount_rmb"],
                 "user_amount_rmb": 0,

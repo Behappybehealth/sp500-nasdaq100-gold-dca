@@ -77,7 +77,7 @@ return json.loads(out.stdout)          # 把对方打印的 JSON 转成 Python �
 - 读：把**整张表**拉下来
 - 写：把**整张表**推上去（覆盖）
 
-所以"加一笔成交记录"的实际动作是（`append_row()` 的 Sheets 分支，storage.py:444–446）：
+所以"加一笔成交记录"的实际动作是（`append_row()` 的 Sheets 分支，storage.py:461–465）：
 
 ```
 把整张 transactions 表读下来（比如 200 行）

@@ -33,6 +33,25 @@ DEFAULT_CONFIG = {
     },
 }
 
+_BIZ_TZ = timezone(timedelta(hours=8))  # 业务时区：Asia/Shanghai（中国无夏令时，固定 +8 零依赖）
+
+
+def biz_today() -> date:
+    """业务"今天"的全链路唯一定义：Asia/Shanghai 自然日。
+
+    Cloud 容器时区是 UTC——直接 date.today() 会让北京时间 00:00–07:59 的
+    "今天"错成昨天。src/dates.py 持同规则实现（子进程隔离，两处必须同改）。
+    """
+    return datetime.now(_BIZ_TZ).date()
+
+
+def is_iso_date(s: str) -> bool:
+    try:
+        date.fromisoformat(s)
+        return True
+    except ValueError:
+        return False
+
 
 @dataclass
 class Transaction:
@@ -302,7 +321,7 @@ def save_cached_closes(path: Path, closes: Dict[str, float]) -> None:
 
 
 def get_symbol_history(symbol: str, years: int, cache_dir: Optional[Path]) -> dict:
-    today = date.today()
+    today = biz_today()
     cache_path = cache_file_for(cache_dir, symbol) if cache_dir else None
     cached = load_cached_closes(cache_path) if cache_path else {}
     latest: Optional[float] = None
@@ -536,8 +555,8 @@ def portfolio_summary(transactions: List[Transaction], prices: Dict[str, dict], 
         item["return_rate"] = (item["unrealized_pnl_rmb"] / item["invested_rmb"]) if item["invested_rmb"] else None
         if item["current_value_rmb"] is not None:
             flows = flows_by_asset.get(item["asset"], [])
-            item["xirr"] = xirr(flows + [(date.today(), item["current_value_rmb"])])
-            item["xirr_period_days"] = (date.today() - min(d for d, _ in flows)).days if flows else None
+            item["xirr"] = xirr(flows + [(biz_today(), item["current_value_rmb"])])
+            item["xirr_period_days"] = (biz_today() - min(d for d, _ in flows)).days if flows else None
         else:
             item["xirr"] = None
             item["xirr_period_days"] = None
@@ -549,8 +568,8 @@ def portfolio_summary(transactions: List[Transaction], prices: Dict[str, dict], 
         "current_value_rmb": total_value if total_value else None,
         "unrealized_pnl_rmb": (total_value - total_invested) if total_value else None,
         "return_rate": ((total_value - total_invested) / total_invested) if total_value and total_invested else None,
-        "xirr": xirr(all_flows + [(date.today(), total_value)]) if total_value else None,
-        "xirr_period_days": (date.today() - min(d for d, _ in all_flows)).days if all_flows else None,
+        "xirr": xirr(all_flows + [(biz_today(), total_value)]) if total_value else None,
+        "xirr_period_days": (biz_today() - min(d for d, _ in all_flows)).days if all_flows else None,
         "positions": list(by_asset.values()),
     }
 
@@ -864,6 +883,15 @@ def main() -> None:
     # 多用户模式：记账数据按用户分目录，行情缓存/策略配置保持共享
     record_dir = base_dir / "data" / "users" / args.user if args.user else base_dir / "data"
     transactions = read_transactions(record_dir / "transactions.csv")
+    # 坏日期防御（如 2026/08/17）：静默吞掉会让这笔钱逃出月度预算核算——
+    # 剔出计算并在输出的 invalid_transactions 里点名，写入侧（records/dca_action）另有拒收
+    invalid_transactions = [
+        {"date": tx.date, "asset": tx.asset, "amount_rmb": tx.amount_rmb}
+        for tx in transactions
+        if not is_iso_date(tx.date)
+    ]
+    if invalid_transactions:
+        transactions = [tx for tx in transactions if is_iso_date(tx.date)]
     observations = read_observations(record_dir / "observations.csv")
     last_observation = observations[-1] if observations else None
     assets = config.get("assets", DEFAULT_CONFIG["assets"])
@@ -905,15 +933,15 @@ def main() -> None:
     if not isinstance(release_cfg, dict):
         release_cfg = {}
     release_window_days = int(release_cfg.get("window_days", 7)) if release_cfg.get("enabled", True) else 0
-    month_prefix = date.today().strftime("%Y-%m")
+    month_prefix = biz_today().strftime("%Y-%m")
     month_dates = [tx.date for tx in transactions if tx.date.startswith(month_prefix)]
     month_dates += [r.get("date", "") for r in observations if r.get("date", "").startswith(month_prefix)]
     month_start = min(month_dates) if month_dates else None
-    monthly_budget, budget_source = resolve_monthly_budget(config, base_dir, date.today(), record_dir)
+    monthly_budget, budget_source = resolve_monthly_budget(config, base_dir, biz_today(), record_dir)
     month_status = monthly_budget_status(
         transactions,
         monthly_budget,
-        date.today(),
+        biz_today(),
         interval_days=interval_days,
         release_window_days=release_window_days,
         month_start_date=month_start,
@@ -959,7 +987,7 @@ def main() -> None:
                 }
 
     result = {
-        "as_of": str(date.today()),
+        "as_of": str(biz_today()),
         "input_amount_rmb": args.amount,
         "effective_amount_rmb": round(suggested_amount, 2),
         "usdcny": usdcny,
@@ -967,6 +995,7 @@ def main() -> None:
         "monthly_budget_status": month_status,
         "config": config,
         "has_local_transactions": bool(transactions),
+        "invalid_transactions": invalid_transactions,
         "last_records": latest_records,
         "since_last_record": since_last_record,
         "markets": markets,

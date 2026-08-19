@@ -436,10 +436,28 @@ def read_rows(table: str, user: str) -> list:
         return list(csv.DictReader(f))
 
 
-def append_row(table: str, user: str, row: dict) -> None:
+def append_row(table: str, user: str, row: dict, force: bool = False) -> None:
     fields = TABLES[table]
     full = {f: row.get(f, "") for f in fields}
     full["user"] = user
+    if table == "transactions" and not force:
+        # 同日同资产同方向复重检测：重复买入是重复投钱洞的入口；
+        # 同日先买后卖（action 不同）属正常序列，不拦。确认为新一笔时传 force=True。
+        dup = next(
+            (
+                r
+                for r in read_rows("transactions", user)
+                if r.get("date") == full["date"]
+                and r.get("asset") == full["asset"]
+                and r.get("action") == full["action"]
+            ),
+            None,
+        )
+        if dup is not None:
+            raise ValueError(
+                f"重复记录：{full['date']} 已有 {full['asset']} {full['action']}"
+                f"（金额 ¥{dup.get('amount_rmb')}）；确认为新一笔请显式覆盖写入"
+            )
     if sheets_enabled():
         df = _read_ws(table, fields)
         df = pd.concat([df, pd.DataFrame([full])], ignore_index=True)
