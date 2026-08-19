@@ -91,7 +91,7 @@ app.py（UI + 业务逻辑，耦合较紧）
 
 | 层 | 技术 | 改代码时要知道的 |
 |---|---|---|
-| 语言 | Python 3.14.4（`.venv`） | `requirements.txt` 未声明 Python 版本 |
+| 语言 | Python 3.14.4（`.venv` 实装） | — |
 | UI | Streamlit 1.61.1 | **每次交互整个脚本从头重跑**；`st.cache_data` 全进程共享（缓存键必须含用户）、`st.session_state` 每标签页一份 |
 | 数据 | pandas 3.0.5 + numpy 2.5.2 | pandas 3 是大版本，与 2 有不兼容改动 |
 | 存储 | Google Sheets（gspread 5.12.4），本地 CSV 回退 | 只能整表读、整表写；读写一律走 `storage.py` |

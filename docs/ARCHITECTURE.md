@@ -29,7 +29,7 @@
 
 | 层 | 用的技术 | 一句话说明 |
 |---|---|---|
-| 语言 | **Python 3.14.4**（本机 `.venv` 实装） | ⚠️ `requirements.txt` **未声明 Python 版本**，只约束包版本，详见详设 §5 |
+| 语言 | **Python 3.14.4**（本机 `.venv` 实装） | — |
 | 网页框架 | **Streamlit 1.61.1** | 把 Python 脚本直接变成网页的工具。**不是** Django/Flask 那种传统框架——每次交互整个脚本从头重跑，模型详解见详设 §1 |
 | 前端 | Streamlit 自带（内部是 React） | 不写 HTML/JS。定制样式靠 `st.markdown(..., unsafe_allow_html=True)` 注入 CSS |
 | 数据处理 | pandas 3.0.5 + numpy 2.5.2 | 表格运算。⚠️ pandas 3 是大版本，与 pandas 2 有不兼容改动 |
@@ -203,7 +203,7 @@ tab4（26 行）是这条链的读侧，业务上和 tab3 是一件事。
 | `app.py` | 66 | Streamlit 主程序，**纯装配层**：import → build_paths → storage.init → 认证一行 → 侧栏一行 → 6 个 tab render 调用 | Streamlit 直接执行 | ✅ |
 | `src/` | 1773 | **业务层**（app.py 只留装配）：`context.py`（73，启动上下文 `Paths`/`Decision`/`build_paths`）+ `services/`（`model.py` 45 模型调用 / `quotes.py` 87 行情抓取 / `curves.py` 85 曲线数据）+ `ui/`（`styles.py` 185 全局 CSS / `overlays.py` 59 三遮罩 / `sidebar.py` 302 侧栏，返回 `Decision` / `auth.py` 328 认证门闸，`require_user()`）+ `tabs/`（`today.py` 93 / `holdings.py` 80 / `records.py` 131 / `history.py` 26 / `backtest.py` 249 / `strategy_doc.py` 18，各暴露 `render(tab, ...)` 显式收参）；不读 app.py 模块级全局 | `app.py` import | ✅ |
 | `storage.py` | 594 | 存储层。所有 Google Sheets 读写都走它（含写前快照、PBKDF2 认证）；19 个公开接口明细见详设 §9 | `app.py` import | ✅ |
-| `requirements.txt` | 6 | 依赖清单。只约束包版本且几乎全无上界，未声明 Python 版本 | Cloud 装依赖时 | ✅ |
+| `requirements.txt` | 6 | 依赖清单。只约束包版本且几乎全无上界 | Cloud 装依赖时 | ✅ |
 | `CHANGELOG.md` | — | **全量改动的人读版流水**：每 commit 一行带 `HH:MM:SS` 时刻（取自 git），由 `scripts/changelog.py` 生成/校验 | 人 | ✅ |
 | `start-app.bat` | — | 本机双击启动 | 你 | ✅ |
 | `CLAUDE.md` | — | 给 AI 编程助手的项目说明 | AI 助手 | ✅ |
