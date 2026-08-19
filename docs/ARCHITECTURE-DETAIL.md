@@ -183,7 +183,7 @@ gspread>=5.8.0,<6        本机实装 5.12.4  ← 唯一有上界的
          (result×9 dec×6 ms×4)  (pf×8)        (result×3 dec×3)
 ```
 
-服务函数在 `src/services/`（`run_model` model.py:19、`parse_wide_table` model.py:42、`fetch_xau_spot` quotes.py:18、`fetch_btc` quotes.py:64、`_load_json` curves.py:19、`load_price_series` curves.py:28、`portfolio_curve` curves.py:44；全部显式收 `paths: Paths` 参数，`Paths` 定义于 `src/context.py`）；执行点在 `src/ui/sidebar.py` render() 内（首跑 :124、表单提交后金额重跑 :235），app.py 侧仅剩 :41 一行调用，结果收口为 `Decision` 返回值（`src/context.py`）后解包。下游 tab1/tab2/tab3 分别在 `src/tabs/today.py` / `holdings.py` / `records.py`（result/dec/ms/pf 等数据全部由 app.py 以显式参数传入 render()）。
+服务函数在 `src/services/`（`run_model` model.py:19、`parse_wide_table` model.py:42、`fetch_xau_spot` quotes.py:18、`fetch_btc` quotes.py:64、`_load_json` curves.py:19、`load_price_series` curves.py:28、`tx_csv_for` curves.py:44（按用户裁决成交账本路径，与引擎 `--user` 同一规则）、`portfolio_curve` curves.py:57；全部显式收 `paths: Paths` 参数，`Paths` 定义于 `src/context.py`）；执行点在 `src/ui/sidebar.py` render() 内（首跑 :124、表单提交后金额重跑 :235），app.py 侧仅剩 :41 一行调用，结果收口为 `Decision` 返回值（`src/context.py`）后解包。下游 tab1/tab2/tab3 分别在 `src/tabs/today.py` / `holdings.py` / `records.py`（result/dec/ms/pf 等数据全部由 app.py 以显式参数传入 render()）。
 
 **模型会跑两次，但第二遍不再白跑**：侧栏先 `run_model(None)` 自动定额；用户在 `amount_form` 表单里提交金额后再 `run_model(amount_in)` 整体重跑一遍子进程——重跑趟命中引擎的行情快照（`data/quote_snapshot.json`，TTL 600 秒，`--snapshot-ttl` 可调，0 禁用；任一标的抓价失败当趟不落盘），跳过 8 个串行行情请求与缓存增量写（下次冷跑自动追平），实测第二趟耗时约为首趟的 11%。引擎输出第 16 个顶层键 `quote_snapshot`（used/age_s/ttl_s）自报快照命中情况。
 

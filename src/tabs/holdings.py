@@ -14,10 +14,10 @@ from ..context import Paths
 from ..services.curves import load_price_series, portfolio_curve
 
 
-def render(tab, result: dict, pf: dict, assets: dict, paths: Paths):
+def render(tab, result: dict, pf: dict, assets: dict, paths: Paths, user: str):
     with tab:
         st.subheader("组合市值 vs 累计投入")
-        curve = portfolio_curve(result, paths)
+        curve = portfolio_curve(result, paths, user)
         if curve is None:
             st.info("暂无成交记录。记账后这里会显示组合曲线。")
         else:

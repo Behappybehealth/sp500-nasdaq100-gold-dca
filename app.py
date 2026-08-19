@@ -55,7 +55,7 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
 
 today.render(tab1, result, dec, ms, ASSETS)
 
-holdings.render(tab2, result, pf, ASSETS, _paths)
+holdings.render(tab2, result, pf, ASSETS, _paths, CURRENT_USER)
 
 records.render(tab3, result, dec, ASSETS, CURRENT_USER)
 

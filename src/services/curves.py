@@ -41,11 +41,25 @@ def load_price_series(paths: Paths):
     return series
 
 
-def portfolio_curve(result: dict, paths: Paths):
+def tx_csv_for(paths: Paths, user: str) -> Path:
+    """当前用户的成交账本路径：与引擎 `--user` 同一条规则。
+
+    单机模式（"local" 哨兵）读共享 `data/transactions.csv`；多用户模式读
+    `data/users/<user>/transactions.csv`（sync_local 的落盘缓存，登录与每次写后刷新）。
+    """
+    if user == "local":
+        return paths.tx_csv
+    if "/" in user or "\\" in user or ".." in user:
+        raise ValueError(f"非法用户名：{user!r}")
+    return paths.data_dir / "users" / user / "transactions.csv"
+
+
+def portfolio_curve(result: dict, paths: Paths, user: str):
     """按成交记录重建每日 投入 vs 市值 曲线。"""
-    if not paths.tx_csv.exists() or paths.tx_csv.stat().st_size == 0:
+    tx_csv = tx_csv_for(paths, user)
+    if not tx_csv.exists() or tx_csv.stat().st_size == 0:
         return None
-    rows = list(csv.DictReader(paths.tx_csv.open("r", encoding="utf-8-sig")))
+    rows = list(csv.DictReader(tx_csv.open("r", encoding="utf-8-sig")))
     if not rows:
         return None
     series = load_price_series(paths)

@@ -166,13 +166,13 @@ tab4（26 行）是这条链的读侧，业务上和 tab3 是一件事。
 | tab | 位置 | 行数 | 业务职责 | 依赖 |
 |---|---|---:|---|---|
 | 🎯 今日模拟 | `src/tabs/today.py` | 93 | 今日建议金额/部署系数/三资产分配/三档执行方案 | render(tab1, result, dec, ms, ASSETS) |
-| 📊 持仓与曲线 | `src/tabs/holdings.py` | 80 | 持仓汇总、估值、浮盈亏、XIRR、净值曲线 | render(tab2, result, pf, ASSETS, _paths) |
+| 📊 持仓与曲线 | `src/tabs/holdings.py` | 80 | 持仓汇总、估值、浮盈亏、XIRR、净值曲线 | render(tab2, result, pf, ASSETS, _paths, CURRENT_USER) |
 | ✍️ 记账 | `src/tabs/records.py` | 131 | 回报成交 / 主动跳过，二次确认后落库 | render(tab3, result, dec, ASSETS, CURRENT_USER) |
 | 📜 历史记录 | `src/tabs/history.py` | 26 | 回读 transactions / observations | render(tab4, CURRENT_USER) |
 | 🧪 回测结果 | `src/tabs/backtest.py` | 249 | 5 段静态回测报告（全部读 `backtest/*.json`；内部段界见详设 §10） | render(tab5, BACKTEST_DIR) |
 | 📖 策略说明 | `src/tabs/strategy_doc.py` | 18 | 读 `strategy/core-strategy.md` 渲染（唯一事实源） | render(tab6, CODE_DIR) |
 
-（行号复核于 2026-08-18）
+（行号复核于 2026-08-19）
 
 ## 8. 数据在哪：四张主表 + 快照 + 本地回退
 
