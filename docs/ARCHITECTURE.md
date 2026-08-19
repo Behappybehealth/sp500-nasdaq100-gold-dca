@@ -3,7 +3,7 @@
 > 【活文档 · 更新时机：**仅顶层架构变更**（换技术栈/存储/部署、改数据流、调目录、动链路）时更新；实现细节变动只更新详设，不动本文】索引见 [docs/README.md](README.md)。
 > **本文件是本项目顶层架构的唯一事实源。** 首版 2026-08-17，2026-08-18 拆分为「概要 + 详设」两份。
 > 面向所有读者（含非技术）：第一次出现的概念都解释。实现细节、设计动机、踩坑记录 → [ARCHITECTURE-DETAIL.md](ARCHITECTURE-DETAIL.md)（同一事实只写一处，本文不重复）。
-> 问题与缺陷不写在这里，走 [BUGLIST.md](BUGLIST.md)，本文只在受影响处标 `→ BUG-0XX`。
+> 问题与缺陷不写在这里，走 [BUGLIST.md](BUGLIST.md)。
 
 **改架构的人必读的维护约定：**
 
@@ -52,7 +52,7 @@
    浏览器（用户）  ←───→ │  Streamlit Community Cloud      │
                         │  一个 Python 进程服务所有用户     │
                         │                                 │
-                        │    app.py（78 行，纯装配层）      │
+                        │    app.py（66 行，纯装配层）      │
                         │    认证/侧栏/6 tab 全部在 src/   │
                         └───┬──────────────────┬──────────┘
                             │                  │
@@ -61,7 +61,7 @@
                             ▼                  ▼
         ┌───────────────────────────┐   ┌──────────────────┐
         │ scripts/dca_calculator.py │   │   storage.py     │
-        │ 计算引擎（938 行）         │   │  存储层（594 行） │
+        │ 计算引擎（983 行）         │   │  存储层（594 行） │
         │                           │   │                  │
         │ 读 data/config.json       │   │ 优先 Google Sheets│
         │ 读记账数据（--user 时      │◄──┤ 无凭据→本地 CSV   │
@@ -83,7 +83,7 @@
 
 **三层 + 一个边界**：`app.py`（UI + 业务逻辑，耦合较紧）→ 通过 subprocess 隔离 `dca_calculator.py`（纯计算）、通过 import 使用 `storage.py`（数据层）。子进程边界是本项目最干净的设计：改计算不影响 UI，反之亦然。
 
-**拆分已完成（BUG-020，7 刀全部落地，见 `docs/plans/app-split-design.md`）**：2026-08-18 一天内完成——启动路径逻辑收编 `src/context.py`，服务函数（模型调用 / 行情抓取 / 曲线计算）在 `src/services/`，全局 CSS / 遮罩 / 侧栏 / 认证在 `src/ui/`，六个 tab 在 `src/tabs/`；所有模块数据显式收参，不读 app.py 模块级全局。app.py 1559→**78 行纯装配层**（import → build_paths → storage.init → 认证门闸一行 → 侧栏一行 → 6 个 tab render 调用）。
+**拆分已完成**（方案存档见 `docs/plans/app-split-design.md`）：启动路径逻辑收编 `src/context.py`，服务函数（模型调用 / 行情抓取 / 曲线计算）在 `src/services/`，全局 CSS / 遮罩 / 侧栏 / 认证在 `src/ui/`，六个 tab 在 `src/tabs/`；所有模块数据显式收参，不读 app.py 模块级全局。app.py 1559→**66 行纯装配层**（import → build_paths → storage.init → 认证门闸一行 → 侧栏一行 → 6 个 tab render 调用）。
 
 ## 4. 数据流：一次"打开页面看今日建议"
 
@@ -101,7 +101,7 @@
       ↓
 ④ 侧边栏调用 run_model(None, CURRENT_USER, _paths)   ← 缓存键含用户身份
       → 启动子进程 dca_calculator.py --base-dir <项目目录> --user <用户名>
-      （run_model 等三个服务函数已搬至 src/services/，_paths 来自 src/context.py）
+      （run_model 等三个服务函数在 src/services/，_paths 来自 src/context.py）
       ↓
 ⑤ 引擎读 data/users/<用户名>/transactions.csv + data/config.json
       （config 与行情缓存保持共享；记账数据按用户分目录）
@@ -119,7 +119,7 @@
 
 ## 5. 三条业务链路
 
-### A. 认证链（`src/ui/auth.py` 的 `require_user()`；app.py 侧仅 :39 一行调用）
+### A. 认证链（`src/ui/auth.py` 的 `require_user()`；app.py 侧仅 :38 一行调用）
 
 三阶段状态机，全部走 `st.session_state`：`login`（名字+PIN 校验）→ `activate`（未激活账号首次设 PIN）→ `bootstrap`（users 表为空时首个注册者自动成为 admin）。门闸用 `st.stop()` 拦住未登录用户，后续代码根本不执行。两段式防残留设计与其踩过的三轮坑，见详设 §6（**不要轻易改动**）。
 
@@ -130,9 +130,9 @@ sidebar.render() ──→ run_model(None) ──subprocess──→ dca_calcula
                           └─→ result / dec / ms / pf 收口为 Decision 返回值 ──→ 各 tab 消费
 ```
 
-注意：**模型会跑两次**——侧栏先自动定额跑一遍；用户手填金额后整体重跑一遍子进程。→ `BUG-024`。细节见详设 §7。
+注意：侧栏先 `run_model(None)` 自动定额跑一遍；用户在表单（`amount_form`）里提交金额后按新金额重跑——重跑趟命中引擎行情快照（`data/quote_snapshot.json`，TTL 600 秒），跳过重复抓价，近即时返回。细节见详设 §7。
 
-### C. 记账链（tab3 写 → tab4 读；均已拆出，见 `src/tabs/records.py` / `src/tabs/history.py`）
+### C. 记账链（tab3 写 → tab4 读；`src/tabs/records.py` / `src/tabs/history.py`）
 
 ```
 tab3  用户回报成交 → session_state["pending_tx"] 暂存 → 复述确认 → storage.append_row("transactions")
@@ -140,38 +140,37 @@ tab3  用户回报成交 → session_state["pending_tx"] 暂存 → 复述确认
 tab4  storage.read_rows() 两张表原样展示
 ```
 
-tab4（29 行）是这条链的读侧，业务上和 tab3 是一件事。
+tab4（26 行）是这条链的读侧，业务上和 tab3 是一件事。
 
-（行号复核于 2026-08-18）
+（行号复核于 2026-08-19）
 
 ## 6. app.py 一次渲染的时序
 
 `app.py` **不是模块，是一个从头跑到尾的脚本**（Streamlit 重跑模型所致，详解见详设 §1）：
 
 ```
-① 1–31   import → build_paths()（启动逻辑在 src/context.py）→ storage.init() → set_page_config
-② 34–36  注入全局 CSS（inject_css()，样式本体在 src/ui/styles.py）
-③ 38–39  认证门闸：CURRENT_USER = auth.require_user()（本体在 src/ui/auth.py；未登录 st.stop()，下面的代码根本不执行）
-④ 41–43  服务函数指针注释（本体在 src/services/）
-⑤ 45–48  侧边栏：sidebar.render(_paths, CURRENT_USER)（本体在 src/ui/sidebar.py），返回 Decision 解包出 result/dec/ms/pf
-⑥ 50–61  声明 6 个 tab（st.tabs 在 :51）
-⑦ 62–78  渲染 6 个 tab（全部 src/tabs/ 的 render() 调用）
+① 13–31  import → build_paths()（启动逻辑在 src/context.py）→ storage.init() → set_page_config
+② 34–35  注入全局 CSS（inject_css()，样式本体在 src/ui/styles.py）
+③ 37–38  认证门闸：CURRENT_USER = auth.require_user()（本体在 src/ui/auth.py；未登录 st.stop()，下面的代码根本不执行）
+④ 40–42  侧边栏：sidebar.render(_paths, CURRENT_USER)（本体在 src/ui/sidebar.py），返回 Decision 解包出 result/dec/ms/pf
+⑤ 44–54  声明 6 个 tab（st.tabs 在 :45）
+⑥ 56–66  渲染 6 个 tab（全部 src/tabs/ 的 render() 调用）
 ```
 
-**关键点：app.py 已是纯装配层**——每段只剩一行调用 + 指针注释，业务全在 `src/` 对应模块。模型执行点在 `src/ui/sidebar.py` render() 内（首跑 :130、金额重跑 :237，「模型跑两次」病灶 → `BUG-024`）；决策结果收口为 `Decision` 返回值，由 app.py 解包显式传给各 tab。
+**关键点：app.py 已是纯装配层**——每段只剩一行调用 + 指针注释，业务全在 `src/` 对应模块。模型执行点在 `src/ui/sidebar.py` render() 内（首跑 :124、表单提交后金额重跑 :235）；决策结果收口为 `Decision` 返回值，由 app.py 解包显式传给各 tab。
 
-（行号复核于 2026-08-18）
+（行号复核于 2026-08-19）
 
 ## 7. 六个 Tab 的职责
 
 | tab | 位置 | 行数 | 业务职责 | 依赖 |
 |---|---|---:|---|---|
-| 🎯 今日模拟 | `src/tabs/today.py`（BUG-020 刀 4 拆出） | 94 | 今日建议金额/部署系数/三资产分配/三档执行方案 | render(tab1, result, dec, ms, ASSETS) |
-| 📊 持仓与曲线 | `src/tabs/holdings.py`（刀 4 拆出） | 81 | 持仓汇总、估值、浮盈亏、XIRR、净值曲线 | render(tab2, result, pf, ASSETS, _paths) |
-| ✍️ 记账 | `src/tabs/records.py`（BUG-020 刀 5 拆出） | 132 | 回报成交 / 主动跳过，二次确认后落库 | render(tab3, result, dec, ASSETS, CURRENT_USER) |
-| 📜 历史记录 | `src/tabs/history.py`（刀 4 拆出） | 29 | 回读 transactions / observations | render(tab4, CURRENT_USER) |
-| 🧪 回测结果 | `src/tabs/backtest.py`（刀 4 拆出） | 249 | 5 段静态回测报告（全部读 `backtest/*.json`，BUG-025 已修；内部段界见详设 §10） | render(tab5, BACKTEST_DIR) |
-| 📖 策略说明 | `src/tabs/strategy_doc.py`（刀 4 拆出） | 21 | 读 `strategy/core-strategy.md` 渲染（唯一事实源，BUG-026 已修） | render(tab6, CODE_DIR) |
+| 🎯 今日模拟 | `src/tabs/today.py` | 93 | 今日建议金额/部署系数/三资产分配/三档执行方案 | render(tab1, result, dec, ms, ASSETS) |
+| 📊 持仓与曲线 | `src/tabs/holdings.py` | 80 | 持仓汇总、估值、浮盈亏、XIRR、净值曲线 | render(tab2, result, pf, ASSETS, _paths) |
+| ✍️ 记账 | `src/tabs/records.py` | 131 | 回报成交 / 主动跳过，二次确认后落库 | render(tab3, result, dec, ASSETS, CURRENT_USER) |
+| 📜 历史记录 | `src/tabs/history.py` | 26 | 回读 transactions / observations | render(tab4, CURRENT_USER) |
+| 🧪 回测结果 | `src/tabs/backtest.py` | 249 | 5 段静态回测报告（全部读 `backtest/*.json`；内部段界见详设 §10） | render(tab5, BACKTEST_DIR) |
+| 📖 策略说明 | `src/tabs/strategy_doc.py` | 18 | 读 `strategy/core-strategy.md` 渲染（唯一事实源） | render(tab6, CODE_DIR) |
 
 （行号复核于 2026-08-18）
 
@@ -185,7 +184,7 @@ tab4（29 行）是这条链的读侧，业务上和 tab3 是一件事。
 | `transactions` | 成交记录，含 `user` 列 |
 | `observations` | 跳过/观察记录，含 `user` 列 |
 | `budget_overrides` | 月度预算覆盖，含 `user` 列 |
-| `<任意表>_bak` | 写前快照（滚动单份）：覆写主表前先把现内容推到这里，快照失败则放弃写入（BUG-002 修复） |
+| `<任意表>_bak` | 写前快照（滚动单份）：覆写主表前先把现内容推到这里，快照失败则放弃写入 |
 
 所有数据表都带 `user` 列做行级隔离。 Sheets 只能整表读、整表写——这个约束与写前快照的动机见详设 §3。
 
@@ -193,7 +192,7 @@ tab4（29 行）是这条链的读侧，业务上和 tab3 是一件事。
 
 - 无 Google 凭据 → 自动降级单机模式，读写 `data/{transactions,observations}.csv` + `data/budget_overrides.json`
 - 云端模式每用户落盘缓存 `data/users/<user>/`（`sync_local` 生成，覆盖前轮转留底 10 份），供引擎 `--user` 读取
-- **行情缓存 `data/market_history/*.csv`（6 个文件，两列 `date,close`，增量更新）——入库是刻意的**，让 Cloud 部署不用冷启动重抓十年数据。⚠️ 这是本仓库最宝贵的资产，别删 → `BUG-006`；增量机制的代价见详设 §4
+- **行情缓存 `data/market_history/*.csv`（6 个文件，两列 `date,close`，增量更新）——入库是刻意的**，让 Cloud 部署不用冷启动重抓十年数据。⚠️ 这是本仓库最宝贵的资产，别删；增量机制的代价见详设 §4
 
 ## 9. 目录逐个说明
 
@@ -201,10 +200,10 @@ tab4（29 行）是这条链的读侧，业务上和 tab3 是一件事。
 
 | 路径 | 行数 | 是什么 | 谁读它 | 入库 |
 |---|---:|---|---|:---:|
-| `app.py` | 78 | Streamlit 主程序，**纯装配层**：import → build_paths → storage.init → 认证一行 → 侧栏一行 → 6 个 tab render 调用（BUG-020 七刀全部落地） | Streamlit 直接执行 | ✅ |
-| `src/` | 1790 | **app.py 拆分新家（BUG-020 收官）**：`context.py`（73，启动上下文 `Paths`/`Decision`/`build_paths`）+ `services/`（`model.py` 45 模型调用 / `quotes.py` 87 行情抓取 / `curves.py` 85 曲线数据）+ `ui/`（`styles.py` 186 全局 CSS / `overlays.py` 60 三遮罩 / `sidebar.py` 304 侧栏，返回 `Decision` / `auth.py` 332 认证门闸，`require_user()`）+ `tabs/`（`today.py` 94 / `holdings.py` 81 / `records.py` 132 / `history.py` 29 / `backtest.py` 249 / `strategy_doc.py` 21，各暴露 `render(tab, ...)` 显式收参）；不读 app.py 模块级全局 | `app.py` import | ✅ |
+| `app.py` | 66 | Streamlit 主程序，**纯装配层**：import → build_paths → storage.init → 认证一行 → 侧栏一行 → 6 个 tab render 调用 | Streamlit 直接执行 | ✅ |
+| `src/` | 1773 | **业务层**（app.py 只留装配）：`context.py`（73，启动上下文 `Paths`/`Decision`/`build_paths`）+ `services/`（`model.py` 45 模型调用 / `quotes.py` 87 行情抓取 / `curves.py` 85 曲线数据）+ `ui/`（`styles.py` 185 全局 CSS / `overlays.py` 59 三遮罩 / `sidebar.py` 302 侧栏，返回 `Decision` / `auth.py` 328 认证门闸，`require_user()`）+ `tabs/`（`today.py` 93 / `holdings.py` 80 / `records.py` 131 / `history.py` 26 / `backtest.py` 249 / `strategy_doc.py` 18，各暴露 `render(tab, ...)` 显式收参）；不读 app.py 模块级全局 | `app.py` import | ✅ |
 | `storage.py` | 594 | 存储层。所有 Google Sheets 读写都走它（含写前快照、PBKDF2 认证）；19 个公开接口明细见详设 §9 | `app.py` import | ✅ |
-| `requirements.txt` | 6 | 依赖清单。只约束包版本且几乎全无上界，未声明 Python 版本 → `BUG-015` | Cloud 装依赖时 | ✅ |
+| `requirements.txt` | 6 | 依赖清单。只约束包版本且几乎全无上界，未声明 Python 版本 | Cloud 装依赖时 | ✅ |
 | `CHANGELOG.md` | — | **全量改动的人读版流水**：每 commit 一行带 `HH:MM:SS` 时刻（取自 git），由 `scripts/changelog.py` 生成/校验 | 人 | ✅ |
 | `start-app.bat` | — | 本机双击启动 | 你 | ✅ |
 | `CLAUDE.md` | — | 给 AI 编程助手的项目说明 | AI 助手 | ✅ |
@@ -215,7 +214,7 @@ tab4（29 行）是这条链的读侧，业务上和 tab3 是一件事。
 
 | 路径 | 行数 | 说明 |
 |---|---:|---|
-| `scripts/dca_calculator.py` | 938 | **策略大脑**。完全独立可单跑，不依赖 Streamlit。输入 = CSV + config，输出 = JSON（15 个顶层键）；参数与键明细见详设 §11 |
+| `scripts/dca_calculator.py` | 983 | **策略大脑**。完全独立可单跑，不依赖 Streamlit。输入 = CSV + config，输出 = JSON（16 个顶层键）；行情快照 `data/quote_snapshot.json`（TTL 600 秒）复用抓价结果；参数与键明细见详设 §11 |
 | `scripts/dca_action.py` | 187 | 业务动作 CLI（`record tx` / `record obs` / `override`）：Skill 入口经它与 Web 共用 storage 业务层；shares 可按金额自动换算，sheets 模式写后自动 `sync_local` 刷新落盘缓存 |
 | `scripts/changelog.py` | 115 | CHANGELOG 维护工具：`add <hash>` 从 git 取提交时刻生成行草稿；`--check` 校验每个 commit 都有行且时刻与 git 一致（CLAUDE.md 第 12 条的配套） |
 
@@ -228,31 +227,31 @@ tab4（29 行）是这条链的读侧，业务上和 tab3 是一件事。
 | `data/transactions.csv` | **成交记录**（真实持仓的账本） | ❌ | 仅本地单机模式使用；云端模式已改 `data/users/<user>/` |
 | `data/observations.csv` | 跳过/观察记录 | ❌ | 同上 |
 | `data/budget_overrides.json` | 按月覆盖预算 | ❌ | 同上 |
-| `data/*.localbak` | 轮转留底文件 | ❌ | 2026-08-18 起为带时间戳的真轮转（旧"只留一份"假保护已随 BUG-002 修复移除） |
+| `data/*.localbak` | 轮转留底文件 | ❌ | 带时间戳的真轮转（覆盖前自动留底 10 份） |
 | `data/market_history/*.csv` | **行情缓存**，6 个文件，两列（`date,close`） | ✅ | **入库是刻意的** —— 让 Cloud 部署不用冷启动重抓十年数据 |
 
-**行情缓存 6 个文件**：`_GSPC.csv`（标普指数）、`SPY.csv`（标普 ETF）、`_NDX.csv`（纳指）、`QQQ.csv`（纳指 ETF）、`GC_F.csv`（黄金期货）、`XAUT_USD.csv`（黄金代币）。孤儿 `GLD.csv`（不在抓取名单、冻结在 2026-08-10）已于 2026-08-18 从仓库移除（BUG-023），取回：`git show f1ed967:data/market_history/GLD.csv`。
+**行情缓存 6 个文件**：`_GSPC.csv`（标普指数）、`SPY.csv`（标普 ETF）、`_NDX.csv`（纳指）、`QQQ.csv`（纳指 ETF）、`GC_F.csv`（黄金期货）、`XAUT_USD.csv`（黄金代币）。孤儿 `GLD.csv`（不在抓取名单、冻结在 2026-08-10）已从仓库移除，取回：`git show f1ed967:data/market_history/GLD.csv`。
 
 ### 9.4 `backtest/` — 回测（一次性产物，非运行时依赖）
 
 | 路径 | 说明 |
 |---|---|
-| `backtest_dca.py` / `backtest_single.py` / `backtest_compare3.py` | 回测脚本。⚠️ 全部写死旧绝对路径 `C:\Users\xiezhibo\.claude\skills\...`，现在跑不起来 → `BUG-015` |
+| `backtest_dca.py` / `backtest_single.py` / `backtest_compare3.py` | 回测脚本。⚠️ 全部写死旧绝对路径 `C:\Users\xiezhibo\.claude\skills\...`，现在跑不起来 |
 | `results_compare3.json` | Tab5 第一段读它（三策略对比） |
 | `results_single_compare.json` | Tab5 第三段读它（单品种动态 vs 固定） |
-| `results_rolling.json` | Tab5 第三段四张滚动表 + 第四段横向对比读它（BUG-025：2026-08-18 从 app.py 硬编码导出，33 行 × 338 格与原字面量逐格相等） |
+| `results_rolling.json` | Tab5 第三段四张滚动表 + 第四段横向对比读它（从 app.py 硬编码无损导出，33 行 × 338 格与原字面量逐格相等） |
 | `results.json` / `results_single.json` / `results.md` / `compare3.md` | 中间产物与文字报告，应用不读 |
 
 ### 9.5 `strategy/` — 策略文档
 
 | 路径 | 说明 |
 |---|---|
-| `strategy/core-strategy.md` | 策略说明**唯一事实源**。Tab6 启动时读它直接渲染（BUG-026 已修，内嵌副本已删） |
+| `strategy/core-strategy.md` | 策略说明**唯一事实源**。Tab6 启动时读它直接渲染，改文档即改页面 |
 
 ### 9.6 `deploy/` — 部署与外发
 
 > **2026-08-17 已清理**：Docker 那套（`Dockerfile` / `docker-compose.yml` / `nginx.conf` / `setup_user.sh` / `streamlit-config.toml`）已删除 —— 它从未成功构建过一次（自 `574c7a7` 初始提交起一行未改），却被标为"唯一事实源"。
-> 取回：`git show 574c7a7:deploy/Dockerfile`。删除理由与「将来重启 Docker 的必守清单」见 `deploy/DEPLOY.md` 第 5 节；对应的问题记录是 `BUG-012`（连带 `BUG-005` / `BUG-013` / `BUG-014`）。
+> 取回：`git show 574c7a7:deploy/Dockerfile`。删除理由与「将来重启 Docker 的必守清单」见 `deploy/DEPLOY.md` 第 5 节。
 
 | 路径 | 状态 | 说明 |
 |---|---|---|
@@ -298,7 +297,7 @@ tab4（29 行）是这条链的读侧，业务上和 tab3 是一件事。
 - **General → App URL** —— 自定义子域 `dca365`
 - **Sharing → public** —— 否则访问者要先登录有权限的 Streamlit 账号，家人打不开
 
-> 应用是 public 的，意味着**应用内的「名字 + PIN」门闸是唯一防线**。→ `BUG-003`、`BUG-004`
+> 应用是 public 的，意味着**应用内的「名字 + PIN」门闸是唯一防线**（fail-closed：凭据缺失/损坏即拒启动；PBKDF2 + 连续失败锁定）。
 
 ## 11. 日志体系 —— 三层分野
 
@@ -306,9 +305,9 @@ tab4（29 行）是这条链的读侧，业务上和 tab3 是一件事。
 |---|---|---|:---:|
 | 机器流水 | 每个 commit 的精确时刻（epoch 存于 `.git/logs/`，人读格式用 `git log --date=format-local`） | git 自身 | — |
 | 改动日志 | 人读版流水：每 commit 一行、**带 HH:MM:SS 时刻**（取自 git，非手写） | 根目录 `CHANGELOG.md`，由 `scripts/changelog.py` 生成/校验 | ✅ |
-| 运行日志 | 应用运行时事件（登录、同步、抓取）——**尚未实现**，→ `BUG-017` | `logs/`（2026-08-18 拍板落点；`*.log` 不入库，`.gitkeep` 占位） | ❌ |
+| 运行日志 | 应用运行时事件（登录、同步、抓取）——**尚未实现** | `logs/`（约定落点；`*.log` 不入库，`.gitkeep` 占位） | ❌ |
 
-⚠️ `logs/` 落点只对**本机 / 长期部署**有意义：Streamlit Cloud 容器重启即丢文件系统，届时运行日志需另配持久化（那是 BUG-017 实现时要解的题）。
+⚠️ `logs/` 落点只对**本机 / 长期部署**有意义：Streamlit Cloud 容器重启即丢文件系统，届时运行日志需另配持久化（那是运行日志实现时要解的题）。
 
 ---
 
@@ -332,3 +331,4 @@ tab4（29 行）是这条链的读侧，业务上和 tab3 是一件事。
 | 2026-08-18 | **BUG-020 刀 6/7：侧边栏外搬**。侧栏（278 行：用户管理 + 行情卡片 + 基准金额 + 汇率 + 预算 + 免责声明 + 数据迁移，含模型执行点）搬至 `src/ui/sidebar.py`（304 行，`render(paths, user)` 返回 `Decision` 收口 result/dec/ms/pf）；app.py 侧换 4 行调用，死引用同步摘除（`run_model`/`fetch_*`/`show_loading`/`date` import 与 BASE/TX_CSV/CONFIG 三个过渡桥别名）。**app.py 663→385 行**；本文 §3/§5/§6/§9 改指新模块 | 第六刀。「模型跑两次」病灶（BUG-024）执行点随之入模块（sidebar.py 内 :130/:237）。AppTest 冒烟 9 项 PASS（侧栏标题/行情/汇率/金额+预算输入框/tab1 metric/6 tab 齐/exceptions 0，**含手填 5000 触发金额重跑分支**）、行情缓存备份/还原无污染 |
 | 2026-08-18 | **BUG-020 刀 7/7：认证收口，拆分收官**。认证门闸（303 行：登录页渲染 + fail-closed + 三阶段状态机 + 会话首同步）搬至 `src/ui/auth.py`（332 行，`require_user()` 零参数、返回用户名）；app.py 侧换 1 行调用，`contextlib`/`os`/遮罩 import 同步摘除。**app.py 385→78 行，纯装配层，BUG-020 七刀全部落地**；本文 §3/§5/§6/§9 改指新模块 | 第七刀，最高风险隔离单独成刀。两段式防残留设计原样随迁（ph.empty() 真删除 + 遮罩不透明 background，详设 §6）。**AppTest 5 条认证路径 12 项全 PASS**：local 直通 / 凭据缺失 fail-closed / 凭据损坏 fail-closed / 未登录渲染登录页且主界面拦截 / 已登录直通（sheets 状态 monkeypatch 模拟）；行情缓存备份/还原无污染 |
 | 2026-08-18 | **BUG-022 修复：新增 `scripts/dca_action.py`（187 行）业务动作 CLI**，Skill 入口经 `record tx` / `record obs` / `override` 子命令与 Web 共用 storage 业务层；shares 可按金额自动换算，sheets 模式写后自动 `sync_local` 刷新落盘缓存 | 此前 Skill 绕过业务层直接调引擎，记账/预算覆盖两边口径分叉；现在写操作全部收口到同一 `storage.py`，双入口行为一致 |
+| 2026-08-19 | **BUG-024 修复：引擎行情快照复用 + 侧栏金额表单化**。`dca_calculator.py`（938→983 行）新增 `data/quote_snapshot.json`——抓价成功后落盘 markets 摘要 + 汇率，TTL 600 秒（`--snapshot-ttl` 可调，0 禁用；任一标的抓价失败当趟不落盘），TTL 内运行跳过重复抓价与缓存增量写（下次冷跑自动追平）；输出 JSON 第 16 个顶层键 `quote_snapshot`（used/age_s/ttl_s）。侧栏金额输入收进 `st.sidebar.form("amount_form")`，键入不再逐击触发整页重跑 | 「我想投 X」每次会话此前付两遍完整计算（含 8 个串行行情请求）；实测重跑趟 t2=0.31s 为冷跑 t1=2.72s 的 11.3%（BUGLIST 验收标准 <20%） |

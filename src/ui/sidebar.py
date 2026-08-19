@@ -1,12 +1,9 @@
 # -*- coding: utf-8 -*-
 """侧边栏：用户管理 + 实时行情 + 基准金额 + 汇率 + 预算 + 免责声明 + 本地历史迁移，并在这里跑模型。
 
-BUG-020 刀 6 从 app.py:357-634 原样搬入；仅三处结构性调整（零逻辑改动）：
-1. 全局 CURRENT_USER / _paths / CONFIG 换成显式参数（render(paths, user)，
-   current_budget_display(user, config)）
-2. QUOTE_ROWS / _quote_html / _fail_html / current_budget_display 四个纯辅助
-   提升到模块级（在原文件里它们定义于侧栏段落中间，不闭包任何局部变量）
-3. result/dec/ms/pf 不再落模块作用域，收口为返回值 Decision（src/context.py）
+render(paths, user) 显式收参、不读 app.py 模块级全局；result/dec/ms/pf 收口为
+返回值 Decision（src/context.py），由 app.py 解包传给各 tab。QUOTE_ROWS /
+_quote_html / _fail_html / current_budget_display 为模块级纯辅助（不闭包局部变量）。
 """
 from __future__ import annotations
 

@@ -21,18 +21,18 @@
 
 ```
 sp500-nasdaq100-gold-dca/
-├── app.py                    # Streamlit 主程序（✅ 78 行纯装配层：BUG-020 七刀全部落地，业务全在 src/）
+├── app.py                    # Streamlit 主程序（66 行纯装配层：import/认证一行/侧栏一行/6 个 tab 调用，业务全在 src/）
 ├── storage.py                # 存储层：Google Sheets 优先，本地 CSV 回退（594 行；含写前快照、PBKDF2 认证）
-├── src/                      # app.py 拆分新家（BUG-020，7 刀方案逐刀外搬中）
+├── src/                      # 业务层：app.py 只留装配，逻辑全在这里
 │   ├── context.py            # 启动上下文：Paths / Decision / build_paths（73 行；code_dir 按 parent.parent 定位）
 │   ├── services/             # 服务层：model.py 模型调用（45）/ quotes.py 行情抓取（87）/ curves.py 曲线数据（85）
-│   ├── ui/                   # 样式/遮罩/侧栏/认证：styles.py 全局 CSS（186）/ overlays.py 三遮罩（60）/ sidebar.py 侧栏（304，返回 Decision）/ auth.py 认证门闸（332，require_user()）
-│   └── tabs/                 # 六个 tab 渲染：today(94)/holdings(81)/records(132，记账写链)/history(29)/backtest(249)/strategy_doc(21)，各暴露 render(tab, ...)
+│   ├── ui/                   # 样式/遮罩/侧栏/认证：styles.py 全局 CSS（185）/ overlays.py 三遮罩（59）/ sidebar.py 侧栏（302，返回 Decision）/ auth.py 认证门闸（328，require_user()）
+│   └── tabs/                 # 六个 tab 渲染：today(93)/holdings(80)/records(131，记账写链)/history(26)/backtest(249)/strategy_doc(18)，各暴露 render(tab, ...)
 ├── CHANGELOG.md              # 改动日志：每个 commit 一行带时刻（人读版流水，见第 12 条；scripts/changelog.py 维护）
 ├── start-app.bat             # 本机双击启动 Streamlit
-├── logs/                     # 运行日志约定落点（*.log 不入库；Cloud 容器重启即失，实现见 BUG-017）
+├── logs/                     # 运行日志约定落点（*.log 不入库；Cloud 容器重启即失，运行日志尚未实现）
 ├── scripts/
-│   ├── dca_calculator.py     # 计算引擎（938 行，独立可运行，输出 JSON；--user 读 data/users/<user>/）
+│   ├── dca_calculator.py     # 计算引擎（983 行，独立可运行，输出 JSON；--user 读 data/users/<user>/；行情快照 600s 内复用抓价结果）
 │   ├── dca_action.py         # 业务动作 CLI（187 行）：record tx/obs + override，Skill 经它与 Web 共用 storage 业务层
 │   └── changelog.py          # CHANGELOG 维护：add <hash> 生成带时刻的行，--check 校验全覆盖
 ├── data/
@@ -69,7 +69,7 @@ sp500-nasdaq100-gold-dca/
 ```
 app.py（UI + 业务逻辑，耦合较紧）
    │
-   ├── import ──────→ src/（BUG-020 七刀全落：context 启动上下文、services 模型/行情/曲线、
+   ├── import ──────→ src/（context 启动上下文、services 模型/行情/曲线、
    │                       ui 样式/遮罩/侧栏/认证、tabs 全部六个 tab；函数显式收 src/context.Paths 等参数，
    │                       不读 app.py 模块级全局）
    │
@@ -91,27 +91,7 @@ app.py（UI + 业务逻辑，耦合较紧）
 
 | 问题 | 现状 | 计划 |
 |---|---|---|
-| ~~app.py 过长~~ ✅ 已收口 | 78 行纯装配层（原 1559；BUG-020 七刀 2026-08-18 一天内全部落地：context/services/ui/tabs 全拆） | 拆分方案见 `docs/plans/app-split-design.md`（存档） |
 | 状态管理分散 | `st.session_state` 多处读写 | 集中管理 |
-
-**拆分方案（已于 2026-08-18 七刀全部落地，此处存档；实施时认证/侧栏拆成两刀，与草案略有出入）：**
-
-```
-src/
-├── ui/
-│   ├── styles.py          # CSS（~180 行）
-│   ├── auth.py            # 登录门闸 + 遮罩（~200 行）
-│   ├── sidebar.py         # 侧边栏：行情/预算/汇率（~260 行）
-│   └── components.py      # loading / quote 卡片
-├── tabs/
-│   ├── today.py           # Tab1 今日模拟
-│   ├── holdings.py        # Tab2 持仓与曲线
-│   ├── records.py         # Tab3 记账
-│   ├── history.py         # Tab4 历史
-│   ├── backtest.py        # Tab5 回测结果
-│   └── strategy_doc.py    # Tab6 策略文档
-└── services/              # ✅ 刀 2 已落（实装名为 model.py 模型调用 / quotes.py 行情 / curves.py 曲线）
-```
 
 ---
 

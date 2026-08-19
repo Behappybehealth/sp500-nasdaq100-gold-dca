@@ -32,11 +32,11 @@
 | 问题 | Streamlit 的机制 | 项目里怎么用的 |
 |---|---|---|
 | 重跑一遍，之前用户填的东西不就丢了？ | **`st.session_state`** —— 一个字典，跨"重跑"活着，每个浏览器标签页各有一份 | 存登录状态 `user`、待确认的记账 `pending_tx` 等 **10 个键**（明细见 §8） |
-| 重跑一遍，慢操作（抓行情、算模型）每次都重做？ | **`st.cache_data`** —— 记住函数的结果，下次同样参数直接返回 | `run_model()` 缓存 900 秒 ← **`BUG-001` 就出在这里** |
-| 重跑一遍，怎么让页面停在登录页不往下走？ | **`st.stop()`** —— 立刻停止本次执行 | 认证门闸用它拦住未登录用户 ← **`BUG-003` 出在这里** |
+| 重跑一遍，慢操作（抓行情、算模型）每次都重做？ | **`st.cache_data`** —— 记住函数的结果，下次同样参数直接返回 | `run_model()` 缓存 900 秒，缓存键含用户名（多用户不串号） |
+| 重跑一遍，怎么让页面停在登录页不往下走？ | **`st.stop()`** —— 立刻停止本次执行 | 认证门闸用它拦住未登录用户 |
 
 > **最关键的一条：`st.session_state` 是"每个浏览器一份"，但 `st.cache_data` 是"整个服务器共用一份"。**
-> 这个区别很容易搞混，也是 `BUG-001` 的全部原因。
+> 这个区别很容易搞混——所以 `run_model()` 的缓存键必须含用户身份，否则 A 用户的结果会被 B 直接命中。
 
 **还有一个必须知道的怪癖**：以 `st.rerun()` 结束的运行**不会清除该趟未重新渲染的旧元素**。所以瞬态页面（比如登录页）必须整体挂进一个固定的 `st.empty()` 容器，跳转前用 `容器.empty()` 把它从 DOM 里**真删除**，而不是用遮罩盖住 —— 否则登录表单会残留并漂在主应用上。这个坑踩过三轮，细节见 §6。
 
@@ -52,7 +52,7 @@ app.py  ──启动一个全新的 Python 程序──→  scripts/dca_calculat
         （app.py 读这段文字，转成数据用）
 ```
 
-用代码看就是 `run_model()` 内（src/services/model.py:19 定义，subprocess 调用在 :31；BUG-020 刀 2 前在 app.py:586/:598）：
+用代码看就是 `run_model()` 内（src/services/model.py:19 定义，subprocess 调用在 :31）：
 
 ```python
 cmd = [sys.executable, "scripts/dca_calculator.py", "--base-dir", str(BASE)]
@@ -62,9 +62,9 @@ return json.loads(out.stdout)          # 把对方打印的 JSON 转成 Python �
 
 **打个比方**：不自己做饭，打电话叫外卖。好处是厨房（引擎）和餐厅（UI）完全隔离——改菜谱不会弄坏餐厅装修。**这个设计是对的，也是这个项目最干净的一处。**
 
-代价是：两边只能通过"命令行参数"和"打印出来的文字"沟通。**引擎不知道谁是当前用户**，它只知道 `--base-dir` 指向哪个目录、那个目录里的 CSV 写了什么。这是 `BUG-001` 的另一半原因。
+代价是：两边只能通过"命令行参数"和"打印出来的文字"沟通。**引擎不知道谁是当前用户**，它只知道 `--base-dir` 指向哪个目录、那个目录里的 CSV 写了什么——所以多用户模式靠 `--user` 参数让引擎改读 `data/users/<user>/` 下的分目录数据。
 
-（行号复核于 2026-08-18）
+（行号复核于 2026-08-19）
 
 ---
 
@@ -85,7 +85,7 @@ return json.loads(out.stdout)          # 把对方打印的 JSON 转成 Python �
   → 把这 201 行整体推上去，覆盖原来的 200 行
 ```
 
-**打个比方**：改一个字，要把整本书重新抄一遍再交上去。**这是 `BUG-002` 的全部原因**——如果"读下来"这一步失败了，你手里就是一本空书，抄完交上去，原来那本就没了。
+**打个比方**：改一个字，要把整本书重新抄一遍再交上去。**所以"读下来"这一步是命门**——如果它失败了，你手里就是一本空书，抄完交上去，原来那本就没了。storage 因此定下两条规矩：读失败抛错拒写（空表不覆写）、写前先把现内容快照到 `_bak` 表。
 
 另有**进程内全局 8 秒短缓存** `_SHEET_CACHE`（storage.py:138–139，TTL 定义在 :139），`_read_ws(..., fresh=True)`（:149 起）可绕过它强制新鲜读。
 
@@ -107,7 +107,7 @@ dca_calculator.py:293-296   save_cached_closes() 内 path.open("w") 整文件截
 `period1 = last_cached` 意味着**最前沿那一天每次运行都会被重抓并按日期键覆盖**。
 
 - **好处**：当天的价格会自动从盘中价修正成收盘价（自愈一天）
-- **代价**：只要有更晚的日期落库，前一天就再也不会被重新请求 —— **脏值永久冻结**。→ `BUG-006`
+- **代价**：只要有更晚的日期落库，前一天就再也不会被重新请求 —— **脏值永久冻结**（这也是每次跑引擎/AppTest 前要备份行情缓存、跑后还原比对的原因）
 
 **抓取路径与降级顺序**：
 
@@ -121,9 +121,9 @@ yfinance 兜底（auto_adjust=True）
 东财 push2（curl 子进程，3 次重试无退避）→ XAU / BTC 实时价
 ```
 
-⚠️ 两条路径**复权口径不一致**：Chart 走原始 `quote.close`，yfinance 兜底用 `auto_adjust=True`。→ `BUG-007`
+⚠️ 两条路径**复权口径不一致**：Chart 走原始 `quote.close`，yfinance 兜底用 `auto_adjust=True`。
 
-（行号复核于 2026-08-18）
+（行号复核于 2026-08-19）
 
 ---
 
@@ -140,7 +140,7 @@ st-gsheets-connection>=0.1.0   本机实装 0.1.0
 gspread>=5.8.0,<6        本机实装 5.12.4  ← 唯一有上界的
 ```
 
-无 lock 文件。**声明的和实装的差很远，等于没有可复现性** —— 上游一发版就可能把线上打挂。→ `BUG-015`
+无 lock 文件。**声明的和实装的差很远，等于没有可复现性** —— 上游一发版就可能把线上打挂。
 
 Python 版本只活在两处事实里：本机 `.venv` 实装 **3.14.4**，以及 Streamlit Cloud 平台侧的隐式默认。哪天上游镜像换了 Python 大版本，没有任何声明能拦住。
 
@@ -148,9 +148,9 @@ Python 版本只活在两处事实里：本机 `.venv` 实装 **3.14.4**，以�
 
 ---
 
-## 6. 认证链深挖（src/ui/auth.py，332 行；BUG-020 刀 7 起）
+## 6. 认证链深挖（src/ui/auth.py，328 行）
 
-> 2026-08-18 刀 7 前本节锚点在 app.py（44–346）；现 app.py 侧仅剩 :39 一行 `CURRENT_USER = auth.require_user()`。
+> app.py 侧仅剩 :38 一行 `CURRENT_USER = auth.require_user()`，本节锚点全部在 auth.py。
 
 三阶段状态机，全部走 `st.session_state`：
 
@@ -160,7 +160,7 @@ Python 版本只活在两处事实里：本机 `.venv` 实装 **3.14.4**，以�
 | `activate` | 账号存在但未激活 | 首次设 PIN → `storage.set_pin()` |
 | `bootstrap` | users 表为空 | 首个注册者自动成为 admin → `storage.create_user()` |
 
-区间构成：登录/激活/自举页渲染函数 `_render_login_page()` 定义于 auth.py:24；门闸入口 `require_user()` 在 :172（零参数，全部输入走 storage / session_state / 环境变量）；fail-closed 认证模式判断在 :180 一带（`DCA_AUTH_MODE=local` 才进单机模式，secrets 缺失/损坏 :195 `st.stop()`）；登录门闸执行在 :319–321（`with _login_ph.container(): _render_login_page(...)` + `st.stop()`）；:322–330 是登录成功后的**会话首同步**（`storage.sync_local(user)`，同步失败不阻塞但给可见警告）；:332 返回用户名。
+区间构成：登录/激活/自举页渲染函数 `_render_login_page()` 定义于 auth.py:20；门闸入口 `require_user()` 在 :168（零参数，全部输入走 storage / session_state / 环境变量）；fail-closed 认证模式判断在 :174 一带（`DCA_AUTH_MODE=local` 才进单机模式，secrets 缺失/损坏 :191 `st.stop()`）；登录页渲染前的名单读取同样 fail-closed（:305–313，读不出名单直接报错停住，绝不渲染"创建管理员"表单）；登录门闸执行在 :315–317（`with _login_ph.container(): _render_login_page(...)` + `st.stop()`）；:318–327 是登录成功后的**会话首同步**（`storage.sync_local(user)`，同步失败不阻塞但给可见警告）；:328 返回用户名。
 
 **两段式设计（踩过 3 轮坑，不要动）：** 点击那一趟**零网络 I/O**（用户名单取 session 缓存），把意图写进 `session_state["_auth"]` → `ph.empty()` 把登录页从 DOM 里**真删除**（不是遮住）→ 挂 `show_auth_mask` → `st.rerun()`。下一趟才在遮罩后面做全部网络工作。
 
@@ -169,35 +169,35 @@ Python 版本只活在两处事实里：本机 `.venv` 实装 **3.14.4**，以�
 1. 以 `st.rerun()` 结束的运行不会清除该趟未重新渲染的旧元素 → 登录表单残留并漂在主应用上
 2. 遮罩必须写 `background` —— 曾因遮罩透明导致残留登录页透出，**DOM 检查全过但用户看到冻屏**。验证遮罩不能只看元素在不在 DOM，要查 computedStyle 背景不透明度或截图
 
-（行号复核于 2026-08-18）
+（行号复核于 2026-08-19）
 
 ---
 
-## 7. 决策链：模型为什么跑两次
+## 7. 决策链：两次模型运行与行情快照
 
 ```
 侧栏渲染 ──→ run_model(None) ──subprocess──→ scripts/dca_calculator.py ──→ JSON
                     │
-                    └─→ result / dec / ms / pf 落在模块作用域
+                    └─→ result / dec / ms / pf 收口为 Decision 返回值
                                 │
               ┌─────────────────┼──────────────────┐
             tab1 今日模拟      tab2 持仓曲线      tab3 记账
          (result×9 dec×6 ms×4)  (pf×8)        (result×3 dec×3)
 ```
 
-服务函数已随 BUG-020 刀 2 搬至 `src/services/`（`run_model` model.py:19、`parse_wide_table` model.py:42、`fetch_xau_spot` quotes.py:18、`fetch_btc` quotes.py:64、`_load_json` curves.py:19、`load_price_series` curves.py:28、`portfolio_curve` curves.py:44；全部显式收 `paths: Paths` 参数，`Paths` 定义于 `src/context.py`）；执行点已随刀 6 搬至 `src/ui/sidebar.py` render() 内（首跑 :130、`# ---- 先运行模型 ----` 标记 :125、金额重跑 :237），app.py 侧仅剩 :354 一行调用，结果收口为 `Decision` 返回值（`src/context.py`）后解包。下游 tab1/tab2 已随刀 4 拆至 `src/tabs/today.py`、`src/tabs/holdings.py`，tab3 已随刀 5 拆至 `src/tabs/records.py`（result/dec/ms/pf 等数据全部由 app.py 以显式参数传入 render()）。
+服务函数在 `src/services/`（`run_model` model.py:19、`parse_wide_table` model.py:42、`fetch_xau_spot` quotes.py:18、`fetch_btc` quotes.py:64、`_load_json` curves.py:19、`load_price_series` curves.py:28、`portfolio_curve` curves.py:44；全部显式收 `paths: Paths` 参数，`Paths` 定义于 `src/context.py`）；执行点在 `src/ui/sidebar.py` render() 内（首跑 :124、表单提交后金额重跑 :235），app.py 侧仅剩 :41 一行调用，结果收口为 `Decision` 返回值（`src/context.py`）后解包。下游 tab1/tab2/tab3 分别在 `src/tabs/today.py` / `holdings.py` / `records.py`（result/dec/ms/pf 等数据全部由 app.py 以显式参数传入 render()）。
 
-**模型会跑两次**：侧栏先 `run_model(None)` 自动定额；若用户手填了金额（`amount_in > 0`），再 `run_model(amount_in)` 整体重跑一遍子进程。→ `BUG-024`
+**模型会跑两次，但第二遍不再白跑**：侧栏先 `run_model(None)` 自动定额；用户在 `amount_form` 表单里提交金额后再 `run_model(amount_in)` 整体重跑一遍子进程——重跑趟命中引擎的行情快照（`data/quote_snapshot.json`，TTL 600 秒，`--snapshot-ttl` 可调，0 禁用；任一标的抓价失败当趟不落盘），跳过 8 个串行行情请求与缓存增量写（下次冷跑自动追平），实测第二趟耗时约为首趟的 11%。引擎输出第 16 个顶层键 `quote_snapshot`（used/age_s/ttl_s）自报快照命中情况。
 
-（行号复核于 2026-08-18）
+（行号复核于 2026-08-19）
 
 ---
 
 ## 8. 全局耦合实测清单
 
-> ⚠️ **拆分前基线**（1559 行版 app.py，2026-08-18 上午实测）。BUG-020 七刀已于同日全部落地，app.py 收口为 78 行纯装配层——本表保留为历史基线不再重测。收口后 app.py 模块级全局仅剩 6 个（`_paths` / `CODE_DIR` / `DATA_DIR` / `ASSETS` / `BACKTEST_DIR` / `CURRENT_USER`），全部是装配参数，业务代码零引用模块级全局。
+> ⚠️ **拆分前基线**（1559 行版 app.py，2026-08-18 上午实测）。app.py 现已收口为 66 行纯装配层——本表保留为历史基线不再重测。收口后 app.py 模块级全局仅剩 6 个（`_paths` / `CODE_DIR` / `DATA_DIR` / `ASSETS` / `BACKTEST_DIR` / `CURRENT_USER`），全部是装配参数，业务代码零引用模块级全局。
 >
-> 口径：`\b名字\b` 在 app.py 的出现次数（含注释提及），按结构区分桶。分区边界见概要版 §6（渲染时序）。2026-08-18 重测——上一版数字在 BUG-023/025 两次手术后已漂移，本次全部重算。
+> 口径：`\b名字\b` 在 app.py 的出现次数（含注释提及），按结构区分桶。分区边界见概要版 §6（渲染时序）。2026-08-18 重测（上一版数字在死代码清理与 Tab5 数据导出两次改动后已漂移，该次全部重算）。
 
 **模块级全局 8 个**，作用域比想象的窄得多：
 
@@ -206,7 +206,7 @@ Python 版本只活在两处事实里：本机 `.venv` 实装 **3.14.4**，以�
 | `CURRENT_USER` | 17 | 0 | 3 | 0 | 10 | 0 | 0 | 2 | 2 | 0 | 0 | 会话态 |
 | `DATA_DIR` | 8 | 5 | 0 | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | **纯服务层** |
 | `ASSETS` | 8 | 1 | 0 | 0 | 0 | 1 | 1 | 5 | 0 | 0 | 0 | 配置 |
-| `CODE_DIR` | 6 | 3 | 0 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 1 | 服务层 + tab6（BUG-026 起 tab6 用它定位 strategy/） |
+| `CODE_DIR` | 6 | 3 | 0 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 1 | 服务层 + tab6（tab6 用它定位 strategy/） |
 | `BASE` | 4 | 3 | 0 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | **纯服务层** |
 | `CONFIG` | 3 | 2 | 0 | 0 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 配置 |
 | `TX_CSV` | 4 | 1 | 0 | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | **纯服务层** |
@@ -248,7 +248,7 @@ Python 版本只活在两处事实里：本机 `.venv` 实装 **3.14.4**，以�
 
 ## 10. tab5「回测结果」内部构成（src/tabs/backtest.py，249 行）
 
-> BUG-020 刀 4 起本 tab 从 app.py 搬至 `src/tabs/backtest.py`（`render(tab, backtest_dir)` :17）；段界对齐模块内 `# ========== ①…⑤` 注释锚点。
+> 本 tab 在 `src/tabs/backtest.py`（`render(tab, backtest_dir)` :17）；段界对齐模块内 `# ========== ①…⑤` 注释锚点。
 
 | 段 | 行区间 | 行数 | 数据来源 |
 |---|---|---:|---|
@@ -258,19 +258,21 @@ Python 版本只活在两处事实里：本机 `.venv` 实装 **3.14.4**，以�
 | 四、四标的横向对比 | 214–219 | 6 | ✅ 读 `results_rolling.json` |
 | 五、综合结论 | 220–249 | 30 | 纯 markdown |
 
-历史上后五张表曾把 415 行数据硬写在代码里，2026-08-18 已导出 `results_rolling.json`（BUG-025），现在全 tab 统一从文件读数；文件缺失时 warning 优雅降级（加载器 `_load_json`，src/services/curves.py:19）。
+全 tab 统一从文件读数；文件缺失时 warning 优雅降级（加载器 `_load_json`，src/services/curves.py:19）。
 
 （行号复核于 2026-08-18）
 
 ---
 
-## 11. 计算引擎接口（scripts/dca_calculator.py，938 行）
+## 11. 计算引擎接口（scripts/dca_calculator.py，983 行）
 
-**参数四个**：`--amount`、`--base-dir`、`--history-years`、`--user`（多用户模式：记账数据从 `data/users/<user>/` 读取，config 与行情缓存保持共享；含路径穿越防护。没有 `--no-refresh`）。
+**参数五个**：`--amount`、`--base-dir`、`--history-years`、`--user`（多用户模式：记账数据从 `data/users/<user>/` 读取，config 与行情缓存保持共享；含路径穿越防护）、`--snapshot-ttl`（行情快照 TTL 秒数，默认 600，0=禁用。没有 `--no-refresh`）。
 
-**输入文件**：`data/config.json`、`data/market_history/`、记账三件套——无 `--user` 时读 `data/{transactions,observations}.csv` + `data/budget_overrides.json`，有 `--user` 时读 `data/users/<user>/` 下同名文件。
+**输入文件**：`data/config.json`、`data/market_history/`、`data/quote_snapshot.json`（存在且未过期时免抓价）、记账三件套——无 `--user` 时读 `data/{transactions,observations}.csv` + `data/budget_overrides.json`，有 `--user` 时读 `data/users/<user>/` 下同名文件。
 
-**输出**：print 一大段 JSON（:934），**15 个顶层键**——字面量构造 14 个（:918–931：`as_of` / `input_amount_rmb` / `effective_amount_rmb` / `usdcny` / `usdtcny` / `monthly_budget_status` / `config` / `has_local_transactions` / `last_records` / `since_last_record` / `markets` / `portfolio` / `decision` / `suggested_weights`），随后 :933 追加 `wide_table_markdown`（由 `render_wide_table()` :720 生成，app.py 侧 `parse_wide_table()` 解析回 DataFrame，src/services/model.py:42）。
+**行情快照**：`load_quote_snapshot()`（:407）/ `save_quote_snapshot()`（:425），落盘 `data/quote_snapshot.json`（`fetched_at` / markets 摘要 / `usdcny` / `usdtusd`，仅几 KB）。TTL 内命中（:885）则跳过行情抓取与缓存增量写——下次冷跑自动追平，不丢历史；任一标的抓价失败（带 `error`）当趟不落盘（:896 一带），防止坏快照连环命中。快照只是加速缓存：过期自动失效、缺失自动全抓，不入库。
+
+**输出**：print 一大段 JSON（:979），**16 个顶层键**——字面量构造 15 个（:961–976：`as_of` / `input_amount_rmb` / `effective_amount_rmb` / `usdcny` / `usdtcny` / `monthly_budget_status` / `config` / `has_local_transactions` / `last_records` / `since_last_record` / `markets` / `quote_snapshot` / `portfolio` / `decision` / `suggested_weights`），随后 :978 追加 `wide_table_markdown`（由 `render_wide_table()` :753 生成，app.py 侧 `parse_wide_table()` 解析回 DataFrame，src/services/model.py:42）。
 
 单独跑它：
 
@@ -279,4 +281,4 @@ Python 版本只活在两处事实里：本机 `.venv` 实装 **3.14.4**，以�
 .venv/Scripts/python.exe scripts/dca_calculator.py --amount 5000 --base-dir .
 ```
 
-（行号复核于 2026-08-18）
+（行号复核于 2026-08-19）
