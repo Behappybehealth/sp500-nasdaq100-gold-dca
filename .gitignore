@@ -5,6 +5,8 @@ data/budget_overrides.json
 data/*.localbak
 # 东财 XAU 实时价的落盘缓存（app.py 运行时生成，随时可重抓）
 data/xau_spot_last.json
+# 行情快照（dca_calculator 运行时生成的加速缓存，过期自动失效、缺失自动全抓）
+data/quote_snapshot.json
 # 多用户模式下 sync_local 的每用户落盘缓存（BUG-001 修复后产生）
 data/users/
 

@@ -8,6 +8,7 @@ import csv
 import json
 import math
 import sys
+import time
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -398,6 +399,38 @@ def fetch_usdtusd() -> float:
         return float(meta.get("regularMarketPrice") or closes[-1])
     except Exception:
         return 1.0
+
+
+_SNAPSHOT_NAME = "quote_snapshot.json"
+
+
+def load_quote_snapshot(base_dir: Path, ttl_s: int) -> Optional[dict]:
+    """读取 TTL 内的行情快照（上一次运行抓取的 markets/汇率），供短时间内的连续调用直接复用。
+
+    过期、缺失或文件损坏一律返回 None，调用方退化为正常抓取。
+    """
+    if ttl_s <= 0:
+        return None
+    try:
+        snap = json.loads((base_dir / "data" / _SNAPSHOT_NAME).read_text(encoding="utf-8"))
+        age = time.time() - float(snap["fetched_at"])
+        if 0 <= age < ttl_s and isinstance(snap.get("markets"), dict):
+            snap["age_s"] = int(age)
+            return snap
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    return None
+
+
+def save_quote_snapshot(base_dir: Path, markets: Dict[str, dict], usdcny: float, usdtusd: float) -> None:
+    """把本次行情抓取结果落盘为快照。任一标的带 error 时不存——失败结果不该被冻结一整个 TTL。"""
+    if any(isinstance(m, dict) and m.get("error") for m in markets.values()):
+        return
+    payload = {"fetched_at": time.time(), "markets": markets, "usdcny": usdcny, "usdtusd": usdtusd}
+    try:
+        (base_dir / "data" / _SNAPSHOT_NAME).write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass  # 快照只是加速缓存，写失败不影响本次输出
 
 
 def market_symbol_for_asset(asset_key: str, info: dict) -> str:
@@ -820,6 +853,7 @@ def main() -> None:
     parser.add_argument("--base-dir", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--history-years", type=int, default=10)
     parser.add_argument("--user", default=None, help="多用户模式：记账数据从 data/users/<user>/ 读取（config 与行情缓存保持共享）")
+    parser.add_argument("--snapshot-ttl", type=int, default=600, help="行情快照复用窗口（秒）：TTL 内的连续运行直接复用上一次的抓取结果；0 = 每次全抓")
     args = parser.parse_args()
 
     if args.user and ("/" in args.user or "\\" in args.user or ".." in args.user):
@@ -827,7 +861,7 @@ def main() -> None:
 
     base_dir = args.base_dir
     config = read_json(base_dir / "data" / "config.json")
-    # BUG-001：多用户模式下记账数据按用户分目录，行情缓存/策略配置保持共享
+    # 多用户模式：记账数据按用户分目录，行情缓存/策略配置保持共享
     record_dir = base_dir / "data" / "users" / args.user if args.user else base_dir / "data"
     transactions = read_transactions(record_dir / "transactions.csv")
     observations = read_observations(record_dir / "observations.csv")
@@ -848,9 +882,19 @@ def main() -> None:
     cache_dir = None
     if cache_cfg.get("enabled", True):
         cache_dir = base_dir / str(cache_cfg.get("dir", "data/market_history"))
-    markets = fetch_history(symbols, args.history_years, cache_dir)
-    usdcny = fetch_usdcny()
-    usdtusd = fetch_usdtusd()
+    snapshot = load_quote_snapshot(base_dir, args.snapshot_ttl)
+    if snapshot is not None:
+        # 快照命中的本次运行跳过行情抓取与缓存增量更新；下次冷跑会自动追平缓存
+        markets = snapshot["markets"]
+        usdcny = snapshot["usdcny"]
+        usdtusd = snapshot["usdtusd"]
+        snapshot_info = {"used": True, "age_s": snapshot["age_s"], "ttl_s": args.snapshot_ttl}
+    else:
+        markets = fetch_history(symbols, args.history_years, cache_dir)
+        usdcny = fetch_usdcny()
+        usdtusd = fetch_usdtusd()
+        save_quote_snapshot(base_dir, markets, usdcny, usdtusd)
+        snapshot_info = {"used": False, "age_s": None, "ttl_s": args.snapshot_ttl}
     usdtcny = round(usdcny * usdtusd, 4)
     interval_cfg = config.get("preferred_trade_interval_days", [2, 3])
     if isinstance(interval_cfg, list) and interval_cfg:
@@ -926,6 +970,7 @@ def main() -> None:
         "last_records": latest_records,
         "since_last_record": since_last_record,
         "markets": markets,
+        "quote_snapshot": snapshot_info,
         "portfolio": portfolio_summary(transactions, markets, assets, usdcny, usdtcny),
         "decision": decision,
         "suggested_weights": weights,

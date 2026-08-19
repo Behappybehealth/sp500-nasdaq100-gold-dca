@@ -7,9 +7,6 @@ BUG-020 刀 6 从 app.py:357-634 原样搬入；仅三处结构性调整（零�
 2. QUOTE_ROWS / _quote_html / _fail_html / current_budget_display 四个纯辅助
    提升到模块级（在原文件里它们定义于侧栏段落中间，不闭包任何局部变量）
 3. result/dec/ms/pf 不再落模块作用域，收口为返回值 Decision（src/context.py）
-
-⚠️ 本模块是「模型会跑两次」病灶（BUG-024）的唯一执行点：首次自动定额 run_model(None)，
-用户手填金额后整体重跑 run_model(amount_in)。修 BUG-024 改这里。
 """
 from __future__ import annotations
 
@@ -216,23 +213,27 @@ def render(paths: Paths, user: str) -> Decision:
         st.sidebar.caption(f"截至 {max(latest_dates) if latest_dates else '?'}")
 
     # ---- ② 基准金额 + 刷新按钮（同一行）----
+    # 金额输入放在表单内：键入/步进只在控件本地暂存，按 Enter 或 🔄 提交后才触发整页重跑，
+    # 避免每个中间值都引发一次模型重算。
     st.sidebar.markdown("---")
-    _col_a, _col_r = st.sidebar.columns([3, 1])
-    with _col_a:
-        amount_in = st.number_input(
-            "基准金额（0=自动）",
-            min_value=0.0,
-            value=0.0,
-            step=500.0,
-            key="amt_base",
-            label_visibility="collapsed",
-        )
-    with _col_r:
-        if st.button("🔄 刷新", use_container_width=True, key="btn_refresh"):
-            st.cache_data.clear()
-            st.session_state.pop("synced", None)  # 触发重进时重新从云端同步
-            st.rerun()
-    # 用户输入了非零金额 → 用实际金额重跑模型
+    with st.sidebar.form("amount_form", border=False):
+        _col_a, _col_r = st.columns([3, 1])
+        with _col_a:
+            amount_in = st.number_input(
+                "基准金额（0=自动）",
+                min_value=0.0,
+                value=0.0,
+                step=500.0,
+                key="amt_base",
+                label_visibility="collapsed",
+            )
+        with _col_r:
+            _refresh = st.form_submit_button("🔄 刷新", use_container_width=True)
+    if _refresh:
+        st.cache_data.clear()
+        st.session_state.pop("synced", None)  # 触发重进时重新从云端同步
+        st.rerun()
+    # 用户提交了非零金额 → 用实际金额重跑模型（行情快照命中时几乎即时）
     if amount_in > 0:
         result = run_model(amount_in, user, paths)
         dec = result["decision"]
