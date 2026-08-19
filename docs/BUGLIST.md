@@ -1526,7 +1526,7 @@ exceptions: none
 > - [src/tabs/holdings.py:17,20](../src/tabs/holdings.py#L17)：`render()` 加 `user` 透传。
 > - [app.py:58](../app.py#L58)：tab2 调用点传 `CURRENT_USER`。
 >
-> commit：入库后回填 hash。
+> commit：`06d6ac4`（修复与同期文档一 commit 入库）。
 
 #### ✔️ 验证结果
 
