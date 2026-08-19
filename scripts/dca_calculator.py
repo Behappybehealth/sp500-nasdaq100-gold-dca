@@ -397,7 +397,8 @@ def fetch_history(symbols: Iterable[str], years: int = 10, cache_dir: Optional[P
     return {symbol: get_symbol_history(symbol, years, cache_dir) for symbol in symbols}
 
 
-def fetch_usdcny() -> float:
+def fetch_usdcny() -> Optional[float]:
+    """USD/CNY 实时报价；抓不到返回 None（汇率是变量不是常量——绝不静默回落到写死的数）。"""
     try:
         result = fetch_chart("CNY=X", range_="5d")
         meta = result.get("meta", {})
@@ -405,11 +406,11 @@ def fetch_usdcny() -> float:
         closes = [float(x) for x in quote.get("close", []) if x is not None and x > 0]
         return float(meta.get("regularMarketPrice") or closes[-1])
     except Exception:
-        return 7.20
+        return None
 
 
-def fetch_usdtusd() -> float:
-    """USDT/USD 报价；U 本位资产的人民币估值用 USDCNY × USDTUSD。"""
+def fetch_usdtusd() -> Optional[float]:
+    """USDT/USD 报价；U 本位资产的人民币估值用 USDCNY × USDTUSD。抓不到返回 None。"""
     try:
         result = fetch_chart("USDT-USD", range_="5d")
         meta = result.get("meta", {})
@@ -417,7 +418,48 @@ def fetch_usdtusd() -> float:
         closes = [float(x) for x in quote.get("close", []) if x is not None and x > 0]
         return float(meta.get("regularMarketPrice") or closes[-1])
     except Exception:
-        return 1.0
+        return None
+
+
+_FX_LAST_NAME = "fx_last.json"
+
+
+def load_fx_last(base_dir: Path) -> dict:
+    """上次抓取成功的汇率（分字段 {"value", "fetched_at"}）；缺失/损坏返回 {}。"""
+    try:
+        data = json.loads((base_dir / "data" / _FX_LAST_NAME).read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_fx_last(base_dir: Path, usdcny: Optional[float], usdtusd: Optional[float]) -> None:
+    """把本次抓到的实时汇率并入 fx_last.json：只覆写抓成功的字段，另一字段保留上次值。"""
+    if usdcny is None and usdtusd is None:
+        return
+    last = load_fx_last(base_dir)
+    now = time.time()
+    if usdcny is not None:
+        last["usdcny"] = {"value": usdcny, "fetched_at": now}
+    if usdtusd is not None:
+        last["usdtusd"] = {"value": usdtusd, "fetched_at": now}
+    try:
+        (base_dir / "data" / _FX_LAST_NAME).write_text(
+            json.dumps(last, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    except OSError:
+        pass  # 兜底缓存写失败不影响本次输出
+
+
+def _fx_entry(live_value: Optional[float], last_entry, now: float) -> dict:
+    """单汇率三件套 {value, live, as_of}：live=True 本次实时抓到（as_of=抓取时刻）；
+    否则回落到 fx_last.json 的上次成功值（live=False，as_of=当时抓取时刻）；
+    连上次值都没有 → value=None（估值层据此置空，绝不编一个数）。"""
+    if live_value is not None:
+        return {"value": live_value, "live": True, "as_of": now}
+    if isinstance(last_entry, dict) and isinstance(last_entry.get("value"), (int, float)):
+        return {"value": float(last_entry["value"]), "live": False, "as_of": last_entry.get("fetched_at")}
+    return {"value": None, "live": False, "as_of": None}
 
 
 _SNAPSHOT_NAME = "quote_snapshot.json"
@@ -441,11 +483,11 @@ def load_quote_snapshot(base_dir: Path, ttl_s: int) -> Optional[dict]:
     return None
 
 
-def save_quote_snapshot(base_dir: Path, markets: Dict[str, dict], usdcny: float, usdtusd: float) -> None:
+def save_quote_snapshot(base_dir: Path, markets: Dict[str, dict], usdcny: Optional[float], usdtusd: Optional[float], fx: dict) -> None:
     """把本次行情抓取结果落盘为快照。任一标的带 error 时不存——失败结果不该被冻结一整个 TTL。"""
     if any(isinstance(m, dict) and m.get("error") for m in markets.values()):
         return
-    payload = {"fetched_at": time.time(), "markets": markets, "usdcny": usdcny, "usdtusd": usdtusd}
+    payload = {"fetched_at": time.time(), "markets": markets, "usdcny": usdcny, "usdtusd": usdtusd, "fx": fx}
     try:
         (base_dir / "data" / _SNAPSHOT_NAME).write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     except OSError:
@@ -503,7 +545,7 @@ def xirr(cashflows: list, tol: float = 1e-6, max_iter: int = 50) -> Optional[flo
     return (lo + hi) / 2.0
 
 
-def portfolio_summary(transactions: List[Transaction], prices: Dict[str, dict], assets: Dict[str, dict], current_fx_rate: float, usdt_fx_rate: Optional[float] = None) -> dict:
+def portfolio_summary(transactions: List[Transaction], prices: Dict[str, dict], assets: Dict[str, dict], current_fx_rate: Optional[float], usdt_fx_rate: Optional[float] = None) -> dict:
     by_asset: Dict[str, dict] = {}
     flows_by_asset: Dict[str, list] = {}
     all_flows: list = []
@@ -540,19 +582,22 @@ def portfolio_summary(transactions: List[Transaction], prices: Dict[str, dict], 
                     price = proxy_price
                     price_source = proxy
                     break
-        if cfg.get("fx_mode") == "usdt" and usdt_fx_rate:
+        # 汇率不可用（None）时估值置空而不是编数：历史记账汇率不代表当前，置空让 UI 显式告警
+        if cfg.get("fx_mode") == "usdt":
             fx_rate = usdt_fx_rate
+        elif price:
+            fx_rate = current_fx_rate
         else:
-            fx_rate = current_fx_rate if price else item.get("tx_fx_rate", 1.0)
+            fx_rate = item.get("tx_fx_rate", 1.0)
         item["latest_price"] = price
         item["price_source"] = price_source
         item["market_symbol"] = market_symbol_for_asset(item["asset"], cfg) if cfg else item["symbol"]
         item["current_fx_rate"] = fx_rate
-        item["current_value_rmb"] = item["shares"] * price * fx_rate if price else None
+        item["current_value_rmb"] = item["shares"] * price * fx_rate if (price and fx_rate) else None
         if item["current_value_rmb"] is not None:
             total_value += item["current_value_rmb"]
         item["unrealized_pnl_rmb"] = (item["current_value_rmb"] - item["invested_rmb"]) if item["current_value_rmb"] is not None else None
-        item["return_rate"] = (item["unrealized_pnl_rmb"] / item["invested_rmb"]) if item["invested_rmb"] else None
+        item["return_rate"] = (item["unrealized_pnl_rmb"] / item["invested_rmb"]) if (item["unrealized_pnl_rmb"] is not None and item["invested_rmb"]) else None
         if item["current_value_rmb"] is not None:
             flows = flows_by_asset.get(item["asset"], [])
             item["xirr"] = xirr(flows + [(biz_today(), item["current_value_rmb"])])
@@ -916,14 +961,30 @@ def main() -> None:
         markets = snapshot["markets"]
         usdcny = snapshot["usdcny"]
         usdtusd = snapshot["usdtusd"]
+        fx = snapshot.get("fx")
+        if not isinstance(fx, dict) or "usdcny" not in fx:
+            # 兼容旧格式快照（无 fx 段）：彼时汇率必有值（旧代码常量兜底），视同实时口径重建
+            fx = {
+                "usdcny": {"value": usdcny, "live": True, "as_of": snapshot["fetched_at"]},
+                "usdtusd": {"value": usdtusd, "live": True, "as_of": snapshot["fetched_at"]},
+            }
         snapshot_info = {"used": True, "age_s": snapshot["age_s"], "ttl_s": args.snapshot_ttl}
     else:
         markets = fetch_history(symbols, args.history_years, cache_dir)
-        usdcny = fetch_usdcny()
-        usdtusd = fetch_usdtusd()
-        save_quote_snapshot(base_dir, markets, usdcny, usdtusd)
+        now = time.time()
+        usdcny_live = fetch_usdcny()
+        usdtusd_live = fetch_usdtusd()
+        save_fx_last(base_dir, usdcny_live, usdtusd_live)
+        last_fx = load_fx_last(base_dir)
+        fx = {
+            "usdcny": _fx_entry(usdcny_live, last_fx.get("usdcny"), now),
+            "usdtusd": _fx_entry(usdtusd_live, last_fx.get("usdtusd"), now),
+        }
+        usdcny = fx["usdcny"]["value"]
+        usdtusd = fx["usdtusd"]["value"]
+        save_quote_snapshot(base_dir, markets, usdcny, usdtusd, fx)
         snapshot_info = {"used": False, "age_s": None, "ttl_s": args.snapshot_ttl}
-    usdtcny = round(usdcny * usdtusd, 4)
+    usdtcny = round(usdcny * usdtusd, 4) if (usdcny is not None and usdtusd is not None) else None
     interval_cfg = config.get("preferred_trade_interval_days", [2, 3])
     if isinstance(interval_cfg, list) and interval_cfg:
         interval_days = int(max(interval_cfg))
@@ -992,6 +1053,7 @@ def main() -> None:
         "effective_amount_rmb": round(suggested_amount, 2),
         "usdcny": usdcny,
         "usdtcny": usdtcny,
+        "fx": fx,
         "monthly_budget_status": month_status,
         "config": config,
         "has_local_transactions": bool(transactions),

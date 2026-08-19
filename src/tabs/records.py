@@ -45,15 +45,30 @@ def render(tab, result: dict, dec: dict, assets: dict, user: str):
             default_fx = (
                 result.get("usdtcny")
                 if assets[tx_asset].get("fx_mode") == "usdt"
-                else result["usdcny"]
+                else result.get("usdcny")
             )
             try:
-                _fx_default = float(default_fx or 6.73)
+                _fx_default = float(default_fx) if default_fx is not None else 0.0
             except (TypeError, ValueError):
-                _fx_default = 6.73
+                _fx_default = 0.0
             tx_fx = c7.number_input(
                 "汇率（U/CNY 或 USD/CNY）", value=_fx_default, step=0.001, format="%.4f"
             )
+            if _fx_default <= 0:
+                st.caption(
+                    "⚠️ 实时汇率不可用：请按交易软件的实际成交汇率手动填写"
+                    "（数量按 金额÷汇率÷价格 自动算）"
+                )
+            else:
+                _fxb = result.get("fx") or {}
+                if assets[tx_asset].get("fx_mode") == "usdt":
+                    _fx_live = all(
+                        (_fxb.get(k) or {}).get("live", True) for k in ("usdcny", "usdtusd")
+                    )
+                else:
+                    _fx_live = (_fxb.get("usdcny") or {}).get("live", True)
+                if not _fx_live:
+                    st.caption("⚠️ 当前默认汇率为上次成功抓取的缓存值，提交前请核对")
             tx_shares = c8.number_input(
                 "数量（0 = 按金额÷汇率÷价格自动算）",
                 min_value=0.0,

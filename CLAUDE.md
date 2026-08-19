@@ -57,19 +57,20 @@ sp500-nasdaq100-gold-dca/
 ├── src/                      # 业务层：app.py 只留装配，逻辑全在这里
 │   ├── context.py            # 启动上下文：Paths / Decision / build_paths（73 行；code_dir 按 parent.parent 定位）
 │   ├── dates.py              # 业务"今天"唯一定义 biz_today()（20 行；Asia/Shanghai 固定 UTC+8，与引擎 dca_calculator.py 同规则双实现，两处必须同改）
-│   ├── services/             # 服务层：model.py 模型调用（45）/ quotes.py 行情抓取（87）/ curves.py 曲线数据（99）
-│   ├── ui/                   # 样式/遮罩/侧栏/认证：styles.py 全局 CSS（185）/ overlays.py 三遮罩（59）/ sidebar.py 侧栏（301，返回 Decision）/ auth.py 认证门闸（328，require_user()）
-│   └── tabs/                 # 六个 tab 渲染：today(93)/holdings(73)/records(167，记账写链)/history(26)/backtest(249)/strategy_doc(18)，各暴露 render(tab, ...)
+│   ├── services/             # 服务层：model.py 模型调用（45）/ quotes.py 行情抓取（87）/ curves.py 曲线数据（102）
+│   ├── ui/                   # 样式/遮罩/侧栏/认证：styles.py 全局 CSS（185）/ overlays.py 三遮罩（59）/ sidebar.py 侧栏（328，返回 Decision）/ auth.py 认证门闸（328，require_user()）
+│   └── tabs/                 # 六个 tab 渲染：today(93)/holdings(78)/records(182，记账写链)/history(26)/backtest(249)/strategy_doc(18)，各暴露 render(tab, ...)
 ├── CHANGELOG.md              # 改动日志：每个 commit 一行带时刻（人读版流水，见第 12 条；scripts/changelog.py 维护）
 ├── start-app.bat             # 本机双击启动 Streamlit
 ├── logs/                     # 运行日志约定落点（*.log 不入库；Cloud 容器重启即失，运行日志尚未实现）
 ├── scripts/
-│   ├── dca_calculator.py     # 计算引擎（1012 行，独立可运行，输出 JSON；--user 读 data/users/<user>/；行情快照 600s 内复用抓价结果）
+│   ├── dca_calculator.py     # 计算引擎（1074 行，独立可运行，输出 JSON；--user 读 data/users/<user>/；行情快照 600s 内复用抓价结果）
 │   ├── dca_action.py         # 业务动作 CLI（203 行）：record tx/obs + override，Skill 经它与 Web 共用 storage 业务层
 │   └── changelog.py          # CHANGELOG 维护：add <hash> 生成带时刻的行，--check 校验全覆盖
 ├── data/
 │   ├── config.json           # 策略参数与资产定义
 │   ├── budget_overrides.json # 月度预算覆盖（不入库）
+│   ├── fx_last.json          # 汇率上次成功值兜底（不入库；实时失败时引擎读它并在 fx 段标 live:false+as_of）
 │   ├── transactions.csv      # 成交记录（不入库；仅单机模式用，云端模式见 users/）
 │   ├── observations.csv      # 跳过/观察记录（不入库；同上）
 │   ├── users/                # 云端模式每用户落盘缓存（不入库，sync_local 生成，覆盖前轮转留底 10 份）

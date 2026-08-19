@@ -7,6 +7,8 @@ _quote_html / _fail_html / current_budget_display 为模块级纯辅助（不闭
 """
 from __future__ import annotations
 
+from datetime import datetime
+
 import storage
 import streamlit as st
 
@@ -46,6 +48,19 @@ def _quote_html(name, price, chg, stale=False):
 
 def _fail_html(name):
     return f'<div style="margin:3px 0"><span style="color:#888888">{name}</span><br><span style="color:#d97706">获取失败，需复核实时价格</span></div>'
+
+
+def _fx_caption(entry, label):
+    """单个汇率的三态文案：实时照常 / 兜底值带 ⚠️缓存与 as_of / 完全不可用。"""
+    v = (entry or {}).get("value")
+    if v is None:
+        return f"{label} 不可用"
+    s = f"{label} {v:.4f}"
+    if not entry.get("live", True):
+        as_of = entry.get("as_of")
+        when = datetime.fromtimestamp(as_of).strftime("%m-%d %H:%M") if as_of else "未知时刻"
+        s += f" ⚠️缓存({when})"
+    return s
 
 
 def current_budget_display(user, config):
@@ -236,8 +251,20 @@ def render(paths: Paths, user: str) -> Decision:
         ms = result["monthly_budget_status"]
         pf = result["portfolio"]
 
-    # ---- ③ 汇率 ----
-    st.sidebar.caption(f"USD/CNY {result['usdcny']} ｜ U/CNY {result.get('usdtcny')}")
+    # ---- ③ 汇率（三态：实时 / ⚠️缓存值+as_of / 不可用）----
+    _fx = result.get("fx") or {}
+    _e_cny, _e_u = _fx.get("usdcny") or {}, _fx.get("usdtusd") or {}
+    _fx_parts = [_fx_caption(_e_cny, "USD/CNY")]
+    _uc = result.get("usdtcny")
+    if _uc is None:
+        _fx_parts.append("U/CNY 不可用")
+    elif _e_cny.get("live", True) and _e_u.get("live", True):
+        _fx_parts.append(f"U/CNY {_uc:.4f}")
+    else:
+        _asof = _e_cny.get("as_of") or _e_u.get("as_of")
+        _when = datetime.fromtimestamp(_asof).strftime("%m-%d %H:%M") if _asof else "未知时刻"
+        _fx_parts.append(f"U/CNY {_uc:.4f} ⚠️缓存({_when})")
+    st.sidebar.caption(" ｜ ".join(_fx_parts))
 
     # ---- ④ 每月预算（底部，同一行）----
     st.sidebar.markdown("---")

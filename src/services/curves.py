@@ -64,11 +64,14 @@ def portfolio_curve(result: dict, paths: Paths, user: str):
         return None
     series = load_price_series(paths)
     asset_sym = {"sp500": "SPY", "nasdaq100": "QQQ", "gold": "XAUT-USD"}
+    usdcny = result.get("usdcny")
     fx_map = {
-        "sp500": result["usdcny"],
-        "nasdaq100": result["usdcny"],
-        "gold": result.get("usdtcny", result["usdcny"]),
+        "sp500": usdcny,
+        "nasdaq100": usdcny,
+        "gold": result.get("usdtcny") or usdcny,
     }
+    if any(v is None for v in fx_map.values()):
+        return None  # 汇率不可用 → 估值曲线整体置空：残缺曲线比没有曲线更误导
     days = sorted({d for s in series.values() for d in s})
     first = min(r["date"] for r in rows)
     days = [d for d in days if d >= first]

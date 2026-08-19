@@ -17,17 +17,22 @@ def render(tab, result: dict, pf: dict, assets: dict, paths: Paths, user: str):
     with tab:
         st.subheader("组合市值 vs 累计投入")
         curve = portfolio_curve(result, paths, user)
-        if curve is None:
-            st.info("暂无成交记录。记账后这里会显示组合曲线。")
-        else:
+        if curve is not None:
             st.line_chart(curve)
+        elif result.get("usdcny") is None or result.get("usdtcny") is None:
+            st.warning("⚠️ 实时汇率不可用，组合市值曲线暂缺（估值需汇率换算；累计投入不受影响）")
+        else:
+            st.info("暂无成交记录。记账后这里会显示组合曲线。")
+        if pf.get("positions"):
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("累计投入", f"¥{pf['total_invested_rmb']:,.0f}")
-            c2.metric("当前市值", f"¥{(pf['current_value_rmb'] or 0):,.0f}")
+            _cv = pf.get("current_value_rmb")
+            c2.metric("当前市值", f"¥{_cv:,.0f}" if _cv is not None else "不可用")
+            _pnl = pf.get("unrealized_pnl_rmb")
             c3.metric(
                 "未实现盈亏",
-                f"¥{(pf['unrealized_pnl_rmb'] or 0):,.0f}",
-                f"{(pf['return_rate'] or 0) * 100:+.2f}%",
+                f"¥{_pnl:,.0f}" if _pnl is not None else "不可用",
+                f"{pf['return_rate'] * 100:+.2f}%" if pf.get("return_rate") is not None else None,
             )
             xirr_days = pf.get("xirr_period_days")
             c4.metric(

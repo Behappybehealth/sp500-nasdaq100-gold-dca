@@ -185,7 +185,7 @@ gspread>=5.8.0,<6        本机实装 5.12.4  ← 唯一有上界的
 
 服务函数在 `src/services/`（`run_model` model.py:19、`parse_wide_table` model.py:42、`fetch_xau_spot` quotes.py:18、`fetch_btc` quotes.py:64、`_load_json` curves.py:19、`load_price_series` curves.py:28、`tx_csv_for` curves.py:44（按用户裁决成交账本路径，与引擎 `--user` 同一规则）、`portfolio_curve` curves.py:57；全部显式收 `paths: Paths` 参数，`Paths` 定义于 `src/context.py`）；执行点在 `src/ui/sidebar.py` render() 内（首跑 :124、表单提交后金额重跑 :235），app.py 侧仅剩 :41 一行调用，结果收口为 `Decision` 返回值（`src/context.py`）后解包。下游 tab1/tab2/tab3 分别在 `src/tabs/today.py` / `holdings.py` / `records.py`（result/dec/ms/pf 等数据全部由 app.py 以显式参数传入 render()）。
 
-**模型会跑两次，但第二遍不再白跑**：侧栏先 `run_model(None)` 自动定额；用户在 `amount_form` 表单里提交金额后再 `run_model(amount_in)` 整体重跑一遍子进程——重跑趟命中引擎的行情快照（`data/quote_snapshot.json`，TTL 600 秒，`--snapshot-ttl` 可调，0 禁用；任一标的抓价失败当趟不落盘），跳过 8 个串行行情请求与缓存增量写（下次冷跑自动追平），实测第二趟耗时约为首趟的 11%。引擎输出第 16 个顶层键 `quote_snapshot`（used/age_s/ttl_s）自报快照命中情况。
+**模型会跑两次，但第二遍不再白跑**：侧栏先 `run_model(None)` 自动定额；用户在 `amount_form` 表单里提交金额后再 `run_model(amount_in)` 整体重跑一遍子进程——重跑趟命中引擎的行情快照（`data/quote_snapshot.json`，TTL 600 秒，`--snapshot-ttl` 可调，0 禁用；任一标的抓价失败当趟不落盘），跳过 8 个串行行情请求与缓存增量写（下次冷跑自动追平），实测第二趟耗时约为首趟的 11%。引擎输出顶层键 `quote_snapshot`（used/age_s/ttl_s）自报快照命中情况。
 
 （行号复核于 2026-08-19）
 
@@ -262,15 +262,17 @@ gspread>=5.8.0,<6        本机实装 5.12.4  ← 唯一有上界的
 
 ---
 
-## 11. 计算引擎接口（scripts/dca_calculator.py，983 行）
+## 11. 计算引擎接口（scripts/dca_calculator.py，1074 行）
 
 **参数五个**：`--amount`、`--base-dir`、`--history-years`、`--user`（多用户模式：记账数据从 `data/users/<user>/` 读取，config 与行情缓存保持共享；含路径穿越防护）、`--snapshot-ttl`（行情快照 TTL 秒数，默认 600，0=禁用。没有 `--no-refresh`）。
 
-**输入文件**：`data/config.json`、`data/market_history/`、`data/quote_snapshot.json`（存在且未过期时免抓价）、记账三件套——无 `--user` 时读 `data/{transactions,observations}.csv` + `data/budget_overrides.json`，有 `--user` 时读 `data/users/<user>/` 下同名文件。
+**输入文件**：`data/config.json`、`data/market_history/`、`data/quote_snapshot.json`（存在且未过期时免抓价）、`data/fx_last.json`（汇率上次成功值兜底，分字段带 `fetched_at`）、记账三件套——无 `--user` 时读 `data/{transactions,observations}.csv` + `data/budget_overrides.json`，有 `--user` 时读 `data/users/<user>/` 下同名文件。
 
-**行情快照**：`load_quote_snapshot()`（:407）/ `save_quote_snapshot()`（:425），落盘 `data/quote_snapshot.json`（`fetched_at` / markets 摘要 / `usdcny` / `usdtusd`，仅几 KB）。TTL 内命中（:885）则跳过行情抓取与缓存增量写——下次冷跑自动追平，不丢历史；任一标的抓价失败（带 `error`）当趟不落盘（:896 一带），防止坏快照连环命中。快照只是加速缓存：过期自动失效、缺失自动全抓，不入库。
+**行情快照**：`load_quote_snapshot()`（:468）/ `save_quote_snapshot()`（:486），落盘 `data/quote_snapshot.json`（`fetched_at` / markets 摘要 / `usdcny` / `usdtusd` / `fx` 段，仅几 KB）。TTL 内命中（:960）则跳过行情抓取与缓存增量写——下次冷跑自动追平，不丢历史；任一标的抓价失败（带 `error`）当趟不落盘（:487-488），防止坏快照连环命中。快照只是加速缓存：过期自动失效、缺失自动全抓，不入库。
 
-**输出**：print 一大段 JSON（:979），**16 个顶层键**——字面量构造 15 个（:961–976：`as_of` / `input_amount_rmb` / `effective_amount_rmb` / `usdcny` / `usdtcny` / `monthly_budget_status` / `config` / `has_local_transactions` / `last_records` / `since_last_record` / `markets` / `quote_snapshot` / `portfolio` / `decision` / `suggested_weights`），随后 :978 追加 `wide_table_markdown`（由 `render_wide_table()` :753 生成，app.py 侧 `parse_wide_table()` 解析回 DataFrame，src/services/model.py:42）。
+**汇率链**（汇率是变量，全项目无一处写死常量）：`fetch_usdcny()`（:400）/ `fetch_usdtusd()`（:412）抓不到返回 `None`；抓取成功落盘 `data/fx_last.json`（分字段只覆写成功的那个），失败时 `_fx_entry()`（:454）回落上次成功值，输出 `fx.{usdcny,usdtusd}.{value,live,as_of}` 三件套——连上次值都没有则 `value=null`，估值层（`portfolio_summary` :585-600）据此把 RMB 估值置空而不是编数（决策金额不依赖汇率，照出）。
+
+**输出**：print 一大段 JSON（:1070），**18 个顶层键**——字面量构造 17 个（:1050–1068：`as_of` / `input_amount_rmb` / `effective_amount_rmb` / `usdcny` / `usdtcny` / `fx` / `monthly_budget_status` / `config` / `has_local_transactions` / `invalid_transactions` / `last_records` / `since_last_record` / `markets` / `quote_snapshot` / `portfolio` / `decision` / `suggested_weights`），随后 :1069 追加 `wide_table_markdown`（由 `render_wide_table()` :817 生成，app.py 侧 `parse_wide_table()` 解析回 DataFrame，src/services/model.py:42）。
 
 单独跑它：
 
@@ -278,5 +280,7 @@ gspread>=5.8.0,<6        本机实装 5.12.4  ← 唯一有上界的
 .venv/Scripts/python.exe scripts/dca_calculator.py --base-dir .
 .venv/Scripts/python.exe scripts/dca_calculator.py --amount 5000 --base-dir .
 ```
+
+（行号复核于 2026-08-19）
 
 （行号复核于 2026-08-19）
