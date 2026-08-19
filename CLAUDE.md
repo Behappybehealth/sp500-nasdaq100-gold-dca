@@ -17,6 +17,49 @@
 
 ---
 
+## 技术栈
+
+接手本项目先读本节。每层只写两件事：用什么，以及它怎样约束你写代码。
+
+**运行时与框架**
+
+- **Python 3.14.4**（本机 `.venv` 实装）：全项目唯一解释器，命令一律走 `.venv/Scripts/python.exe`
+- **Streamlit 1.61.1**：执行模型是「每次交互整个脚本从头重跑」——理解本项目的代码组织方式，先理解这个前提。`st.session_state` 每浏览器标签页一份；`st.cache_data` 全进程共享，缓存键必须含用户名，否则跨用户串号
+- 前端不手写 HTML/JS；定制样式靠注入 CSS（`src/ui/styles.py`）
+
+**数据与存储**
+
+- **pandas 3.0.5 + numpy 2.5.2**：pandas 3 与 2 有不兼容改动，照搬网络示例前先核对版本
+- **Google Sheets**（gspread 5.12.4）：多用户模式的唯一事实源；只能整表读、整表写——读失败抛错拒写，写前快照 `_bak`
+- **本地 CSV 回退**：无 GCP 凭据时自动降级单机；云端模式每用户落盘缓存 `data/users/<user>/`
+
+**行情数据**
+
+- **Yahoo Chart v8**（`urllib` 直连）→ **yfinance 1.6.0** 兜底；**东方财富 push2**（`curl` 子进程）供 XAU/BTC 实时价：三者皆非官方接口、无 key、无额度保证
+- 口径警示：Chart 用原始 close，yfinance 兜底自动复权——两条路径复权口径不一致，跨源比较价格时注意
+
+**认证**
+
+- 自写「名字 + PIN」：PBKDF2-HMAC-SHA256（20 万迭代 + 每账号随机盐），连续失败 5 次锁 15 分钟；fail-closed——secrets 缺失/损坏即拒启动，仅显式 `DCA_AUTH_MODE=local` 进单机模式
+
+**计算引擎**
+
+- 独立脚本 `scripts/dca_calculator.py` + **subprocess 隔离**：UI 与计算零共享内存，只经命令行参数与 stdout JSON 通信，是本项目最干净的边界
+- 行情快照 `data/quote_snapshot.json`（TTL 600s）复用抓价结果，TTL 内重跑近即时
+
+**部署与外发**
+
+- **Streamlit Community Cloud**：推 `main` 自动重新部署；**容器时区 UTC**——`date.today()` 在北京时间 00:00–07:59 仍停在前一天，写日期逻辑时牢记
+- **ngrok 固定域名**：本机临时外发；`deploy/start-dca-tunnel.bat` 只能写 ASCII
+
+**工程工具**
+
+- **ruff** 格式化（无 CI 强制）；**git** + GitHub 私有仓库
+
+全表与版本复核日期见 `docs/ARCHITECTURE.md` §2。
+
+---
+
 ## 目录结构
 
 ```
@@ -84,24 +127,6 @@ app.py（UI + 业务逻辑，耦合较紧）
 ```
 
 **关键设计：** `dca_calculator.py` 通过 subprocess 调用，与 UI 完全隔离。改计算逻辑不会影响 UI，反之亦然。
-
----
-
-## 技术栈速览
-
-| 层 | 技术 | 改代码时要知道的 |
-|---|---|---|
-| 语言 | Python 3.14.4（`.venv` 实装） | — |
-| UI | Streamlit 1.61.1 | **每次交互整个脚本从头重跑**；`st.cache_data` 全进程共享（缓存键必须含用户）、`st.session_state` 每标签页一份 |
-| 数据 | pandas 3.0.5 + numpy 2.5.2 | pandas 3 是大版本，与 2 有不兼容改动 |
-| 存储 | Google Sheets（gspread 5.12.4），本地 CSV 回退 | 只能整表读、整表写；读写一律走 `storage.py` |
-| 行情 | Yahoo Chart v8（`urllib`）→ yfinance 兜底；东财 push2（`curl`） | 全是非官方接口、无 key；Chart 用原始 close、yfinance 自动复权，两路径口径不一致 |
-| 认证 | 自写「名字 + PIN」 | PBKDF2-HMAC-SHA256（20 万迭代 + 随机盐），fail-closed |
-| 引擎 | 独立脚本 + subprocess | 见上「架构」；行情快照 `quote_snapshot.json` TTL 600s |
-| 部署 | Streamlit Community Cloud（推 main 自动部署） | **容器时区 UTC**：`date.today()` 在北京时间 00:00–07:59 仍停在前一天 |
-| 格式 | ruff | 有格式化痕迹，无 CI 强制 |
-
-全表与版本复核日期见 `docs/ARCHITECTURE.md` §2。
 
 ---
 

@@ -12,7 +12,7 @@
 | [BUGLIST.md](BUGLIST.md) | 开发 / AI | 确认门四段推进 | 问题唯一事实源（每条须 1 对 1 确认后才可修） |
 | [策略说明](../strategy/core-strategy.md) | 所有人 | 策略调整同期 | 三资产动态定投策略完整文档 |
 | [部署与外发指南](../deploy/DEPLOY.md) | 部署者 | 部署方式变动同期 | 只写真实在用的 Cloud / 本机 / ngrok 三条路径 |
-| [CLAUDE.md](../CLAUDE.md) | AI 助手 | 规矩变动同期 | AI 入口：目录树、技术栈速览、红线规矩 |
+| [CLAUDE.md](../CLAUDE.md) | AI 助手 | 规矩变动同期 | AI 入口：技术栈、目录树、红线规矩 |
 | [README.md](../README.md) | 访客 | 门面信息变动同期 | 项目门面 |
 | [CHANGELOG.md](../CHANGELOG.md) | 所有人 | 每个 commit 同期 | 全量改动的人读版流水（每行带时刻，scripts/changelog.py 生成与校验） |
 
