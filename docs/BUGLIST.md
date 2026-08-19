@@ -939,7 +939,7 @@ wide_table_markdown 非空 ✅   warnings 数量 = 0 ✅   stderr 为空 ✅
 
 #### 🔧 实际修复
 
-> **2026-08-19 修复（commit 见尾随回填）**：
+> **2026-08-19 修复（commit `9991543`）**：
 > 1. **唯一实时源**：`fetch_usdcny`（:400）/`fetch_usdtusd`（:412）改返回 `Optional[float]`，失败 `None`——7.20 / 1.0 两个写死常量删除；records.py 的 6.73 字面量删除。全项目汇率零硬编码（回测 6.7334 为冻结历史，不动）。
 > 2. **fx_last.json 兜底**：`save_fx_last`（:436）抓成功即刷新（分字段只覆写成功的那个，全 None 不写）；`load_fx_last`（:427）坏文件读 `{}`；`_fx_entry`（:454）组装三件套 `{value, live, as_of}`。`.gitignore` 补 `data/fx_last.json`（本地缓存不入库）。
 > 3. **引擎输出**：main 抓取路径构建 `fx.{usdcny,usdtusd}` 三件套；`usdtcny` 双有才算（任一 None → None）；result 第 18 键 `fx`；快照 payload 携带 `fx` 段（旧格式快照兼容重建，视同实时 + as_of=快照时刻）。
