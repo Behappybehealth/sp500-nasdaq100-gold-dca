@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """决策模型调用：subprocess 起 scripts/dca_calculator.py，收 JSON。
 
-BUG-020 刀 2 从 app.py:585-612 原样搬入；仅把模块级全局 CODE_DIR/BASE 换成显式 paths 参数。
+显式收 paths 参数，不读 app.py 模块级全局。
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from ..context import Paths
 
 @st.cache_data(ttl=900, show_spinner=False)  # 加载提示由下方自定义浮动组件负责
 def run_model(amount: float | None, user: str, paths: Paths) -> dict:
-    """user 必须进缓存键：否则 A 的结果会被 B 直接命中（BUG-001 串号）。"""
+    """user 必须进缓存键：否则 A 用户的结果会被 B 直接命中（串号）。"""
     cmd = [
         sys.executable,
         str(paths.code_dir / "scripts" / "dca_calculator.py"),

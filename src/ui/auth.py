@@ -1,13 +1,9 @@
 # -*- coding: utf-8 -*-
 """认证门闸：名字+PIN 三阶段状态机（login / activate / bootstrap）+ 会话首同步。
 
-BUG-020 刀 7 从 app.py:44-346 原样搬入（零逻辑改动）：
-- `_render_login_page` 原样（模块级私有函数）
-- 门闸段收进 `require_user()`：AUTH_MODE/CURRENT_USER 由模块级全局改为函数局部变量，
-  if/elif/else 骨架原样，通过返回值交出用户名
-- 无需参数：全部输入走 storage / session_state / 环境变量
+require_user() 无需参数：全部输入走 storage / session_state / 环境变量，通过返回值交出用户名。
 
-⚠️ 两段式防残留设计踩过三轮坑（点击趟零网络 I/O → ph.empty() 真删除 → 遮罩 → rerun；
+⚠️ 两段式防残留设计（点击趟零网络 I/O → ph.empty() 真删除 → 遮罩 → rerun；
 遮罩必须写不透明 background），详见 docs/ARCHITECTURE-DETAIL.md §6 —— 不要轻易改动。
 """
 from __future__ import annotations
@@ -172,10 +168,10 @@ def _render_login_page(names, ph):
 def require_user() -> str:
     """认证门闸：未登录则渲染登录页并 st.stop()；通过则返回用户名（含会话首同步）。
 
-    fail-closed（BUG-003）：默认 sheets 模式，secrets 缺失/损坏即 st.stop()；
+    fail-closed：默认 sheets 模式，secrets 缺失/损坏即 st.stop()；
     只有显式 DCA_AUTH_MODE=local 才进单机模式。
     """
-    # ---- 认证模式（BUG-003 fail-closed）：默认 sheets；只有显式 DCA_AUTH_MODE=local 才进单机模式 ----
+    # ---- 认证模式（fail-closed）：默认 sheets；只有显式 DCA_AUTH_MODE=local 才进单机模式 ----
     # 原则：安全策略必须是显式声明的，「读不到凭据」永远不等于「不需要登录」。
     auth_mode = os.environ.get("DCA_AUTH_MODE", "sheets").strip().lower()
     user = "local"
@@ -311,7 +307,7 @@ def require_user() -> str:
                 try:
                     names = storage.list_users()  # 仅每会话首次加载触网一次
                 except Exception:
-                    # BUG-002：读不出名单绝不能渲染登录/自举表单——否则访客看到的就是"创建管理员"
+                    # 读不出名单绝不能渲染登录/自举表单——否则访客看到的就是"创建管理员"（fail-closed）
                     st.error("☁️ 云端存储暂时不可用，请稍后刷新重试。")
                     st.stop()
                 st.session_state["_names"] = names

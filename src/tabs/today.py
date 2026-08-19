@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 """Tab1 今日模拟：建议金额/部署系数/可用池/每日基准 + 复盘 + 宽表 + 行情评分。
 
-BUG-020 刀 4 从 app.py:649-728 原样搬入；仅把全局 ASSETS 换成显式参数，
-parse_wide_table 来自 src.services.model。
+数据全部显式收参，不读 app.py 模块级全局；parse_wide_table 来自 src.services.model。
 """
 from __future__ import annotations
 

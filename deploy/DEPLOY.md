@@ -34,13 +34,13 @@ git push origin main
 | **公开访问** | Settings → Sharing → public | 必须 public。默认私有会要求访问者先登录有权限的 Streamlit 账号，家人打不开 |
 
 > ⚠️ **应用已 public，意味着应用内的「名字 + PIN」门闸是唯一防线。**
-> 这道门闸目前的失效方向和强度问题见 [`BUG-003`](../docs/BUGLIST.md#bug-003认证是-fail-open-的门闸可以整体消失) / [`BUG-004`](../docs/BUGLIST.md#bug-004pin-的保护强度撑不住公开部署)。
+> 门闸为 fail-closed：secrets 缺失/损坏即拒绝服务；PIN 是 PBKDF2 加盐哈希 + 连续失败锁定。
 
 ### 已知的平台侧限制
 
-- **时区是 UTC**，用户在 UTC+8。代码里没有任何时区定义，`date.today()` 直接取进程时区 → **北京时间每天 00:00–07:59**，服务端的「今天」仍停在前一天。（[`BUG-008`](../docs/BUGLIST.md#bug-008今天是模糊的--重复投的钱洞)，未修）
-- **单进程服务所有用户**，所以 `st.cache_data` 是全用户共用的。（[`BUG-001`](../docs/BUGLIST.md#bug-001跨用户数据串号)，未修）
-- 平台没有日志留存、没有告警。线上炸了只能等人告诉你。（[`BUG-017`](../docs/BUGLIST.md#bug-017可观测性全空线上炸了只能等人告诉你)，未修）
+- **时区是 UTC**，用户在 UTC+8。代码里没有任何时区定义，`date.today()` 直接取进程时区 → **北京时间每天 00:00–07:59**，服务端的「今天」仍停在前一天。
+- **单进程服务所有用户**，所以 `st.cache_data` 是全用户共用的；缓存键内含用户名，跨用户不串号。
+- 平台没有日志留存、没有告警。线上炸了只能等人告诉你。
 
 ---
 
@@ -53,7 +53,7 @@ cd X:/coding/projects/sp500-nasdaq100-gold-dca
 # 或双击项目根目录的 start-app.bat
 ```
 
-**认证模式（2026-08-18 起，fail-closed）**：默认要求云端模式——没配 secrets 会**拒绝启动**并提示原因。本机已配 `.streamlit/secrets.toml` 则无感（照常登录）。要在**无凭据的机器**上跑单机版，必须显式设置：
+**认证模式（fail-closed）**：默认要求云端模式——没配 secrets 会**拒绝启动**并提示原因。本机已配 `.streamlit/secrets.toml` 则无感（照常登录）。要在**无凭据的机器**上跑单机版，必须显式设置：
 
 ```bash
 # Git Bash:
@@ -71,7 +71,7 @@ DCA_AUTH_MODE=local .venv/Scripts/streamlit run app.py
 ```
 
 **本机环境实况（2026-08-17 实测）**：Python 3.14.4 / streamlit 1.61.1 / pandas 3.0.5 / numpy 2.5.2 / yfinance 1.6.0 / gspread 5.12.4。
-`requirements.txt` 里全是无上界的 `>=`（如 `pandas>=2.0.0`），**与实装版本差很远，等于没有可复现性**。（[`BUG-015`](../docs/BUGLIST.md#bug-015零测试零-ci依赖不钉版本回测脚本全是坏的)，未修）
+`requirements.txt` 里全是无上界的 `>=`（如 `pandas>=2.0.0`），**与实装版本差很远，等于没有可复现性**。
 
 ---
 
@@ -115,12 +115,12 @@ cmd 可能把乱码碎片当命令去执行——**这个坑只在双击运行�
 | build context 错位 | compose 写 `context: .` + `dockerfile: deploy/Dockerfile`，而文档全程用 `-f deploy/docker-compose.yml` → 解析成 `deploy/deploy/Dockerfile`，构建立刻失败 |
 | 挂载路径对不上 | 文档教你建 `data/me/`，compose 挂的是 `./data/user1` → 容器里读不到 config.json，`SystemExit` |
 
-**`BUG-012` 的修复动作同时连带解决的真实风险：**
+**删除那套文件同时消掉的真实风险：**
 
 - **GCP 私钥不再会被烤进镜像层。** `.dockerignore` 没排除 `.streamlit/`，而 `Dockerfile:21` COPY 整个目录。镜像层是只读堆叠的，后面 `rm` 掉前面那层还在，**「打包进去再删」是无效的**。没有 Dockerfile = 没有这条外泄路径。
 - **`setup_user.sh` 不会再炸配置。** 它用 `sed "/^}$/r ..."` 插 nginx location 块，而文件里第一个独占一行的 `}` 是 **upstream 块的收尾**，不是 server 块的 → location 被插到 server 块外面 → nginx 报 `location directive is not allowed here`，**完全起不来**。加一个用户 = 所有用户下线。
 - **两套互相抵消的多用户实现收敛成一套。** 原先「一用户一容器一目录」和「应用内登录 + Sheets 行隔离」并存，但所有容器 COPY 的是同一份 service account、指向同一个表格 —— 容器隔离是纯废重量，且 nginx 路径与 Sheets 用户名毫无绑定，任何人从任意 `/xxx/` 路径都能登任何账号。现在只剩应用内登录这一套。
-- **原文档里那句不实陈述一并删掉了**：「用户能互相看到数据吗？不能，每个用户有独立的容器和数据目录，完全隔离。」—— 真实情况是所有用户共用一个 `data/transactions.csv` 和一块进程级缓存（[`BUG-001`](../docs/BUGLIST.md#bug-001跨用户数据串号)）。
+- **原文档里那句不实陈述一并删掉了**：「用户能互相看到数据吗？不能，每个用户有独立的容器和数据目录，完全隔离。」—— 真实情况是所有用户共用一个 `data/transactions.csv` 和一块进程级缓存。
 
 ### 将来真要用 Docker 的话
 
@@ -135,7 +135,7 @@ git checkout 574c7a7 -- deploy/Dockerfile   # 取回
 
 1. **COPY 清单必须含 `storage.py`**（当年就漏了这个）
 2. **`.streamlit/secrets.toml` 绝不进镜像层**。`.dockerignore` 已经保留并把它列在第一条了 —— 凭据走运行时挂载或环境变量注入
-3. **设 `TZ=Asia/Shanghai`**（当年 Dockerfile 和 compose 都没设，是 [`BUG-008`](../docs/BUGLIST.md#bug-008今天是模糊的--重复投的钱洞) 的一部分成因）
+3. **设 `TZ=Asia/Shanghai`**（当年 Dockerfile 和 compose 都没设时区，容器内 `date.today()` 会落在 UTC）
 4. **`FROM` 钉住 digest**，不要用 `python:3.12-slim` 这种浮动 tag。且注意本机已经是 **Python 3.14.4**，pandas 3.0.5 —— 镜像里装 3.12 会得到完全不同的依赖解析
 5. **COPY 要带上 `strategy/`、`backtest/`、`data/market_history/`**，否则 Tab5 是空的、每个用户从冷缓存起步（`.dockerignore` 现在还排除着 `backtest*/` 和 `*.md`，重启 Docker 时要一并复核）
 6. **每用户独立 `--base-dir`**。这个机制在代码里已经就绪（`app.py` 和 `dca_calculator.py` 都支持 `--base-dir`），与 Docker 无关，不需要容器也能用
@@ -147,10 +147,9 @@ git checkout 574c7a7 -- deploy/Dockerfile   # 取回
 
 **线上真正的数据在 Google Sheets，项目目前没有自己可控、自动执行且验证过可恢复的备份。** Google Sheets 的平台版本历史可能是最后一道救命绳，但它不等于本项目已经建立了备份制度。
 
-`storage.py` 自称 Sheets 是「唯一事实源」，但：
+`storage.py` 以 Sheets 为「唯一事实源」，本地侧已有的保护：
 
-- 没有项目侧自动导出、命名快照、保留周期和恢复演练；只能被动依赖平台可能提供的版本历史
-- 本地 `data/*.localbak` 是**假保护** —— 判断条件是「备份文件不存在时才备份」，所以它只在第一次同步时生成过一次，永远是最早那一份；而且用的是移动（`replace`）不是复制
-- 一次 Sheets 读取失败就会让整张表被一行覆盖（[`BUG-002`](../docs/BUGLIST.md#bug-002一次读取失败--全部历史被覆盖)），**且没有恢复路径**
+- 本地 `data/*.localbak` 是带时间戳的轮转留底（滚动保留最近 10 份），`sheets` 写前会先快照 `<表名>_bak` 工作表，快照失败则放弃写入
+- Sheets 读取故障会抛错拒写，不会把空表当成"没有数据"覆写上去
 
-这是当前最急的缺口之一，完整成因、修复路径与验证标准见 [`BUG-002`](../docs/BUGLIST.md#bug-002一次读取失败--全部历史被覆盖) 和 [`BUG-018`](../docs/BUGLIST.md#bug-018事实源没有项目级可恢复备份)。
+**仍缺的是项目自己可控的备份制度**：没有自动导出、命名快照、保留周期和恢复演练，只能被动依赖 Google 平台可能提供的版本历史。这是当前最急的缺口之一，完整清单与验证标准见 [docs/BUGLIST.md](../docs/BUGLIST.md) 备份相关条目。

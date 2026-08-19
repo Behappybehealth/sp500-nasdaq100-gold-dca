@@ -27,7 +27,7 @@
 
 | 文件 | 说明 |
 |---|---|
-| [plans/app-split-design.md](plans/app-split-design.md) | **半活**：app.py 拆分 6 刀方案（BUG-020 施工图纸，拆分完成前保持更新，拆完转冻） |
+| [plans/app-split-design.md](plans/app-split-design.md) | app.py 拆分方案（施工图纸，已执行完毕） |
 | [plans/project-audit-2026-08-17.md](plans/project-audit-2026-08-17.md) | 2026-08-17 全量审计原始快照（26 条问题的出处） |
 | [plans/architecture-and-p0-explained.md](plans/architecture-and-p0-explained.md) | ARCHITECTURE / BUGLIST 的前身，已被拆分取代 |
 | [plans/distributed-pondering-puppy.md](plans/distributed-pondering-puppy.md) | 回测模型实施计划（已执行完） |

@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
 """全局 CSS：登录页科技风背景、玻璃拟态登录卡、加载/遮罩组件样式。
 
-BUG-020 刀 3 从 app.py:42-215 原样搬入（仅包成 inject_css()）。
 ⚠️ 遮罩类（.dca-sync-mask / .dca-auth-mask）必须保持不透明 background——
-曾因透明遮罩导致残留登录页透出，DOM 检查全过但用户看到冻屏（详设 §6）。
+透明遮罩会让残留登录页透出，DOM 检查全过但用户看到冻屏（详设 §6）。
 """
 from __future__ import annotations
 

@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Tab5 回测结果：5 段静态报告，全部读 backtest/*.json（BUG-025 单一供数）。
+"""Tab5 回测结果：5 段静态报告，全部读 backtest/*.json（单一供数）。
 
-BUG-020 刀 4 从 app.py:923-1155 原样搬入；仅把全局 BACKTEST_DIR 换成显式参数，
-_load_json 来自 src.services.curves。内部段界见 docs/ARCHITECTURE-DETAIL.md §10。
+数据显式收 BACKTEST_DIR 参数；_load_json 来自 src.services.curves。
+内部段界见 docs/ARCHITECTURE-DETAIL.md §10。
 """
 from __future__ import annotations
 

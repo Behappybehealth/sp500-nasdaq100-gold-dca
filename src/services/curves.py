@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """曲线与文件数据：JSON 加载 / 缓存行情序列 / 组合净值曲线。
 
-BUG-020 刀 2 从 app.py:615-620、694-752 原样搬入；仅把模块级全局 CODE_DIR/DATA_DIR/TX_CSV 换成显式 paths 参数。
+显式收 paths 参数，不读 app.py 模块级全局。
 """
 from __future__ import annotations
 

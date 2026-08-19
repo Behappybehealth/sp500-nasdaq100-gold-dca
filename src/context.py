@@ -28,7 +28,7 @@ class Paths:
 
 @dataclass
 class Decision:
-    """侧栏跑模型产出的决策结果（刀 6 起由 sidebar 返回；手填金额时整体重算）。"""
+    """侧栏跑模型产出的决策结果（由 sidebar.render 返回；手填金额时整体重算）。"""
 
     result: dict  # run_model 的原始 JSON
     dec: dict  # result["decision"]
@@ -37,10 +37,10 @@ class Decision:
 
 
 def build_paths(argv=None) -> Paths:
-    """解析 --base-dir → 定位数据目录 → 读 config.json（原 app.py 启动段 :26-49 原样收编）。
+    """解析 --base-dir → 定位数据目录 → 读 config.json。
 
-    ⚠️ 唯一的真实陷阱（设计文档刀 2 注意项）：CODE_DIR 必须是**项目根**，
-    本文件在 src/ 下，所以要 parent.parent —— 搬模块后多一层，不能照抄原来的 parent。
+    ⚠️ 唯一的真实陷阱：CODE_DIR 必须是**项目根**——本文件在 src/ 下，
+    所以要 parent.parent（多一层），不能照抄单层脚本的 parent。
     """
     code_dir = Path(__file__).resolve().parent.parent  # src/ 的上一级 = 项目根
 

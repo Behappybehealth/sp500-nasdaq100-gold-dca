@@ -18,9 +18,9 @@ from src.ui import auth, sidebar
 from src.ui.styles import inject_css
 from src.tabs import backtest, history, holdings, records, strategy_doc, today
 
-# ---- 路径：代码 vs 数据分离（启动逻辑已收编 src/context.py，BUG-020 刀 2）----
+# ---- 路径：代码 vs 数据分离，由 src/context.build_paths 装配 ----
 _paths = build_paths()
-# 过渡桥：剩余模块级全局供 storage.init 与各 tab render 调用（BASE/TX_CSV/CONFIG 死引用已摘除）
+# 模块级别名：供 storage.init 与各 tab render 传参
 CODE_DIR = _paths.code_dir
 DATA_DIR = _paths.data_dir
 ASSETS = _paths.assets
@@ -31,19 +31,13 @@ storage.init(DATA_DIR)
 st.set_page_config(page_title="模拟定投决策台", layout="wide", page_icon="📈")
 
 
-# ---- 全局样式与加载组件 ----
-# CSS 已搬至 src/ui/styles.py（BUG-020 刀 3）；遮罩的不透明 background 是冻屏坑防线，详见该文件头注。
+# ---- 全局样式（src/ui/styles.py；遮罩的不透明 background 是冻屏坑防线，详见该文件头注）----
 inject_css()
 
-# ---- 认证门闸（BUG-020 刀 7）：本体在 src/ui/auth.py（登录页/遮罩/会话首同步；未登录 st.stop()）----
+# ---- 认证门闸：src/ui/auth.py（登录页/遮罩/会话首同步；未登录 st.stop()）----
 CURRENT_USER = auth.require_user()
 
-# ---- 服务函数已搬至 src/services/（BUG-020 刀 2）：
-# run_model / parse_wide_table → services/model.py；fetch_xau_spot / fetch_btc → services/quotes.py；
-# _load_json / load_price_series / portfolio_curve → services/curves.py。调用点显式传 _paths。
-
-# ---------------- 侧边栏 ----------------
-# 侧栏已搬至 src/ui/sidebar.py（BUG-020 刀 6：render() 返回 Decision，收口 result/dec/ms/pf）
+# ---------------- 侧边栏：渲染 + 跑模型（src/ui/sidebar.py）----------------
 _decision = sidebar.render(_paths, CURRENT_USER)
 result, dec, ms, pf = _decision.result, _decision.dec, _decision.ms, _decision.pf
 
@@ -59,20 +53,14 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
     ]
 )
 
-# ---- 五个只读 tab 已搬至 src/tabs/（BUG-020 刀 4）：today/holdings/history/backtest/strategy_doc ----
 today.render(tab1, result, dec, ms, ASSETS)
 
-# tab2 已搬至 src/tabs/holdings.py（BUG-020 刀 4）
 holdings.render(tab2, result, pf, ASSETS, _paths)
 
-# tab3 已搬至 src/tabs/records.py（BUG-020 刀 5：写链单独成刀）
 records.render(tab3, result, dec, ASSETS, CURRENT_USER)
 
-# tab4 已搬至 src/tabs/history.py（BUG-020 刀 4）
 history.render(tab4, CURRENT_USER)
 
-# tab5 已搬至 src/tabs/backtest.py（BUG-020 刀 4）
 backtest.render(tab5, BACKTEST_DIR)
 
-# tab6 已搬至 src/tabs/strategy_doc.py（BUG-020 刀 4）
 strategy_doc.render(tab6, CODE_DIR)

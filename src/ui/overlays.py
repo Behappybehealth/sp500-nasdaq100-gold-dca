@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """三个遮罩/加载组件：show_loading / show_sync_mask / show_auth_mask。
 
-BUG-020 刀 3 从 app.py:218-266 原样搬入，零逻辑改动。
 ⚠️ 遮罩视觉正确性依赖 styles.py 里对应 CSS 类的不透明 background（详设 §6 的冻屏坑）。
 """
 from __future__ import annotations

@@ -83,7 +83,7 @@ USER_FIELDS = [
 
 TABLES = {"transactions": TX_FIELDS, "observations": OBS_FIELDS}
 
-# PIN 策略（BUG-004）：新 PIN 强制 6-8 位；存量 4-5 位旧账号不受影响，登录成功时自动迁移哈希。
+# PIN 策略：新 PIN 强制 6-8 位；存量 4-5 位旧账号不受影响，登录成功时自动迁移哈希。
 _PBKDF2_ITER = 200_000  # 2026-08-17 本机实测约 0.073s/次；换部署机应按 0.05-0.3s 目标重新标定
 _PIN_MIN, _PIN_MAX = 6, 8
 _LOCK_AFTER = 5  # 连续失败 5 次锁定
@@ -97,7 +97,7 @@ def sheets_status() -> str:
     """后端三态：'ok' 已配置 / 'off' 未配置（合法单机）/ 'error' secrets 读取异常（配置损坏）。
 
     「没配」和「读不出来」必须分开：前者是用户选的本地模式，后者是故障——
-    安全相关的判断只许信 'ok'（fail-closed，BUG-003）。"""
+    安全相关的判断只许信 'ok'（fail-closed）。"""
     try:
         conns = st.secrets.get("connections", {})
     except Exception:
@@ -147,7 +147,7 @@ def _is_missing_ws(exc: Exception) -> bool:
 
 
 def _read_ws(name: str, fields: list, fresh: bool = False) -> pd.DataFrame:
-    """读整个 worksheet；表不存在或为空时返回带表头的空表；读取故障抛 SheetReadError（BUG-002：绝不让"我不知道"伪装成"没有"）。
+    """读整个 worksheet；表不存在或为空时返回带表头的空表；读取故障抛 SheetReadError（绝不让"我不知道"伪装成"没有"）。
     fresh=True 绕过 8 秒短缓存强制新鲜读。"""
     if fresh:
         _SHEET_CACHE.pop(name, None)
@@ -172,7 +172,7 @@ def _read_ws(name: str, fields: list, fresh: bool = False) -> pd.DataFrame:
 
 
 def _write_ws(name: str, df: pd.DataFrame) -> None:
-    """整表覆写。写前先把当前内容快照到 <name>_bak（滚动单份，BUG-002 第二层）；
+    """整表覆写。写前先把当前内容快照到 <name>_bak（滚动单份）；
     快照失败则放弃写入（fail-closed：宁可不写，不可无备份覆写）。"""
     _SHEET_CACHE.pop(name, None)  # 写后即时失效，下一次读拿最新
     conn = _conn()
@@ -506,7 +506,7 @@ def set_override(user: str, month: str, budget_rmb: float) -> None:
 
 
 def _rotate_backup(path: Path, keep: int = 10) -> None:
-    """覆盖前带时间戳**复制**留底（不是移动），滚动保留最近 keep 份（BUG-002 第三层）。"""
+    """覆盖前带时间戳**复制**留底（不是移动），滚动保留最近 keep 份。"""
     if not path.exists():
         return
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -519,7 +519,7 @@ def _rotate_backup(path: Path, keep: int = 10) -> None:
 def sync_local(user: str) -> None:
     """把云端该用户的 transactions/observations/budget_overrides 落盘成本地缓存。
 
-    sheets 模式落在 data/users/<user>/ —— 每用户独立目录，两个用户同时在线也不会互相覆写（BUG-001）；
+    sheets 模式落在 data/users/<user>/ —— 每用户独立目录，两个用户同时在线也不会互相覆写；
     覆盖前先 _rotate_backup 留底。本地模式（无 secrets）不调用本函数。
     """
     if not sheets_enabled():

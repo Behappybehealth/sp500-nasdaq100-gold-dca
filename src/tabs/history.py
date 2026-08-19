@@ -1,8 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Tab4 历史记录：回读 transactions / observations 两张表原样展示。
-
-BUG-020 刀 4 从 app.py:909-922 原样搬入；仅把全局 CURRENT_USER 换成显式参数。
-"""
+"""Tab4 历史记录：回读 transactions / observations 两张表原样展示。"""
 from __future__ import annotations
 
 import pandas as pd

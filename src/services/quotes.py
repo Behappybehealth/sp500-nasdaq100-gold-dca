@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """实时行情报价：东财 XAU 现货 + Yahoo BTC。
 
-BUG-020 刀 2 从 app.py:623-691 原样搬入；仅把模块级全局 DATA_DIR 换成显式 paths 参数。
+显式收 paths 参数，不读 app.py 模块级全局。
 """
 from __future__ import annotations
 

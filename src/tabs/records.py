@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """Tab3 记账：回报成交（buy/sell）+ 主动跳过（observe），复述确认后落库。
 
-BUG-020 刀 5 从 app.py:654-769 原样搬入；仅把全局 ASSETS/CURRENT_USER 换成显式参数。
 写链：session_state["pending_tx"]/["pending_obs"] 暂存 → 复述确认 → storage.append_row。
 """
 from __future__ import annotations

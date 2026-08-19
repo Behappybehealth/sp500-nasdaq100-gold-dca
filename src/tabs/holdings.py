@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 """Tab2 持仓与曲线：组合市值 vs 累计投入 / 权重对比 / 近一年价格走势。
 
-BUG-020 刀 4 从 app.py:729-792 原样搬入；仅把全局 ASSETS/_paths 换成显式参数，
-portfolio_curve / load_price_series 来自 src.services.curves。
+数据全部显式收参，不读 app.py 模块级全局；portfolio_curve / load_price_series 来自 src.services.curves。
 """
 from __future__ import annotations
 
