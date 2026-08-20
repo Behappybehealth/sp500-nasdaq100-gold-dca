@@ -266,9 +266,13 @@ gspread>=5.8.0,<6        本机实装 5.12.4  ← 唯一有上界的
 
 **session_state key 10 个**（口径：[`key`] 读写 + `.pop()` / `.get()` 调用合计）：`_auth`(8) `synced`(7) `_login_err`(6) `_names`(5) `activating`(5) `pending_tx`(5) `user`(4) `pending_obs`(4) `_boot_err`(2) `_act_err`(2)，另有 1 处 `.clear()`。其中 8 个属认证/会话链、2 个属记账链（`pending_tx` / `pending_obs`），**没有跨链共享**。
 
+**session_state 当前实测（2026-08-20，拆分后）**：**11 个键、60 处引用**，`app.py` 侧已归零 —— `src/ui/auth.py` 39 处（`_auth` 8 / `synced` 7 / `_login_err` 6 / `_names` 5 / `activating` 5 / `user` 4 / `_boot_err` 2 / `_act_err` 2）、`src/tabs/records.py` 18 处（`pending_tx` 9 / `tx_dup` 4 / `pending_obs` 3；`tx_dup` 由 `BUG-008` 的写入去重确认引入，键数因此由基线的 10 变 11）、`src/ui/sidebar.py` 3 处。
+
+拆分后**出现了基线时不存在的跨模块共享**：`synced`（语义="本会话是否已从云端同步过"）由两个模块共管生命周期 —— `auth.py` 在登录/激活/自举成功处与会话首同步后置 True（:226 / :261 / :293 / :319 读 / :326 设），`sidebar.py` 的 🔄 刷新 `pop` 掉它触发重同步（:254）、本地历史上传后又置 True（:332）。登出走 `sidebar.py:97` 的 `st.session_state.clear()` **全清**，所以切用户不会残留 `pending_tx` 之类的待确认数据（已实测，不是数据安全问题）；代价是"哪个键属于哪条链、谁负责清"完全隐式，无单一记录处 —— 缺口已登记 `BUG-032`。
+
 **storage 接口 19 个公开函数**（app.py 侧调用次数）：`sync_local`×4、`read_rows`×2、`list_users`×2、`is_admin`×2、`append_row`×2、`sheets_status`×2，其余 12 个各 ×1，`sheets_enabled` 仅 storage 内部使用 —— 已是干净边界。
 
-（复核于 2026-08-18）
+（复核于 2026-08-18；`session_state` 当前实测于 2026-08-20，模块级全局表仍为拆分前基线不重测）
 
 ---
 
