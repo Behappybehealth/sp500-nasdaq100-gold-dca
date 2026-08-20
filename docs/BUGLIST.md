@@ -21,6 +21,8 @@
 
 **编号规则**：`BUG-0XX` 全局唯一、只增不改、**永不复用**。问题一旦登记就不删除 —— 即使成因消失（比如承载它的文件被删了），也留在册上标 ✅ 并写清是被谁连带修掉的。
 
+**行号坐标约定**：本文所有 `file:line` 都是**记录当时的坐标**（登记日的现场 / 修复日的落点），**不是指向当前代码的活链接**。所以一律写成不可点击的等宽文本 —— 代码一重构行号就漂，而回头把它改成"修好后的位置"等于篡改证据。要看当时的原文：`git show <该条目的 commit 或其父提交>:<file>`。**"当前代码在哪"由 [ARCHITECTURE-DETAIL.md](ARCHITECTURE-DETAIL.md) 负责**（活文档，锚点 + 行号双写、每节末尾标复核日期）。最容易踩空的一处：`app.py` 于 2026-08-18 经 `BUG-020` 七刀从 1984 行收口为 66 行纯装配层（拆分前最后一版 `77ea4a6`），因此 2026-08-18 及之前的条目里凡 `app.py:` 三位数以上行号，那段代码现已在 `src/` 下。
+
 ---
 
 # 总览统计
@@ -114,7 +116,7 @@
 
 | 等级 | 状态 | 发现日期 | 确认日期 | 修复日期 | 主要证据 |
 |---|---|---|---|---|---|
-| **P0** | ✅ 已验证 | 2026-08-17 | 2026-08-18 | 2026-08-18 | [app.py:556-557](../app.py#L556-L557)、[storage.py:368](../storage.py#L368) |
+| **P0** | ✅ 已验证 | 2026-08-17 | 2026-08-18 | 2026-08-18 | `app.py:556-557`、`storage.py:368` |
 
 ### ① 现在会发生什么
 
@@ -230,10 +232,10 @@ data/
 
 #### 🔧 实际修复
 
-- [app.py:587-596](../app.py#L587-L596)：`run_model(amount, user)`——user 进缓存键；`user != "local"` 时子进程命令追加 `--user`
-- [app.py:821](../app.py#L821)、[app.py:960](../app.py#L960)：两个调用点都传 `CURRENT_USER`
-- [scripts/dca_calculator.py:822](../scripts/dca_calculator.py#L822)：新增 `--user` 参数；[:825-826](../scripts/dca_calculator.py#L825-L826) 拒绝路径分隔符与 `..`；[:831-833](../scripts/dca_calculator.py#L831-L833) 记账数据改读 `data/users/<user>/`；[:64-71](../scripts/dca_calculator.py#L64-L71) `resolve_monthly_budget` 加 `record_dir` 第 4 参
-- [storage.py:528-549](../storage.py#L528-L549)：`sync_local` 落盘到 `data/users/<user>/`（每用户独立目录）
+- `app.py:587-596`：`run_model(amount, user)`——user 进缓存键；`user != "local"` 时子进程命令追加 `--user`
+- `app.py:821`、`app.py:960`：两个调用点都传 `CURRENT_USER`
+- `scripts/dca_calculator.py:822`：新增 `--user` 参数；`:825-826` 拒绝路径分隔符与 `..`；`:831-833` 记账数据改读 `data/users/<user>/`；`:64-71` `resolve_monthly_budget` 加 `record_dir` 第 4 参
+- `storage.py:528-549`：`sync_local` 落盘到 `data/users/<user>/`（每用户独立目录）
 - [.gitignore](../.gitignore)：补 `data/users/`（用户数据不入库）
 - commit：`a1707a6`（引擎/UI/ignore）+ `f02ff22`（sync_local）
 
@@ -253,7 +255,7 @@ data/
 
 | 等级 | 状态 | 发现日期 | 确认日期 | 修复日期 | 主要证据 |
 |---|---|---|---|---|---|
-| **P0** | ✅ 已验证 | 2026-08-17 | 2026-08-18 | 2026-08-18 | [storage.py:107-110](../storage.py#L107-L110)、[storage.py:299-307](../storage.py#L299-L307)、[storage.py:378-380](../storage.py#L378-L380) |
+| **P0** | ✅ 已验证 | 2026-08-17 | 2026-08-18 | 2026-08-18 | `storage.py:107-110`、`storage.py:299-307`、`storage.py:378-380` |
 
 ### ① 现在会发生什么
 
@@ -302,7 +304,7 @@ storage.py:205   create_user() → _write_ws("users", concat([空表, 新 admin]
 | 保护 | 实际情况 |
 |---|---|
 | Google Sheets 版本历史 | 可能提供平台侧的最后一道恢复机会，但项目没有命名快照、自动导出或经过演练的恢复流程；**不能把“平台也许还能回退”当成项目自己的备份** |
-| 本地 `data/*.localbak` | **假保护**。[storage.py:378-380](../storage.py#L378-L380) 的条件是"`.localbak` **不存在时**才备份" → 只在第一次 sync 时生成过一次，**永远是最早那一份** |
+| 本地 `data/*.localbak` | **假保护**。`storage.py:378-380` 的条件是"`.localbak` **不存在时**才备份" → 只在第一次 sync 时生成过一次，**永远是最早那一份** |
 | `.localbak` 的写法 | 用 `path.replace()` —— 这是**移动**不是复制。移动完到重新写出之间崩掉，**当前文件就没了** |
 
 ### ③ 怎么修
@@ -378,11 +380,11 @@ shutil.copy2(path, path.with_suffix(f".{时间戳}.bak"))
 
 #### 🔧 实际修复
 
-- [storage.py:38-43](../storage.py#L38-L43)：新增 `SheetReadError` / `SheetWriteError` 两个异常
-- [storage.py:142-171](../storage.py#L142-L171)：`_is_missing_ws` 区分「表不存在」与「读取故障」；`_read_ws` 故障一律 `raise SheetReadError`——"empty ≠ error"，原 `except: return 空表` 根除
-- [storage.py:174-202](../storage.py#L174-L202)：`_write_ws` 写前把现内容快照到 `<表名>_bak`（滚动单份）；快照失败 `raise SheetWriteError` **放弃写入**；主写入 `fillna("")`
-- [storage.py:517-525](../storage.py#L517-L525)：`_rotate_backup` 覆盖前带时间戳**复制**留底，滚动保留 10 份（替代旧 .localbak 移动式假保护）
-- [app.py](../app.py) 全部写入点包 try/except、失败可见提示且不 rerun：[:791](../app.py#L791) 重置 PIN / [:798](../app.py#L798) 删用户 / [:808](../app.py#L808) 加账号 / [:1007](../app.py#L1007) 预算 / [:1269](../app.py#L1269)、[:1309](../app.py#L1309) 记账与观察（pop 改到写入成功后才执行）；[:567](../app.py#L567) 名单读取失败拒渲染自举表单；[:581](../app.py#L581) 首次 sync 失败给可见告警
+- `storage.py:38-43`：新增 `SheetReadError` / `SheetWriteError` 两个异常
+- `storage.py:142-171`：`_is_missing_ws` 区分「表不存在」与「读取故障」；`_read_ws` 故障一律 `raise SheetReadError`——"empty ≠ error"，原 `except: return 空表` 根除
+- `storage.py:174-202`：`_write_ws` 写前把现内容快照到 `<表名>_bak`（滚动单份）；快照失败 `raise SheetWriteError` **放弃写入**；主写入 `fillna("")`
+- `storage.py:517-525`：`_rotate_backup` 覆盖前带时间戳**复制**留底，滚动保留 10 份（替代旧 .localbak 移动式假保护）
+- [app.py](../app.py) 全部写入点包 try/except、失败可见提示且不 rerun：`:791` 重置 PIN / `:798` 删用户 / `:808` 加账号 / `:1007` 预算 / `:1269`、`:1309` 记账与观察（pop 改到写入成功后才执行）；`:567` 名单读取失败拒渲染自举表单；`:581` 首次 sync 失败给可见告警
 - commit：`f02ff22`（storage 三层）+ `a1707a6`（app.py 包装）
 
 #### ✔️ 验证结果
@@ -401,7 +403,7 @@ shutil.copy2(path, path.with_suffix(f".{时间戳}.bak"))
 
 | 等级 | 状态 | 发现日期 | 确认日期 | 修复日期 | 主要证据 |
 |---|---|---|---|---|---|
-| **P0** | ✅ 已验证 | 2026-08-17 | 2026-08-18 | 2026-08-18 | [app.py:430-431](../app.py#L430-L431)、[storage.py:63-68](../storage.py#L63-L68) |
+| **P0** | ✅ 已验证 | 2026-08-17 | 2026-08-18 | 2026-08-18 | `app.py:430-431`、`storage.py:63-68` |
 
 ### ① 现在会发生什么
 
@@ -505,9 +507,9 @@ elif AUTH_MODE == "local":
 
 #### 🔧 实际修复
 
-- [app.py:430-445](../app.py#L430-L445)：门闸重写——`AUTH_MODE` 默认 `sheets`；`local` 才单机（挂黄色警示条）；`error`/`off` 分别报「配置损坏」「配置缺失」后 `st.stop()`
-- [storage.py:96-110](../storage.py#L96-L110)：`sheets_status()` 三态（ok/off/error）+ `sheets_enabled()` 只在 `ok` 时放行
-- [app.py:528](../app.py#L528)、[:567](../app.py#L567)：登录名单走 `list_users_fresh()` 新鲜读，读取故障报「云端存储暂时不可用」并 `st.stop()`——**绝不渲染自举表单**（防"读不出=没用户=随便建号"）
+- `app.py:430-445`：门闸重写——`AUTH_MODE` 默认 `sheets`；`local` 才单机（挂黄色警示条）；`error`/`off` 分别报「配置损坏」「配置缺失」后 `st.stop()`
+- `storage.py:96-110`：`sheets_status()` 三态（ok/off/error）+ `sheets_enabled()` 只在 `ok` 时放行
+- `app.py:528`、`:567`：登录名单走 `list_users_fresh()` 新鲜读，读取故障报「云端存储暂时不可用」并 `st.stop()`——**绝不渲染自举表单**（防"读不出=没用户=随便建号"）
 - commit：`a1707a6`（app.py 门闸）+ `f02ff22`（storage 三态）
 
 #### ✔️ 验证结果
@@ -526,13 +528,13 @@ elif AUTH_MODE == "local":
 
 | 等级 | 状态 | 发现日期 | 确认日期 | 修复日期 | 主要证据 |
 |---|---|---|---|---|---|
-| **P0** | ✅ 已验证 | 2026-08-17 | 2026-08-18 | 2026-08-18 | [storage.py:134-135](../storage.py#L134-L135)、[storage.py:190](../storage.py#L190) |
+| **P0** | ✅ 已验证 | 2026-08-17 | 2026-08-18 | 2026-08-18 | `storage.py:134-135`、`storage.py:190` |
 
 ### ① 现在会发生什么
 
 有人拿到 `dca365.streamlit.app` 这个地址（应用是 public 的），打开登录页：
 
-1. **用户名不用猜** —— 登录页的下拉框把所有用户名列给未登录访客看（[app.py:540-546](../app.py#L540-L546)）
+1. **用户名不用猜** —— 登录页的下拉框把所有用户名列给未登录访客看（`app.py:540-546`）
 2. **PIN 只有 4 位也行** —— 1 万种组合
 3. **试错次数没有上限** —— 无限速、无锁定、无验证码
 4. **试错没有任何记录** —— 全项目零日志，你永远不会知道有人试过
@@ -545,9 +547,9 @@ elif AUTH_MODE == "local":
 
 | 事实 | 证据 |
 |---|---|
-| PIN 只要 4–8 位 | [storage.py:190](../storage.py#L190) `if not (4 <= len(pin or "") <= 8)` |
-| 哈希是**单轮无盐 SHA256** | [storage.py:134-135](../storage.py#L134-L135) `sha256(f"dca::{name}::{pin}")` |
-| 唯一的"盐"是用户名 —— 而用户名在登录页**下拉可枚举** | [app.py:540-546](../app.py#L540-L546) |
+| PIN 只要 4–8 位 | `storage.py:190` `if not (4 <= len(pin or "") <= 8)` |
+| 哈希是**单轮无盐 SHA256** | `storage.py:134-135` `sha256(f"dca::{name}::{pin}")` |
+| 唯一的"盐"是用户名 —— 而用户名在登录页**下拉可枚举** | `app.py:540-546` |
 | **零失败限速、零锁定、零审计日志** | grep `attempt` / `lockout` / `rate_limit` / `fail_count` 全项目零命中；`logging` 在三个主文件里零命中 |
 | 应用已 public，这是唯一防线 | 为绕开 Streamlit 私有锁改的，见 ARCHITECTURE §1.7 |
 
@@ -645,11 +647,11 @@ users 表加两列 `fail_count` / `locked_until`。连续失败 5 次 → 锁 15
 
 #### 🔧 实际修复
 
-- [storage.py:73-90](../storage.py#L73-L90)：`USER_FIELDS` 扩为 8 列（+salt/hash_algo/fail_count/locked_until）；常量 `_PBKDF2_ITER=200_000`、`_PIN_MIN=6`、`_LOCK_AFTER=5`、`_LOCK_MINUTES=15`
-- [storage.py:208-227](../storage.py#L208-L227)：`_pin_hash`（旧 sha256 仅留作校验）、`_pin_hash_v2`（PBKDF2+盐）、`_new_pin_record`（`secrets.token_hex(16)` 随机盐）
-- [storage.py:263-311](../storage.py#L263-L311)：`authenticate` 重写——锁定期内对错都拒；失败计数 ≥5 锁 15 分钟；成功清状态；旧格式自动迁移 PBKDF2；返回 `ok|no_user|pending|bad_pin|locked`
-- [storage.py:323-348](../storage.py#L323-L348)、[:386-404](../storage.py#L386-L404)：`create_user`/`set_pin` 强制 6-8 位、写新格式三字段；[:416-428](../storage.py#L416-L428) `reset_pin` 连锁定与算法标记一起清
-- [app.py:489](../app.py#L489)：登录加 `locked` 提示「失败次数过多，账号已锁定，请 15 分钟后重试」；PIN 文案 4-8 位 → 6-8 位（4 处）
+- `storage.py:73-90`：`USER_FIELDS` 扩为 8 列（+salt/hash_algo/fail_count/locked_until）；常量 `_PBKDF2_ITER=200_000`、`_PIN_MIN=6`、`_LOCK_AFTER=5`、`_LOCK_MINUTES=15`
+- `storage.py:208-227`：`_pin_hash`（旧 sha256 仅留作校验）、`_pin_hash_v2`（PBKDF2+盐）、`_new_pin_record`（`secrets.token_hex(16)` 随机盐）
+- `storage.py:263-311`：`authenticate` 重写——锁定期内对错都拒；失败计数 ≥5 锁 15 分钟；成功清状态；旧格式自动迁移 PBKDF2；返回 `ok|no_user|pending|bad_pin|locked`
+- `storage.py:323-348`、`:386-404`：`create_user`/`set_pin` 强制 6-8 位、写新格式三字段；`:416-428` `reset_pin` 连锁定与算法标记一起清
+- `app.py:489`：登录加 `locked` 提示「失败次数过多，账号已锁定，请 15 分钟后重试」；PIN 文案 4-8 位 → 6-8 位（4 处）
 - commit：`f02ff22`（storage）+ `a1707a6`（app.py 提示）
 
 #### ✔️ 验证结果
@@ -823,10 +825,10 @@ wide_table_markdown 非空 ✅   warnings 数量 = 0 ✅   stderr 为空 ✅
 
 | 等级 | 状态 | 发现日期 | 确认日期 | 修复日期 | 主要证据 |
 |---|---|---|---|---|---|
-| **P1** | ✅ **已修复** | 2026-08-17 | 2026-08-19 | 2026-08-20 | [dca_calculator.py:344-386](../scripts/dca_calculator.py#L344-L386)、[:58](../scripts/dca_calculator.py#L58) |
+| **P1** | ✅ **已修复** | 2026-08-17 | 2026-08-19 | 2026-08-20 | `dca_calculator.py:344-386`、`:58` |
 
 - **① 现象**：盘中运行时，当天未收盘的临时价被当作"收盘价"写入 CSV 并提交进 git——已抓现行：`2026-08-14` 在 git 历史里被写过 3 个值（4398.80→4405.30→4380.40），08-18 早上工作区里 08-17 的值还在漂（GC_F 4456.90→4434.30、XAUT 4378.37→4362.37）。
-- **② 原理**：增量抓取 `period1=last_cached` 每次都重抓前沿日并按日期键覆盖（[:312-317](../scripts/dca_calculator.py#L312-L317)），落盘是整文件 `open("w")` 截断重写（[:292-298](../scripts/dca_calculator.py#L292-L298)），全程唯一校验只有 `close > 0`（[:257](../scripts/dca_calculator.py#L257)）。
+- **② 原理**：增量抓取 `period1=last_cached` 每次都重抓前沿日并按日期键覆盖（`:312-317`），落盘是整文件 `open("w")` 截断重写（`:292-298`），全程唯一校验只有 `close > 0`（`:257`）。
 - **③ 修法**：只持久化已收盘 K 线（当日行标 provisional，不写盘或写盘但不入 git）+ temp+rename 原子写 + 日期≤今天 / 跳变阈值 / 行数不减三道闸。
 - **④ 为什么有效**：脏值只要后面有更晚日期落库就永久冻结不再被重抓，从源头只收已收盘数据，污染在机制上进不来。
 - **⑤ 验证**：盘中连跑两次 → 当天日期不入 csv；往缓存塞一条 ±20% 跳变的假数据 → 被拒并出现 warning；写盘中途 kill 进程 → 文件不残缺。
@@ -842,16 +844,16 @@ wide_table_markdown 非空 ✅   warnings 数量 = 0 ✅   stderr 为空 ✅
 
 #### 🔧 实际修复
 
-> **2026-08-20 修复（commit `COMMIT3_HASH`）**：
-> 1. **新增 `utc_today()`**（[:58](../scripts/dca_calculator.py#L58)）：落库安全线专用的 UTC 自然日，与业务 `biz_today()`（UTC+8，BUG-008 引入）**两个函数两个用途**——落库看 UTC（全市场收盘的统一安全线），业务日界看北京。docstring 写明为什么 UTC 午夜能一条规则覆盖美股/GC=F/24/7 的 XAUT，免得后人按标的维护收盘时刻表。
-> 2. **`save_cached_closes(path, closes) -> List[str]`** 重写（[:344-386](../scripts/dca_calculator.py#L344-L386)），返回 warning 列表由调用方透传 JSON：
+> **2026-08-20 修复（commit `0b1ec6e`）**：
+> 1. **新增 `utc_today()`**（`:58`）：落库安全线专用的 UTC 自然日，与业务 `biz_today()`（UTC+8，BUG-008 引入）**两个函数两个用途**——落库看 UTC（全市场收盘的统一安全线），业务日界看北京。docstring 写明为什么 UTC 午夜能一条规则覆盖美股/GC=F/24/7 的 XAUT，免得后人按标的维护收盘时刻表。
+> 2. **`save_cached_closes(path, closes) -> List[str]`** 重写（`:344-386`），返回 warning 列表由调用方透传 JSON：
 >    - **闸①盘中价不落盘**：`persistable = {d: c for d, c in closes.items() if d < cutoff}`，`cutoff = utc_today()`；全部被剔 → 不建文件、返回"无可落库数据"warning。
 >    - **闸②行数不减**：`len(persistable) < len(existing)` 直接拒写（防上游残缺数据把库削平）。
 >    - **闸③原子写**：`path.name.tmp<pid>` + `os.replace`；`OSError` 时 `tmp.unlink(missing_ok=True)` 收尾并挂 warning（不留残缺文件也不留垃圾）。
->    - **±20% 跳变只 warning 不拦**（`_JUMP_WARN_PCT = 0.20`，[:341](../scripts/dca_calculator.py#L341)）：1987 式真崩盘必须能落库；且**只查本次真正变更的日期**（`existing.get(d) != c`），否则历史老跳变每次跑都刷一遍 warning。
+>    - **±20% 跳变只 warning 不拦**（`_JUMP_WARN_PCT = 0.20`，`:341`）：1987 式真崩盘必须能落库；且**只查本次真正变更的日期**（`existing.get(d) != c`），否则历史老跳变每次跑都刷一遍 warning。
 >    - **无变化不碰文件**：`persistable == existing` 时直接返回（盘中/周末重跑是常态，不该产生 mtime 抖动与无意义写盘）。
-> 3. **bar 日期改按 UTC 解释**（[:296-317](../scripts/dca_calculator.py#L296-L317)，施工中主动抓到的连带缺陷）：原 `date.fromtimestamp(ts)` 用**本机时区**，与闸①的 UTC 口径不一致。UTC+8 下恰好等价（ts 全落在 UTC 00:00–13:30），但负偏移时区会让 XAUT 的 UTC 00:00 bar 整体错位一天——同一份数据在不同机器上标不同日期。已改为 `datetime.fromtimestamp(ts, timezone.utc).date()`。
-> 4. **warning 双通道分离**（[:481-484](../scripts/dca_calculator.py#L481-L484)）：`cache_warning`（语义=数据没更新到最新，UI 与 `asset_note` 的"缓存未更新"据此标黄）与 `persist_warnings`（语义=落库护栏说了话，与新鲜度无关）分列两个键。混用会让一次跳变告警把新鲜数据误标成 stale。
+> 3. **bar 日期改按 UTC 解释**（`:296-317`，施工中主动抓到的连带缺陷）：原 `date.fromtimestamp(ts)` 用**本机时区**，与闸①的 UTC 口径不一致。UTC+8 下恰好等价（ts 全落在 UTC 00:00–13:30），但负偏移时区会让 XAUT 的 UTC 00:00 bar 整体错位一天——同一份数据在不同机器上标不同日期。已改为 `datetime.fromtimestamp(ts, timezone.utc).date()`。
+> 4. **warning 双通道分离**（`:481-484`）：`cache_warning`（语义=数据没更新到最新，UI 与 `asset_note` 的"缓存未更新"据此标黄）与 `persist_warnings`（语义=落库护栏说了话，与新鲜度无关）分列两个键。混用会让一次跳变告警把新鲜数据误标成 stale。
 
 #### ✔️ 验证结果
 
@@ -876,10 +878,10 @@ wide_table_markdown 非空 ✅   warnings 数量 = 0 ✅   stderr 为空 ✅
 
 | 等级 | 状态 | 发现日期 | 确认日期 | 修复日期 | 主要证据 |
 |---|---|---|---|---|---|
-| **P1** | ✅ **已修复** | 2026-08-17 | 2026-08-19 | 2026-08-20 | [dca_calculator.py:389-407](../scripts/dca_calculator.py#L389-L407) |
+| **P1** | ✅ **已修复** | 2026-08-17 | 2026-08-19 | 2026-08-20 | `dca_calculator.py:389-407` |
 
 - **① 现象**：同一标的的历史价格取决于"哪条路径抓的"——Yahoo Chart 主路径用原始收盘价，yfinance 兜底路径用后复权价。
-- **② 原理**：`pairs_from_chart_result` 直接取原始 `quote.close`（[:254](../scripts/dca_calculator.py#L254)），而 yfinance 兜底写死 `auto_adjust=True`（[:338](../scripts/dca_calculator.py#L338)）；拆股/分红时两种口径差数倍，老缓存行又永不重抓 → 缓存内部形成永久断点，跨断点的涨跌和回撤全错。
+- **② 原理**：`pairs_from_chart_result` 直接取原始 `quote.close`（`:254`），而 yfinance 兜底写死 `auto_adjust=True`（`:338`）；拆股/分红时两种口径差数倍，老缓存行又永不重抓 → 缓存内部形成永久断点，跨断点的涨跌和回撤全错。
 - **③ 修法**：两条路径统一成同一种口径，切换时对受影响标的做一次全量重建。
 - **④ 为什么有效**：全库单一口径后，任意两行之间的差值才有意义，断点在物理上无法产生。
 - **⑤ 验证**：强制两条路径各抓一次同一标的 → 同一日期价格一致；全量重建后抽查拆股/分红日前后价格连续。
@@ -891,9 +893,9 @@ wide_table_markdown 非空 ✅   warnings 数量 = 0 ✅   stderr 为空 ✅
 
 #### 🔧 实际修复
 
-> **2026-08-20 修复（commit `COMMIT3_HASH`）**：
-> 1. **`_yfinance_closes`（[:389-407](../scripts/dca_calculator.py#L389-L407)）`auto_adjust=True → False`**：与 Chart 主路径的原始 `quote.close` 及存量缓存统一 **raw 口径**。docstring 写明"一边复权一边不复权，拆股/分红日前后就会在同一份缓存里形成永久断点"，把 WHY 钉在代码里而不是只留在台账。
-> 2. **"兜底结果不落库"升级为显式不变量**：docstring 明写「本函数结果只供本次决策，不落库（落库口径单一由 Chart 路径负责）」。这是本条"零重建"论断的前提——两个 yfinance 分支（[:437](../scripts/dca_calculator.py#L437)、[:455](../scripts/dca_calculator.py#L455)）只 `cached.update(...)` 供本次计算，`save_cached_closes` 全文件只出现在两个 Chart 成功分支（[:431](../scripts/dca_calculator.py#L431)、[:450](../scripts/dca_calculator.py#L450)）。
+> **2026-08-20 修复（commit `0b1ec6e`）**：
+> 1. **`_yfinance_closes`（`:389-407`）`auto_adjust=True → False`**：与 Chart 主路径的原始 `quote.close` 及存量缓存统一 **raw 口径**。docstring 写明"一边复权一边不复权，拆股/分红日前后就会在同一份缓存里形成永久断点"，把 WHY 钉在代码里而不是只留在台账。
+> 2. **"兜底结果不落库"升级为显式不变量**：docstring 明写「本函数结果只供本次决策，不落库（落库口径单一由 Chart 路径负责）」。这是本条"零重建"论断的前提——两个 yfinance 分支（`:437`、`:455`）只 `cached.update(...)` 供本次计算，`save_cached_closes` 全文件只出现在两个 Chart 成功分支（`:431`、`:450`）。
 > 3. **缓存零重建**（与确认记录一致）：存量已是纯 raw，无污染可清。
 
 #### ✔️ 验证结果
@@ -910,10 +912,10 @@ wide_table_markdown 非空 ✅   warnings 数量 = 0 ✅   stderr 为空 ✅
 
 | 等级 | 状态 | 发现日期 | 确认日期 | 修复日期 | 主要证据 |
 |---|---|---|---|---|---|
-| **P1** | ✅ **已修复** | 2026-08-17 | 2026-08-19 | 2026-08-19 | 全项目无 ZoneInfo；[app.py:1157](../app.py#L1157)、[dca_calculator.py:464-467](../scripts/dca_calculator.py#L464-L467) |
+| **P1** | ✅ **已修复** | 2026-08-17 | 2026-08-19 | 2026-08-19 | 全项目无 ZoneInfo；`app.py:1157`、`dca_calculator.py:464-467`（均为登记日 2026-08-17 坐标；今天的实现落在 `src/dates.py` 与引擎 `biz_today()`/`is_iso_date()`） |
 
 - **① 现象**：服务端的"今天"由进程时区决定（Cloud 默认 UTC），北京时间每天 00:00–07:59 记的账会被写成"昨天"；加上写入无去重，同一天可记任意多笔、每笔都吃本月预算。
-- **② 原理**：`date.today()` 散布在引擎（dca:302/856/860）和 UI（app.py:930/959/1157/1235）共 7 处、全项目无业务时区定义；写入前不查 `(user,date,asset)` 唯一性；坏日期（如 `2026/08/17`）被 [dca:464-467](../scripts/dca_calculator.py#L464-L467) 静默吞掉——金额照算但不进 XIRR，而本月已投用 `startswith("2026-08")` 判定 → 这笔钱从预算里凭空释放，导致重复投。
+- **② 原理**：`date.today()` 散布在引擎（dca:302/856/860）和 UI（app.py:930/959/1157/1235）共 7 处、全项目无业务时区定义；写入前不查 `(user,date,asset)` 唯一性；坏日期（如 `2026/08/17`）被 `dca:464-467` 静默吞掉——金额照算但不进 XIRR，而本月已投用 `startswith("2026-08")` 判定 → 这笔钱从预算里凭空释放，导致重复投。
 - **③ 修法**：定死一个业务时区（Asia/Shanghai）作为全链路唯一 today 来源；写入侧加 `(user,date,asset)` 重复检测；坏日期直接拒收而不是静默吞。
 - **④ 为什么有效**："今天"只剩一个定义，重复投的两个入口（时区错位 + 无去重）同时封死。
 - **⑤ 验证**：进程时区设成 UTC 模拟 Cloud → 北京 00:30 记账日期仍是当天；同日同资产记第二笔 → 被拦并提示；填入 `2026/08/17` → 明确报错不入库。
@@ -930,7 +932,7 @@ wide_table_markdown 非空 ✅   warnings 数量 = 0 ✅   stderr 为空 ✅
 #### 🔧 实际修复
 
 > **2026-08-19 修复（commit `d24c946`）**：
-> 1. **新增 `src/dates.py`**：`biz_today()` 固定 UTC+8；引擎侧同规则实现在 [dca_calculator.py:36-53](../scripts/dca_calculator.py#L36-L53)（含 `is_iso_date()`），两处 docstring 互指"必须同改"。
+> 1. **新增 `src/dates.py`**：`biz_today()` 固定 UTC+8；引擎侧同规则实现在 `dca_calculator.py:36-53`（含 `is_iso_date()`），两处 docstring 互指"必须同改"。
 > 2. **换源 11 处**：引擎 7 处 + UI 4 处全部 `date.today()` → `biz_today()`（records.py 记账默认日期×2、sidebar.py 预算月份×2、holdings.py 近一年窗口顺手统一并清理为 f-string）；dca_action.py 三处默认值改从引擎 import `biz_today`（同目录单一实现，无第三份拷贝）。修复后代码区 `date.today()` 清零（残留仅 docstring 与文档的说明性提及）。
 > 3. **去重**：`storage.append_row(table, user, row, force=False)`——transactions 写入前查 `(user,date,asset,action)`，撞重抛 `ValueError("重复记录：…确认为新一笔请显式覆盖写入")`；records.py 捕获后挂 `tx_dup` 警告 + 「仍要写入（确认是新一笔）」按钮走 `force=True`；dca_action.py 加 `--force` 透传、`ValueError` 原样透出（Skill 据文案决定是否重试）。
 > 4. **坏日期**：records 提交 `date.fromisoformat` 拒收；dca_action `--date` 同校验（ok:false + 行数不增）；引擎 main() 读账本后剔除非法行，result 新增第 17 键 `invalid_transactions`，records 页顶部警示。
@@ -949,7 +951,7 @@ wide_table_markdown 非空 ✅   warnings 数量 = 0 ✅   stderr 为空 ✅
 
 | 等级 | 状态 | 发现日期 | 确认日期 | 修复日期 | 主要证据 |
 |---|---|---|---|---|---|
-| **P1** | ✅ **已修复** | 2026-08-17 | 2026-08-19 | 2026-08-19 | [dca_calculator.py:386](../scripts/dca_calculator.py#L386)、[:398](../scripts/dca_calculator.py#L398)、[app.py:1176](../app.py#L1176)、[backtest_dca.py:25](../backtest/backtest_dca.py#L25) |
+| **P1** | ✅ **已修复** | 2026-08-17 | 2026-08-19 | 2026-08-19 | `dca_calculator.py:386`、`:398`、`app.py:1176`、`backtest_dca.py:25`（前三个为登记日 2026-08-17 坐标；今天的汇率链是引擎 `fetch_usdcny()`/`fetch_usdtusd()`/`_fx_entry()` 三件套。`backtest_dca.py` 的 6.7334 按确认记录第 4 条判定为冻结历史，不动） |
 
 - **① 现象**：汇率抓取失败时静默回落到硬编码常量，且全项目四个常量互相差最多 7%（7.20 / 1.0 / 6.73 / 6.7334），页面上没有任何"这是兜底值"的标记。
 - **② 原理**：`fetch_usdcny`/`fetch_usdtusd` 的 `except` 直接 return 常量，记账页默认值 6.73，回测固定 6.7334，输出 JSON 里没有任何字段区分"实时汇率"和"抓不到用的常量" → 整个组合的 RMB 估值可能默默错 1–3%。
@@ -991,10 +993,10 @@ wide_table_markdown 非空 ✅   warnings 数量 = 0 ✅   stderr 为空 ✅
 
 | 等级 | 状态 | 发现日期 | 确认日期 | 修复日期 | 主要证据 |
 |---|---|---|---|---|---|
-| **P1** | ✅ **已修复** | 2026-08-17 | 2026-08-19 | 2026-08-20 | [dca_calculator.py:840-869](../scripts/dca_calculator.py#L840-L869)、[:434-442](../scripts/dca_calculator.py#L434-L442) |
+| **P1** | ✅ **已修复** | 2026-08-17 | 2026-08-19 | 2026-08-20 | `dca_calculator.py:840-869`、`:434-442` |
 
-- **① 现象**：Yahoo 持续失败时系统永远用旧缓存照常出买入金额，没有"超过 N 天就拒绝决策"的上限；更隐蔽的是增量抓取 `allow_empty=True`（[:315](../scripts/dca_calculator.py#L315)），Yahoo 返回空也算"增量成功"、无 warning、侧栏显示一切正常。
-- **② 原理**：有缓存时异常只降级为 `cache_stale` + warning、**不尝试 yfinance**（[:311-324](../scripts/dca_calculator.py#L311-L324)）；没有陈旧天数检查；Yahoo 单次 `urlopen` 零重试零退避（[:195-198](../scripts/dca_calculator.py#L195-L198)）。
+- **① 现象**：Yahoo 持续失败时系统永远用旧缓存照常出买入金额，没有"超过 N 天就拒绝决策"的上限；更隐蔽的是增量抓取 `allow_empty=True`（`:315`），Yahoo 返回空也算"增量成功"、无 warning、侧栏显示一切正常。
+- **② 原理**：有缓存时异常只降级为 `cache_stale` + warning、**不尝试 yfinance**（`:311-324`）；没有陈旧天数检查；Yahoo 单次 `urlopen` 零重试零退避（`:195-198`）。
 - **③ 修法**：加陈旧上限（最后一根 K 线超过 N 天则决策降级为"只展示持仓、不出金额"）；空响应算作异常并补 yfinance 兜底；抓取加 2–3 次退避重试。
 - **④ 为什么有效**：决策新鲜度有了硬性下界，"用三周前的价格算今天买多少"在机制上不可能发生。
 - **⑤ 验证**：把缓存最后日期改成 10 天前 → 决策明确降级并提示；模拟空响应 → 转走 yfinance 且打 warning。
@@ -1010,14 +1012,14 @@ wide_table_markdown 非空 ✅   warnings 数量 = 0 ✅   stderr 为空 ✅
 
 #### 🔧 实际修复
 
-> **2026-08-20 修复（commit `COMMIT3_HASH`）**：
-> 1. **陈旧闸**：新增 `_MAX_STALE_DAYS = 7`（[:840](../scripts/dca_calculator.py#L840)）+ `market_freshness(signal_markets, today, max_stale_days)`（[:843-869](../scripts/dca_calculator.py#L843-L869)），返回 `{degraded, stale_days, max_stale_days, per_symbol, reason}`。main 在 `build_decision` 之后过闸（[:1164](../scripts/dca_calculator.py#L1164)）：`degraded` 时 `suggested_amount_rmb = 0.0`、`level_label = "数据陈旧·暂停出金额"`、reason 说清哪个标的落后几天并**保留原评分供参考**。三个信号标的取 `market_symbol_for_asset` 的 `index_symbol`（`^GSPC`/`^NDX`/`GC=F`）；带 `error` 的标的记 `per_symbol[sym] = None` 并直接判 degraded。
+> **2026-08-20 修复（commit `0b1ec6e`）**：
+> 1. **陈旧闸**：新增 `_MAX_STALE_DAYS = 7`（`:840`）+ `market_freshness(signal_markets, today, max_stale_days)`（`:843-869`），返回 `{degraded, stale_days, max_stale_days, per_symbol, reason}`。main 在 `build_decision` 之后过闸（`:1164`）：`degraded` 时 `suggested_amount_rmb = 0.0`、`level_label = "数据陈旧·暂停出金额"`、reason 说清哪个标的落后几天并**保留原评分供参考**。三个信号标的取 `market_symbol_for_asset` 的 `index_symbol`（`^GSPC`/`^NDX`/`GC=F`）；带 `error` 的标的记 `per_symbol[sym] = None` 并直接判 degraded。
 > 2. **挂载位置**：`decision.degraded` + `decision.freshness`（**挂在 decision 内、不加顶层键**）——引擎输出仍是 18 个顶层键，UI 与 Skill 的既有解包不受影响。
-> 3. **空响应算异常**：`pairs_from_chart_result` 删掉 `allow_empty` 死参数，空即 `raise RuntimeError("empty history")`（[:296-317](../scripts/dca_calculator.py#L296-L317)）。调用处注释写明 WHY：`period1` 落在库内最后一天，正常必回该日 K 线，空返回是上游异常而非"没有新数据"，静默当成功会让缓存无限期装死。
-> 4. **cache 分支补 yfinance 兜底**（[:434-442](../scripts/dca_calculator.py#L434-L442)）：有缓存时 Chart 失败也先试 `_yfinance_closes` → `data_source = "yfinance_fallback+cache"`，双双失败才退 `cache_stale`。原先"有缓存就不试 yfinance"等于 Chart 一挂就无声无息一直吃旧缓存。
-> 5. **退避重试**：`fetch_json(url, timeout=20, attempts=3)`（[:228](../scripts/dca_calculator.py#L228)）—— 0.8s/1.6s 退避，末次失败抛 `last_exc`（无 unreachable 死代码）。单请求最坏预算 3×20s + 2.4s ≈ 62s，配合 BUG-011 的并发仍远低于 subprocess 180s。
-> 6. **UI 可见性（施工中主动抓到的连带缺陷）**：[sidebar.py:149-153](../src/ui/sidebar.py#L149-L153) 原按 `data_source.startswith("cache+")` 判"全部正常"——我新增的 `yfinance_fallback+cache` 若命名成 `cache+yahoo_fallback` 就会被静默判成正常，**降级不可见**。已改为语义判断 `not mk.get("error") and not mk.get("cache_warning")`，前缀命名不再是隐式契约。
-> 7. **降级横幅**：[today.py:14-22](../src/tabs/today.py#L14-L22) 在 tab1（建议金额的唯一展示位）顶部 `st.error` 说明"不出金额 + 原因 + 别照旧价下单"；持仓与历史照常展示。
+> 3. **空响应算异常**：`pairs_from_chart_result` 删掉 `allow_empty` 死参数，空即 `raise RuntimeError("empty history")`（`:296-317`）。调用处注释写明 WHY：`period1` 落在库内最后一天，正常必回该日 K 线，空返回是上游异常而非"没有新数据"，静默当成功会让缓存无限期装死。
+> 4. **cache 分支补 yfinance 兜底**（`:434-442`）：有缓存时 Chart 失败也先试 `_yfinance_closes` → `data_source = "yfinance_fallback+cache"`，双双失败才退 `cache_stale`。原先"有缓存就不试 yfinance"等于 Chart 一挂就无声无息一直吃旧缓存。
+> 5. **退避重试**：`fetch_json(url, timeout=20, attempts=3)`（`:228`）—— 0.8s/1.6s 退避，末次失败抛 `last_exc`（无 unreachable 死代码）。单请求最坏预算 3×20s + 2.4s ≈ 62s，配合 BUG-011 的并发仍远低于 subprocess 180s。
+> 6. **UI 可见性（施工中主动抓到的连带缺陷）**：`sidebar.py:149-153` 原按 `data_source.startswith("cache+")` 判"全部正常"——我新增的 `yfinance_fallback+cache` 若命名成 `cache+yahoo_fallback` 就会被静默判成正常，**降级不可见**。已改为语义判断 `not mk.get("error") and not mk.get("cache_warning")`，前缀命名不再是隐式契约。
+> 7. **降级横幅**：`today.py:14-22` 在 tab1（建议金额的唯一展示位）顶部 `st.error` 说明"不出金额 + 原因 + 别照旧价下单"；持仓与历史照常展示。
 
 #### ✔️ 验证结果
 
@@ -1042,7 +1044,7 @@ wide_table_markdown 非空 ✅   warnings 数量 = 0 ✅   stderr 为空 ✅
 
 | 等级 | 状态 | 发现日期 | 确认日期 | 修复日期 | 主要证据 |
 |---|---|---|---|---|---|
-| **P1** | ✅ **已修复** | 2026-08-17 | 2026-08-19 | 2026-08-20 | [dca_calculator.py:488-505](../scripts/dca_calculator.py#L488-L505)、[:1113-1120](../scripts/dca_calculator.py#L1113-L1120) |
+| **P1** | ✅ **已修复** | 2026-08-17 | 2026-08-19 | 2026-08-20 | `dca_calculator.py:488-505`、`:1113-1120` |
 
 - **① 现象**：8 个 Yahoo 请求串行、各 20s 超时 = 最坏 160s，而 subprocess 总上限 180s——Yahoo 不必挂、只要变慢，整页 `st.error` + `st.stop()` 白屏。
 - **② 原理**：`fetch_history` 逐符号串行抓取，总耗时是求和；超时不单独捕获，任何一环慢都直接顶到总上限。
@@ -1057,9 +1059,9 @@ wide_table_markdown 非空 ✅   warnings 数量 = 0 ✅   stderr 为空 ✅
 
 #### 🔧 实际修复
 
-> **2026-08-20 修复（commit `COMMIT3_HASH`）**：
-> 1. **`fetch_history` 并发**（[:488-505](../scripts/dca_calculator.py#L488-L505)）：内层 `_one(sym)` 包 try/except 收成 `{"error": ...}` 条目——**单标的异常不带走整批**（降级展示优于整页失败）；`ThreadPoolExecutor(max_workers=min(8, len(syms)))` + `pool.map` 保持输入顺序；`len(syms) <= 1` 走串行（不为一个请求付线程池开销）。并发安全的依据写进 docstring：每个标的写自己的缓存文件、无共享写入。
-> 2. **main 里 8 请求同波并发**（[:1113-1120](../scripts/dca_calculator.py#L1113-L1120)）：行情（6 标的）与两个汇率一起提交到 `ThreadPoolExecutor(max_workers=3)`，即"总耗时 = 最慢的那一个，而不是 8 个请求求和"。原先是行情批 → usdcny → usdtusd 三段串行。
+> **2026-08-20 修复（commit `0b1ec6e`）**：
+> 1. **`fetch_history` 并发**（`:488-505`）：内层 `_one(sym)` 包 try/except 收成 `{"error": ...}` 条目——**单标的异常不带走整批**（降级展示优于整页失败）；`ThreadPoolExecutor(max_workers=min(8, len(syms)))` + `pool.map` 保持输入顺序；`len(syms) <= 1` 走串行（不为一个请求付线程池开销）。并发安全的依据写进 docstring：每个标的写自己的缓存文件、无共享写入。
+> 2. **main 里 8 请求同波并发**（`:1113-1120`）：行情（6 标的）与两个汇率一起提交到 `ThreadPoolExecutor(max_workers=3)`，即"总耗时 = 最慢的那一个，而不是 8 个请求求和"。原先是行情批 → usdcny → usdtusd 三段串行。
 > 3. **超时预算重算**：单请求最坏 3×20s + 2.4s 退避 ≈ 62s（BUG-010 的重试），并发后总耗时取最大值 ≈ 62s，对 subprocess 180s 上限留出 118s 余量；原先 8 请求串行最坏 160s，紧贴上限。
 > 4. **UI 侧未改**（与确认一致）：引擎逐标的 error 隔离 + 行情快照（BUG-024）已覆盖。
 
@@ -1165,7 +1167,7 @@ wide_table_markdown 非空 ✅   warnings 数量 = 0 ✅   stderr 为空 ✅
 
 | 等级 | 状态 | 发现日期 | 确认日期 | 修复日期 | 主要证据 |
 |---|---|---|---|---|---|
-| **P1** | 🔴 待确认 | 2026-08-17 | — | — | 无 tests/ 无 .github/；[requirements.txt](../requirements.txt) 全 `>=`；[backtest_dca.py:12-17](../backtest/backtest_dca.py#L12-L17) |
+| **P1** | 🔴 待确认 | 2026-08-17 | — | — | 无 tests/ 无 .github/；[requirements.txt](../requirements.txt) 全 `>=`；`backtest_dca.py:12-17` |
 
 - **① 现象**：无测试目录、无 CI、依赖全是无上界 `>=`（本地实装 streamlit 1.61.1 vs 声明 `>=1.32.0`，可复现性为零）；唯一的回归载体 backtest/ 三个脚本硬编码了已失效的绝对路径（`C:\Users\...\.claude\skills\...`），现在直接跑不起来——还违反 CLAUDE.md 自己写的"全项目零绝对路径"。
 - **② 原理**：这三个脚本还自己重写了决策链（部署系数、月度池、月末释放），即使修好路径也测不到线上真跑的 `build_decision` + `monthly_budget_status`；且 `main()` 必然联网、必然写缓存、输出嵌 `date.today()`，没有"固定输入→固定输出"的可重复入口。
@@ -1287,7 +1289,7 @@ wide_table_markdown 非空 ✅   warnings 数量 = 0 ✅   stderr 为空 ✅
 
 | 等级 | 状态 | 发现日期 | 确认日期 | 修复日期 | 主要证据 |
 |---|---|---|---|---|---|
-| **P2** | ⚪ **已判定不修** | 2026-08-17 | 2026-08-19 | — | [storage.py:304-306](../storage.py#L304-L306)、[:117](../storage.py#L117) |
+| **P2** | ⚪ **已判定不修** | 2026-08-17 | 2026-08-19 | — | `storage.py:304-306`、`:117` |
 
 - **① 现象**：每次记账 = 读整表 + 写整表（写放大 O(n)，行数多了必撞 Google 60 次/分/用户 配额）；无主键无唯一约束（BUG-008 的去重只能靠应用层）；全字段强制 `.astype(str)` 丢类型；`is_admin` 在缺 `role` 列时静默失效。
 - **② 原理**：Sheets 的 API 只有整表读写语义，它不是为"高频追加 + 约束校验"设计的——拿它当 OLTP 数据库用，代价是结构性的。
@@ -1366,7 +1368,7 @@ wide_table_markdown 非空 ✅   warnings 数量 = 0 ✅   stderr 为空 ✅
 
 | 等级 | 状态 | 发现日期 | 确认日期 | 修复日期 | 主要证据 |
 |---|---|---|---|---|---|
-| **P2** | ✅ 已验证 | 2026-08-17 | 2026-08-18 | 2026-08-18 | [strategy/core-strategy.md:182-184](../strategy/core-strategy.md#L182-L184)（§12 数据与隐私） |
+| **P2** | ✅ 已验证 | 2026-08-17 | 2026-08-18 | 2026-08-18 | `strategy/core-strategy.md:182-184`（§12 数据与隐私） |
 
 - **① 现象**：Tab6 告诉用户"所有记录和行情缓存都在本地 skill 目录，不上传任何地方"——实际上真实持仓和成交记录存在第三方 Google Sheets，项目也早已迁出 skill 目录。
 - **② 原理**：文案停留在架构变迁（迁 Sheets + 迁项目目录）之前，没有跟着 storage.py 的改造更新。
@@ -1381,7 +1383,7 @@ wide_table_markdown 非空 ✅   warnings 数量 = 0 ✅   stderr 为空 ✅
 
 #### 🔧 实际修复
 
-- [strategy/core-strategy.md:182-184](../strategy/core-strategy.md#L182-L184)：§12「数据与隐私」整节重写为实话——记录/观察/预算存 Google Sheets 云端私有表；应用服务器留有本人本地缓存（`data/users/<用户名>/`）；行情缓存不含个人信息、随仓库分发；PIN 以 PBKDF2 加盐哈希存储、明文不落盘
+- `strategy/core-strategy.md:182-184`：§12「数据与隐私」整节重写为实话——记录/观察/预算存 Google Sheets 云端私有表；应用服务器留有本人本地缓存（`data/users/<用户名>/`）；行情缓存不含个人信息、随仓库分发；PIN 以 PBKDF2 加盐哈希存储、明文不落盘
 - 旧假话"所有记录和行情缓存都在本地 skill 目录，不上传任何地方"随 app.py 内嵌副本一并删除（见 BUG-026 的修复清单）
 - commit：见 BUG-026（同一次提交）
 
@@ -1440,7 +1442,7 @@ exceptions: none
 
 | 等级 | 状态 | 发现日期 | 确认日期 | 修复日期 | 主要证据 |
 |---|---|---|---|---|---|
-| **P2** | ✅ 已验证 | 2026-08-17 | 2026-08-18 | 2026-08-18 | [storage.py:314](../storage.py#L314)、[app.py:41](../app.py#L41)、[:616](../app.py#L616)、`data/market_history/GLD.csv` |
+| **P2** | ✅ 已验证 | 2026-08-17 | 2026-08-18 | 2026-08-18 | `storage.py:314`、`app.py:41`、`:616`、`data/market_history/GLD.csv` |
 
 - **① 现象**：`verify_user`（storage.py:174）、`append_csv`（app.py:583）、`OBS_CSV`（app.py:40）定义后全项目零调用；`GLD.csv` 已不在抓取名单、冻结在 2026-08-10 却仍入库并被 CLAUDE.md 计作"7 个 csv"之一；README 的失效绝对路径已在 2026-08-17 待提交的工作区改动中修好（随 BUG-012 一并入库）。
 - **② 原理**：重构删了调用方但留了定义——死物让人（和 AI）误以为功能还在，顺着它改会改到空气。
@@ -1451,7 +1453,7 @@ exceptions: none
 
 #### ✅ 确认记录
 
-**2026-08-18 拍板：三个死定义全删（无岔路）；`GLD.csv` 选「删」（git 历史可取回）。** 用户在 A1 批次排期问答中对 GLD.csv 一项明确选择"删（推荐）"，并拍板"先做 A1"。施工前已复核当前行号：verify_user 在 [storage.py:314-320](../storage.py#L314-L320)、append_csv 在 [app.py:616-622](../app.py#L616-L622)、OBS_CSV 在 [app.py:41](../app.py#L41)（登记时的 :174/:40/:583 已因批次①②与 026 修复漂移，此处以复核值为准）；全仓 grep 确认三者在 .py 中零调用、GLD 在代码与 config 中零引用。
+**2026-08-18 拍板：三个死定义全删（无岔路）；`GLD.csv` 选「删」（git 历史可取回）。** 用户在 A1 批次排期问答中对 GLD.csv 一项明确选择"删（推荐）"，并拍板"先做 A1"。施工前已复核当前行号：verify_user 在 `storage.py:314-320`、append_csv 在 `app.py:616-622`、OBS_CSV 在 `app.py:41`（登记时的 :174/:40/:583 已因批次①②与 026 修复漂移，此处以复核值为准）；全仓 grep 确认三者在 .py 中零调用、GLD 在代码与 config 中零引用。
 
 #### 🔧 实际修复
 
@@ -1476,7 +1478,7 @@ exceptions: none
 
 | 等级 | 状态 | 发现日期 | 确认日期 | 修复日期 | 主要证据 |
 |---|---|---|---|---|---|
-| **P2** | ✅ 已验证 | 2026-08-17 | 2026-08-18 | 2026-08-19 | [scripts/dca_calculator.py:404-436](../scripts/dca_calculator.py#L404-L436)、[src/ui/sidebar.py](../src/ui/sidebar.py) |
+| **P2** | ✅ 已验证 | 2026-08-17 | 2026-08-18 | 2026-08-19 | `scripts/dca_calculator.py:404-436`、[src/ui/sidebar.py](../src/ui/sidebar.py) |
 
 - **① 现象**：每次进页面先 `run_model(None)` 全量跑一遍（:776），用户输入金额后又 `run_model(amount_in)` 重跑（:915）——每次"我想投 X"的会话都付两次完整计算，每次含 8 个串行行情请求。
 - **② 原理**：第一次运行只为展示默认值，但模型的主要开销（行情抓取）与金额无关，金额只影响最后的分配计算——重复付的是不该重复的部分。
@@ -1513,9 +1515,9 @@ exceptions: none
 
 | 等级 | 状态 | 发现日期 | 确认日期 | 修复日期 | 主要证据 |
 |---|---|---|---|---|---|
-| **P2** | ✅ 已验证 | 2026-08-17 | 2026-08-18 | 2026-08-18 | [backtest/results_rolling.json](../backtest/results_rolling.json)、[app.py:1434-1437](../app.py#L1434-L1437) |
+| **P2** | ✅ 已验证 | 2026-08-17 | 2026-08-18 | 2026-08-18 | [backtest/results_rolling.json](../backtest/results_rolling.json)、`app.py:1434-1437` |
 
-- **① 现象**：约 450 行硬编码回测结果字典（滚动收益表、跨标的对比表）直接写在 app.py 里，改回测要改代码重新部署；同页另一部分又读 `backtest/results*.json`（[:1281-1284](../app.py#L1281-L1284)），两种供数方式并存；结尾 caption 还指向已失效的外部目录 `backtest-dca-5y/`（[:1908](../app.py#L1908)）。
+- **① 现象**：约 450 行硬编码回测结果字典（滚动收益表、跨标的对比表）直接写在 app.py 里，改回测要改代码重新部署；同页另一部分又读 `backtest/results*.json`（`:1281-1284`），两种供数方式并存；结尾 caption 还指向已失效的外部目录 `backtest-dca-5y/`（`:1908`）。
 - **② 原理**：2026-08-11 回测跑完时图省事把数字直接贴进代码，后来结果入仓时只迁了 JSON 那一部分，留下两半。
 - **③ 修法**：把硬编码表导出成 `backtest/results_rolling.json` 等数据文件，Tab5 统一从文件读；caption 改指 `backtest/`。
 - **④ 为什么有效**：数据与代码分离后重跑回测只换文件不动代码；单一供数方式消除"两个事实源哪个新"的问题。
@@ -1529,8 +1531,8 @@ exceptions: none
 #### 🔧 实际修复
 
 - 新增 [backtest/results_rolling.json](../backtest/results_rolling.json)（415 行）：5 块数据（`sp500` / `nasdaq100` / `gold` / `hs300` / `cross`）用 **AST 解析**从 app.py 字面量无损提取，杜绝手抄误差；键名对齐 `results_single_compare.json` 的既有约定
-- [app.py:1434-1437](../app.py#L1434-L1437)：新增 `d3` 加载器（与 `d`/`d2` 同款缺失 warning 模式）；五处 `xxx = […]` 字面量 + `st.dataframe(pd.DataFrame(xxx))` 由 AST 定位行界、逐块校验后替换为 `if d3: st.dataframe(pd.DataFrame(d3["键"]))`；标题/ caption 文案原样留在代码里（属 UI 文案，不是数据）
-- [app.py:1550](../app.py#L1550)：结尾 caption 从失效的 `backtest-dca-5y/` 改指 `backtest/` 三个 JSON
+- `app.py:1434-1437`：新增 `d3` 加载器（与 `d`/`d2` 同款缺失 warning 模式）；五处 `xxx = […]` 字面量 + `st.dataframe(pd.DataFrame(xxx))` 由 AST 定位行界、逐块校验后替换为 `if d3: st.dataframe(pd.DataFrame(d3["键"]))`；标题/ caption 文案原样留在代码里（属 UI 文案，不是数据）
+- `app.py:1550`：结尾 caption 从失效的 `backtest-dca-5y/` 改指 `backtest/` 三个 JSON
 - app.py 1964 → 1559 行（tab5 638 → 233 行）
 - 同期核对活文档：docs/ARCHITECTURE.md（§2.5 tab 表与 tab5 内部构成重写、§3.4 补 results_rolling.json、行数三处、变更记录）、CLAUDE.md（行数两处）
 - commit：本提交（CHANGELOG 2026-08-18 行）
@@ -1551,7 +1553,7 @@ exceptions: none
 
 | 等级 | 状态 | 发现日期 | 确认日期 | 修复日期 | 主要证据 |
 |---|---|---|---|---|---|
-| **P2** | ✅ 已验证 | 2026-08-17 | 2026-08-18 | 2026-08-18 | [app.py:1967-1974](../app.py#L1967-L1974)、[strategy/core-strategy.md](../strategy/core-strategy.md)（184 行） |
+| **P2** | ✅ 已验证 | 2026-08-17 | 2026-08-18 | 2026-08-18 | `app.py:1967-1974`、[strategy/core-strategy.md](../strategy/core-strategy.md)（184 行） |
 
 - **① 现象**：`strategy/core-strategy.md` 与 app.py:1910-1984 内嵌的 Tab6 文案是两份各自漂移的策略说明——CLAUDE.md 自己都标注"应用不读它，两份会各自漂移"。
 - **② 原理**：复制粘贴产生的双事实源，改一处忘另一处是必然不是偶然。
@@ -1567,7 +1569,7 @@ exceptions: none
 #### 🔧 实际修复
 
 - [strategy/core-strategy.md](../strategy/core-strategy.md)：151 → 184 行全量重写。保留技术骨架（§1-§11 策略口径逐字对齐内嵌版），并入原 Tab6 独有的：家人友好开场（:7-18）、§4 每日固定流程闭环图（:45-60）、§8 回测结论诚实版四条（:139-144）；§10 记录规范改双模式口径（:155-157）；§12 隐私真话版（:182-184，即 BUG-021）；头部加【活】标注与"唯一事实源"声明（:3-4）
-- [app.py:1967-1974](../app.py#L1967-L1974)：Tab6 删掉 75 行内嵌副本，改为 `(CODE_DIR / "strategy" / "core-strategy.md").read_text(encoding="utf-8")` 直接 `st.markdown()` 渲染，读文件失败时 `st.error` 明示。app.py 2041 → 1974 行
+- `app.py:1967-1974`：Tab6 删掉 75 行内嵌副本，改为 `(CODE_DIR / "strategy" / "core-strategy.md").read_text(encoding="utf-8")` 直接 `st.markdown()` 渲染，读文件失败时 `st.error` 明示。app.py 2041 → 1974 行
 - 同期核对活文档：docs/ARCHITECTURE.md（§2.5 tab 表、§3.5、行数三处、变更记录）、CLAUDE.md（目录树 strategy 行、行数两处）
 - commit：本提交（CHANGELOG 2026-08-18 行）
 
@@ -1591,7 +1593,7 @@ exceptions: none
 
 | 等级 | 状态 | 发现日期 | 确认日期 | 修复日期 | 主要证据 |
 |---|---|---|---|---|---|
-| **P2** | ✅ **已验证** | 2026-08-18 | 2026-08-19 | 2026-08-19 | [src/services/curves.py:46-48](../src/services/curves.py#L46-L48)（`portfolio_curve` 读 `paths.tx_csv`）、[storage.py:527](../storage.py#L527)（`sync_local` 只写 `data/users/<user>/`） |
+| **P2** | ✅ **已验证** | 2026-08-18 | 2026-08-19 | 2026-08-19 | `src/services/curves.py:46-48`（`portfolio_curve` 读 `paths.tx_csv`）、`storage.py:527`（`sync_local` 只写 `data/users/<user>/`） |
 
 - **① 现象**：Streamlit Cloud（生产）上，tab2 顶部「组合市值 vs 累计投入」曲线**对所有用户永远显示"暂无成交记录"**——哪怕该用户在 Sheets 里有成交记录。同页下方的市值/盈亏指标（来自引擎 JSON，读的是每用户文件）却正常，页面自相矛盾，还可能误导用户以为账没记上。
 - **② 原理**：BUG-001 修复（`a1707a6`）把引擎的记账输入切到 `data/users/<user>/`，但漏了 app 侧这条读路径——`portfolio_curve()` 仍读老式共享文件 `data/transactions.csv`（`TX_CSV`）。该文件被 gitignore、Cloud 容器里从不存在（云端模式 `sync_local` 只写每用户目录），于是 `TX_CSV.exists()` 恒为 False，函数恒返回 None。本地单机模式不受影响（TX_CSV 就是真账本）。
@@ -1616,9 +1618,9 @@ exceptions: none
 #### 🔧 实际修复
 
 > **2026-08-19 修复**（按确认路径施工，3 文件 +18/−5）：
-> - [src/services/curves.py:44-54](../src/services/curves.py#L44-L54)：新增 `tx_csv_for(paths, user)`——与引擎 `--user` 同一规则的账本路径裁决（`"local"` → 共享账本；否则 → `data/users/<user>/transactions.csv`；`/` `\` `..` 穿越抛 `ValueError`）；`portfolio_curve` 改收 `user` 并经它取账本（[:57-59](../src/services/curves.py#L57-L59)）。
-> - [src/tabs/holdings.py:17,20](../src/tabs/holdings.py#L17)：`render()` 加 `user` 透传。
-> - [app.py:58](../app.py#L58)：tab2 调用点传 `CURRENT_USER`。
+> - `src/services/curves.py:44-54`：新增 `tx_csv_for(paths, user)`——与引擎 `--user` 同一规则的账本路径裁决（`"local"` → 共享账本；否则 → `data/users/<user>/transactions.csv`；`/` `\` `..` 穿越抛 `ValueError`）；`portfolio_curve` 改收 `user` 并经它取账本（`:57-59`）。
+> - `src/tabs/holdings.py:17,20`：`render()` 加 `user` 透传。
+> - `app.py:58`：tab2 调用点传 `CURRENT_USER`。
 >
 > commit：`06d6ac4`（修复与同期文档一 commit 入库）。
 
