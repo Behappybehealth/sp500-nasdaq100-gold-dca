@@ -146,8 +146,9 @@ def render(paths: Paths, user: str) -> Decision:
     ms = result["monthly_budget_status"]
     pf = result["portfolio"]
 
+    # 按语义判正常，不按 data_source 前缀：前缀匹配一加新降级路径就会静默漏判
     all_ok = all(
-        str(mk.get("data_source", "")).startswith(("cache+", "yahoo_chart"))
+        not mk.get("error") and not mk.get("cache_warning")
         for mk in result["markets"].values()
     )
     st.sidebar.markdown(

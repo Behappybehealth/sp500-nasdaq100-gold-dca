@@ -100,8 +100,8 @@ return json.loads(out.stdout)          # 把对方打印的 JSON 转成 Python �
 十年历史行情不可能每次都重抓。所以缓存是这样的（`data/market_history/*.csv`，两列 `date,close`）：
 
 ```python
-dca_calculator.py:313-316   if cached: last_cached = ...; fetch_chart(period1=last_cached, ...)  # 从缓存最后一天开始抓
-dca_calculator.py:293-296   save_cached_closes() 内 path.open("w") 整文件截断重写 + 排序
+dca_calculator.py:421-424   if cached: last_cached = ...; fetch_chart(period1=last_cached, ...)  # 从缓存最后一天开始抓
+dca_calculator.py:344-386   save_cached_closes() 三道护栏 + temp/os.replace 原子替换
 ```
 
 `period1 = last_cached` 意味着**最前沿那一天每次运行都会被重抓并按日期键覆盖**。
@@ -109,21 +109,44 @@ dca_calculator.py:293-296   save_cached_closes() 内 path.open("w") 整文件截
 - **好处**：当天的价格会自动从盘中价修正成收盘价（自愈一天）
 - **代价**：只要有更晚的日期落库，前一天就再也不会被重新请求 —— **脏值永久冻结**（这也是每次跑引擎/AppTest 前要备份行情缓存、跑后还原比对的原因）
 
+**落库三道护栏**（`save_cached_closes` 返回 warning 列表，调用方透传到 JSON 的 `persist_warnings`）：
+
+| 闸 | 规则 | 为什么 |
+|---|---|---|
+| ① 冷热分离 | 剔除 `bar_date >= utc_today()` | 盘中价不进库。UTC 午夜是美股（16:00 ET = UTC 20/21:00）、GC=F、24/7 的 XAUT 都已走完前一 UTC 日的**统一安全线**，一条规则覆盖全部标的，不必按标的维护收盘时刻表 |
+| ② 行数不减 | `len(新) < len(库内)` 拒写 | 上游返回残缺数据时不把库削平 |
+| ③ 原子写 | `<name>.tmp<pid>` + `os.replace` | 写盘中途挂掉不留残缺文件；`OSError` 时清 tmp 并挂 warning |
+
+配套两条：**±20% 跳变只报 warning 不拦**（1987 式真崩盘必须能落库），且只查本次真正变更的日期，否则历史老跳变每次跑都刷一遍；**`persistable == existing` 时不碰文件**（盘中/周末重跑是常态，不该产生 mtime 抖动）。
+
+⚠️ **`utc_today()`（落库安全线）与 `biz_today()`（业务日界，UTC+8）是两个函数两个用途**，别互相替换。K 线日期也按 UTC 解释（`datetime.fromtimestamp(ts, timezone.utc).date()`）——用本机时区会让 XAUT 的 UTC 00:00 bar 在负偏移时区整体错位一天，同一份数据在不同机器上标不同日期。
+
 **抓取路径与降级顺序**：
 
 ```
-Yahoo Chart v8（urllib 直连，20s 超时，0 次重试）
+Yahoo Chart v8（urllib 直连，20s 超时 × 3 次尝试，0.8s/1.6s 退避）
    ↓ 失败且有缓存
-标 data_source="cache_stale" + warning（不再尝试 yfinance）
+yfinance 兜底（auto_adjust=False，结果只进内存不落库）→ data_source="yfinance_fallback+cache"
+   ↓ 也失败
+标 data_source="cache_stale" + cache_warning（吃旧缓存，且受 7 天陈旧闸约束）
    ↓ 失败且无缓存
-yfinance 兜底（auto_adjust=True）
+yfinance 兜底（同样不落库）→ "yfinance_full_no_cache"；再失败才返回 error
 
 东财 push2（curl 子进程，3 次重试无退避）→ XAU / BTC 实时价
 ```
 
-⚠️ 两条路径**复权口径不一致**：Chart 走原始 `quote.close`，yfinance 兜底用 `auto_adjust=True`。
+两条路径**复权口径已统一为 raw**（Chart 取原始 `quote.close`，yfinance 兜底 `auto_adjust=False`）。落库**只**发生在两个 Chart 成功分支——`save_cached_closes(cache_path, cached)` 全文件恰好 2 次，这是可断言的不变量：兜底数据在物理上进不了库，所以口径切换无需重建缓存。
 
-（行号复核于 2026-08-19）
+**两个 warning 键语义不同，别混用**：
+
+- `cache_warning` = 数据没更新到最新 → sidebar 标"部分异常"、宽表 `asset_note` 写"缓存未更新"
+- `persist_warnings` = 落库护栏说了话（拒写/跳变/落库失败），**与新鲜度无关**
+
+sidebar 判"行情全部正常"按语义（`not error and not cache_warning`）而非 `data_source` 前缀——前缀匹配一加新降级路径就会静默漏判。
+
+**新鲜度闸**（`market_freshness`，`_MAX_STALE_DAYS = 7`）：三个信号标的（`^GSPC` / `^NDX` / `GC=F`）任一 `history_end` 距 `biz_today()` 超 7 天、或带 `error` → `decision.suggested_amount_rmb = 0`、`level_label = "数据陈旧·暂停出金额"`，只展示持仓不出金额（旧价算出的"今天买多少"比不给建议更危险）。挂载在 `decision.degraded` + `decision.freshness` 内，**不新增顶层键**。
+
+（行号复核于 2026-08-20）
 
 ---
 
@@ -262,17 +285,21 @@ gspread>=5.8.0,<6        本机实装 5.12.4  ← 唯一有上界的
 
 ---
 
-## 11. 计算引擎接口（scripts/dca_calculator.py，1074 行）
+## 11. 计算引擎接口（scripts/dca_calculator.py，1229 行）
 
 **参数五个**：`--amount`、`--base-dir`、`--history-years`、`--user`（多用户模式：记账数据从 `data/users/<user>/` 读取，config 与行情缓存保持共享；含路径穿越防护）、`--snapshot-ttl`（行情快照 TTL 秒数，默认 600，0=禁用。没有 `--no-refresh`）。
 
 **输入文件**：`data/config.json`、`data/market_history/`、`data/quote_snapshot.json`（存在且未过期时免抓价）、`data/fx_last.json`（汇率上次成功值兜底，分字段带 `fetched_at`）、记账三件套——无 `--user` 时读 `data/{transactions,observations}.csv` + `data/budget_overrides.json`，有 `--user` 时读 `data/users/<user>/` 下同名文件。
 
-**行情快照**：`load_quote_snapshot()`（:468）/ `save_quote_snapshot()`（:486），落盘 `data/quote_snapshot.json`（`fetched_at` / markets 摘要 / `usdcny` / `usdtusd` / `fx` 段，仅几 KB）。TTL 内命中（:960）则跳过行情抓取与缓存增量写——下次冷跑自动追平，不丢历史；任一标的抓价失败（带 `error`）当趟不落盘（:487-488），防止坏快照连环命中。快照只是加速缓存：过期自动失效、缺失自动全抓，不入库。
+**抓取层**：`fetch_json(url, timeout=20, attempts=3)`（:228）—— 0.8s/1.6s 退避，末次失败抛最后一个异常。`fetch_history()`（:488）**并发**抓全部标的（`ThreadPoolExecutor`，`max_workers=min(8, N)`；单标的抛异常收成 `error` 条目，不带走整批），main 里行情与两个汇率**同波提交**（:1113），总耗时从 8 请求求和（最坏 160s，紧贴 subprocess 180s）变成取最大值（实测 1.5s，最坏约 62s）。
 
-**汇率链**（汇率是变量，全项目无一处写死常量）：`fetch_usdcny()`（:400）/ `fetch_usdtusd()`（:412）抓不到返回 `None`；抓取成功落盘 `data/fx_last.json`（分字段只覆写成功的那个），失败时 `_fx_entry()`（:454）回落上次成功值，输出 `fx.{usdcny,usdtusd}.{value,live,as_of}` 三件套——连上次值都没有则 `value=null`，估值层（`portfolio_summary` :585-600）据此把 RMB 估值置空而不是编数（决策金额不依赖汇率，照出）。
+**行情快照**：`load_quote_snapshot()`（:576）/ `save_quote_snapshot()`（:594），落盘 `data/quote_snapshot.json`（`fetched_at` / markets 摘要 / `usdcny` / `usdtusd` / `fx` 段，仅几 KB）。TTL 内命中（:1097）则跳过行情抓取与缓存增量写——下次冷跑自动追平，不丢历史；任一标的抓价失败（带 `error`）当趟不落盘，防止坏快照连环命中。快照只是加速缓存：过期自动失效、缺失自动全抓，不入库。
 
-**输出**：print 一大段 JSON（:1070），**18 个顶层键**——字面量构造 17 个（:1050–1068：`as_of` / `input_amount_rmb` / `effective_amount_rmb` / `usdcny` / `usdtcny` / `fx` / `monthly_budget_status` / `config` / `has_local_transactions` / `invalid_transactions` / `last_records` / `since_last_record` / `markets` / `quote_snapshot` / `portfolio` / `decision` / `suggested_weights`），随后 :1069 追加 `wide_table_markdown`（由 `render_wide_table()` :817 生成，app.py 侧 `parse_wide_table()` 解析回 DataFrame，src/services/model.py:42）。
+**汇率链**（汇率是变量，全项目无一处写死常量）：`fetch_usdcny()`（:508）/ `fetch_usdtusd()`（:520）抓不到返回 `None`；抓取成功落盘 `data/fx_last.json`（`save_fx_last` :544，分字段只覆写成功的那个），失败时 `_fx_entry()`（:562）回落上次成功值，输出 `fx.{usdcny,usdtusd}.{value,live,as_of}` 三件套——连上次值都没有则 `value=null`，估值层（`portfolio_summary` :656-721）据此把 RMB 估值置空而不是编数（决策金额不依赖汇率，照出）。
+
+**决策新鲜度闸**：`market_freshness()`（:843，`_MAX_STALE_DAYS = 7`）在 `build_decision` 之后过闸（:1164）——三个信号标的任一落后超 7 天或带 `error` → 金额归零 + `level_label="数据陈旧·暂停出金额"`，原评分保留在 reason 里供参考。结果挂 `decision.degraded` 与 `decision.freshness.{stale_days,max_stale_days,per_symbol,reason}`，**不新增顶层键**（UI 与 Skill 的既有解包不受影响）。
+
+**输出**：print 一大段 JSON（:1225），**18 个顶层键**——字面量构造 17 个（:1205–1223：`as_of` / `input_amount_rmb` / `effective_amount_rmb` / `usdcny` / `usdtcny` / `fx` / `monthly_budget_status` / `config` / `has_local_transactions` / `invalid_transactions` / `last_records` / `since_last_record` / `markets` / `quote_snapshot` / `portfolio` / `decision` / `suggested_weights`），随后 :1224 追加 `wide_table_markdown`（由 `render_wide_table()` :956 生成，app.py 侧 `parse_wide_table()` 解析回 DataFrame，src/services/model.py:42）。
 
 单独跑它：
 
@@ -281,6 +308,4 @@ gspread>=5.8.0,<6        本机实装 5.12.4  ← 唯一有上界的
 .venv/Scripts/python.exe scripts/dca_calculator.py --amount 5000 --base-dir .
 ```
 
-（行号复核于 2026-08-19）
-
-（行号复核于 2026-08-19）
+（行号复核于 2026-08-20）

@@ -7,10 +7,12 @@ import argparse
 import csv
 import json
 import math
+import os
 import sys
 import time
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -51,6 +53,15 @@ def is_iso_date(s: str) -> bool:
         return True
     except ValueError:
         return False
+
+
+def utc_today() -> date:
+    """落库安全线用的 UTC 自然日（区别于业务"今天" biz_today）。
+
+    UTC 午夜这一刻，美股（16:00 ET = UTC 20:00/21:00 收盘）、GC=F、24/7 的 XAUT
+    都已走完前一个 UTC 日——一条规则覆盖全部标的，无需按标的维护收盘时刻表。
+    """
+    return datetime.now(timezone.utc).date()
 
 
 @dataclass
@@ -214,10 +225,23 @@ def monthly_budget_status(transactions: List[Transaction], monthly_budget: float
     }
 
 
-def fetch_json(url: str, timeout: int = 20) -> Dict[str, Any]:
+def fetch_json(url: str, timeout: int = 20, attempts: int = 3) -> Dict[str, Any]:
+    """取一次 Yahoo JSON；失败按 0.8s / 1.6s 退避重试，最后一次的异常原样抛出。
+
+    单请求最坏 3×20s + 2.4s 退避 ≈ 62s——抓取已并发（fetch_history），
+    总耗时取最大值而非求和，仍远低于 subprocess 的 180s 上限。
+    """
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 dca-calculator"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    last_exc: Exception = RuntimeError("no attempt made")
+    for i in range(attempts):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except Exception as exc:  # network/data dependent
+            last_exc = exc
+            if i < attempts - 1:
+                time.sleep(0.8 * 2**i)
+    raise last_exc
 
 
 def fetch_chart(symbol: str, range_: str = "10y", interval: str = "1d", period1: Optional[date] = None, period2: Optional[date] = None) -> Dict[str, Any]:
@@ -269,7 +293,7 @@ def metrics_from_closes(closes: List[float], latest: float, history_start: str, 
     return metrics
 
 
-def pairs_from_chart_result(result: Dict[str, Any], allow_empty: bool = False) -> tuple:
+def pairs_from_chart_result(result: Dict[str, Any]) -> tuple:
     meta = result.get("meta", {})
     timestamps = result.get("timestamp") or []
     quote = (result.get("indicators", {}).get("quote") or [{}])[0]
@@ -277,8 +301,11 @@ def pairs_from_chart_result(result: Dict[str, Any], allow_empty: bool = False) -
     pairs = []
     for ts, close in zip(timestamps, raw_closes):
         if close is not None and close > 0:
-            pairs.append((date.fromtimestamp(ts).isoformat(), float(close)))
-    if not pairs and not allow_empty:
+            # K 线日期按 UTC 解释，与落库闸（save_cached_closes 用 utc_today）同口径。
+            # 用本机时区会让同一份数据在不同时区的机器上标成不同日期——XAUT 的
+            # bar 时间戳正好是 UTC 00:00，负偏移时区下会整体错位到前一天。
+            pairs.append((datetime.fromtimestamp(ts, timezone.utc).date().isoformat(), float(close)))
+    if not pairs:
         raise RuntimeError("empty history")
     latest_raw = meta.get("regularMarketPrice")
     latest = float(latest_raw) if latest_raw else None
@@ -311,13 +338,73 @@ def close_at_or_before(closes: Dict[str, float], day: str) -> Optional[float]:
     return closes[max(eligible)] if eligible else None
 
 
-def save_cached_closes(path: Path, closes: Dict[str, float]) -> None:
+_JUMP_WARN_PCT = 0.20
+
+
+def save_cached_closes(path: Path, closes: Dict[str, float]) -> List[str]:
+    """把收盘序列落盘，三道护栏；返回 warning 列表（调用方透传到 JSON 输出）。
+
+    1. **只写已收盘 K 线**：剔除 `date >= UTC 今天`。盘中价不进库——实时价走
+       `meta.regularMarketPrice` 显示通道（冷热分离）。这是必需的，因为增量抓取
+       每次都重抓前沿日，而一旦有更晚日期落库，脏值就永久冻结不再被重抓。
+    2. **行数不减**：新序列比库里现有的短就拒写（防上游返回残缺数据把库削平）。
+    3. **原子替换**：写临时文件再 os.replace，写盘中途挂掉不留残缺文件。
+
+    ±20% 跳变只报 warning 不拦——1987 式真崩盘必须能落库。
+    """
+    warnings: List[str] = []
+    cutoff = utc_today().isoformat()
+    persistable = {d: c for d, c in closes.items() if d < cutoff}
+    if not persistable:
+        return [f"{path.name}: 无可落库数据（全部 K 线 >= UTC {cutoff}）"]
+    existing = load_cached_closes(path)
+    if len(persistable) < len(existing):
+        return [f"{path.name}: 拒绝覆盖——新序列 {len(persistable)} 行 < 库内 {len(existing)} 行"]
+    if persistable == existing:
+        return warnings  # 无变化不碰文件（盘中/周末重跑的常态）
+    days = sorted(persistable)
+    prev_of = {cur: prev for prev, cur in zip(days, days[1:])}
+    for day in sorted(d for d, c in persistable.items() if existing.get(d) != c):
+        prev = prev_of.get(day)
+        base = persistable.get(prev) if prev else None
+        if base and base > 0 and abs(persistable[day] / base - 1) >= _JUMP_WARN_PCT:
+            warnings.append(
+                f"{path.name}: {day} 相对 {prev} 跳变 {persistable[day] / base - 1:+.1%}（已落库，请核对）"
+            )
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["date", "close"])
-        for day in sorted(closes):
-            writer.writerow([day, f"{closes[day]:.6f}"])
+    tmp = path.with_name(f"{path.name}.tmp{os.getpid()}")
+    try:
+        with tmp.open("w", encoding="utf-8", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["date", "close"])
+            for day in days:
+                writer.writerow([day, f"{persistable[day]:.6f}"])
+        os.replace(tmp, path)
+    except OSError as exc:
+        tmp.unlink(missing_ok=True)
+        warnings.append(f"{path.name}: 落库失败 {exc}")
+    return warnings
+
+
+def _yfinance_closes(symbol: str, years: int) -> Dict[str, float]:
+    """yfinance 兜底序列，**raw 口径**（auto_adjust=False，与 Chart 主路径一致）。
+
+    口径必须钉死：一边复权一边不复权，拆股/分红日前后就会在同一份缓存里形成
+    永久断点，跨断点的涨跌与回撤全错。本函数结果只供本次决策，不落库
+    （落库口径单一由 Chart 路径负责，见 save_cached_closes）。
+    """
+    import yfinance as yf  # type: ignore
+
+    hist = yf.Ticker(symbol).history(period=f"{years}y", interval="1d", auto_adjust=False)
+    if hist.empty:
+        raise RuntimeError("empty history")
+    out: Dict[str, float] = {}
+    for idx, close in zip(hist.index, hist["Close"].tolist()):
+        if close and close > 0:
+            out[str(idx.date())] = float(close)
+    if not out:
+        raise RuntimeError("empty history")
+    return out
 
 
 def get_symbol_history(symbol: str, years: int, cache_dir: Optional[Path]) -> dict:
@@ -328,22 +415,31 @@ def get_symbol_history(symbol: str, years: int, cache_dir: Optional[Path]) -> di
     currency = None
     data_source = ""
     warning = ""
+    persist_warnings: List[str] = []
     meta: Dict[str, Any] = {}
 
     if cached:
         last_cached = date.fromisoformat(max(cached))
         try:
             result = fetch_chart(symbol, period1=last_cached, period2=today + timedelta(days=1))
-            pairs, latest, meta = pairs_from_chart_result(result, allow_empty=True)
+            # 不允许空响应：period1 落在库内最后一天，正常必回该日 K 线；
+            # 空返回是上游异常而不是"没有新数据"，静默当成功会让缓存无限期装死
+            pairs, latest, meta = pairs_from_chart_result(result)
             for day, close in pairs:
                 cached[day] = close
             if cache_path:
-                save_cached_closes(cache_path, cached)
+                persist_warnings = save_cached_closes(cache_path, cached)
             currency = meta.get("currency")
             data_source = "cache+yahoo_chart_incremental"
         except Exception as exc:  # network/data dependent
-            warning = f"incremental fetch failed, using cache as of {max(cached)}: {exc}"
-            data_source = "cache_stale"
+            try:
+                # 有缓存也要试 yfinance：否则 Yahoo Chart 一挂就无声无息地一直吃旧缓存
+                cached.update(_yfinance_closes(symbol, years))
+                data_source = "yfinance_fallback+cache"
+                warning = f"yahoo_chart 增量失败（{exc}）；已用 yfinance 兜底，结果不入库"
+            except Exception as yf_exc:  # network/data dependent
+                warning = f"抓取失败，用库存到 {max(cached)}：yahoo_chart: {exc}；yfinance: {yf_exc}"
+                data_source = "cache_stale"
     else:
         try:
             result = fetch_chart(symbol, range_=f"{years}y")
@@ -351,20 +447,14 @@ def get_symbol_history(symbol: str, years: int, cache_dir: Optional[Path]) -> di
             for day, close in pairs:
                 cached[day] = close
             if cache_path:
-                save_cached_closes(cache_path, cached)
+                persist_warnings = save_cached_closes(cache_path, cached)
             currency = meta.get("currency")
             data_source = "yahoo_chart_full+cache"
         except Exception as chart_exc:  # network/data dependent
             try:
-                import yfinance as yf  # type: ignore
-                hist = yf.Ticker(symbol).history(period=f"{years}y", interval="1d", auto_adjust=True)
-                if hist.empty:
-                    raise RuntimeError("empty history")
-                for idx, close in zip(hist.index, hist["Close"].tolist()):
-                    if close and close > 0:
-                        cached[str(idx.date())] = float(close)
+                cached.update(_yfinance_closes(symbol, years))
                 data_source = "yfinance_full_no_cache"
-                warning = f"yahoo_chart failed ({chart_exc}); yfinance result not written to cache"
+                warning = f"yahoo_chart 失败（{chart_exc}）；yfinance 结果不入库"
             except Exception as yf_exc:  # pragma: no cover - network/data dependent
                 return {"error": f"yahoo_chart: {chart_exc}; yfinance: {yf_exc}"}
 
@@ -389,12 +479,30 @@ def get_symbol_history(symbol: str, years: int, cache_dir: Optional[Path]) -> di
     if cache_path:
         metrics["cache_file"] = str(cache_path)
     if warning:
-        metrics["cache_warning"] = warning
+        metrics["cache_warning"] = warning  # 语义=数据没更新到最新（UI 据此标黄）
+    if persist_warnings:
+        metrics["persist_warnings"] = persist_warnings  # 语义=落库护栏说了话，与新鲜度无关
     return metrics
 
 
 def fetch_history(symbols: Iterable[str], years: int = 10, cache_dir: Optional[Path] = None) -> Dict[str, dict]:
-    return {symbol: get_symbol_history(symbol, years, cache_dir) for symbol in symbols}
+    """并发抓取全部标的（原先串行 → 总耗时是求和，最坏 160s 紧贴 subprocess 的 180s 上限）。
+
+    每个标的写自己的缓存文件、互不共享写入，因此并发安全；总耗时从"求和"变"取最大值"。
+    单个标的抛异常收成 error 条目，不带走整批——降级展示优于整页失败。
+    """
+    syms = list(symbols)
+
+    def _one(sym: str) -> dict:
+        try:
+            return get_symbol_history(sym, years, cache_dir)
+        except Exception as exc:  # network/data dependent
+            return {"error": f"{type(exc).__name__}: {exc}"}
+
+    if len(syms) <= 1:
+        return {s: _one(s) for s in syms}
+    with ThreadPoolExecutor(max_workers=min(8, len(syms))) as pool:
+        return dict(zip(syms, pool.map(_one, syms)))
 
 
 def fetch_usdcny() -> Optional[float]:
@@ -729,6 +837,37 @@ def score_based_weights(scores: Dict[str, dict], assets: Dict[str, dict], model:
     return {k: v / total for k, v in weights.items()}
 
 
+_MAX_STALE_DAYS = 7
+
+
+def market_freshness(signal_markets: Dict[str, dict], today: date, max_stale_days: int = _MAX_STALE_DAYS) -> dict:
+    """信号标的的数据新鲜度闸：任一标的没数据、或最新收盘落后超过上限，即判 degraded。
+
+    没有这道闸，Yahoo 挂三周系统照样用三周前的价格算"今天该买多少"——
+    降级后只展示持仓、不出金额，让人看见问题而不是拿旧价下单。
+    """
+    per_symbol: Dict[str, Optional[int]] = {}
+    reasons: List[str] = []
+    for sym, mk in signal_markets.items():
+        end = (mk or {}).get("history_end")
+        if not mk or mk.get("error") or not end or not is_iso_date(str(end)):
+            per_symbol[sym] = None
+            reasons.append(f"{sym} 无可用行情")
+            continue
+        days = (today - date.fromisoformat(str(end))).days
+        per_symbol[sym] = days
+        if days > max_stale_days:
+            reasons.append(f"{sym} 最新收盘 {end}（落后 {days} 天）")
+    valid = [d for d in per_symbol.values() if d is not None]
+    return {
+        "degraded": bool(reasons),
+        "stale_days": max(valid) if valid else None,
+        "max_stale_days": max_stale_days,
+        "per_symbol": per_symbol,
+        "reason": "；".join(reasons),
+    }
+
+
 def build_decision(signal_markets: Dict[str, dict], assets: Dict[str, dict], model: dict, month_status: dict, user_amount: Optional[float]) -> dict:
     """4/5/6 一体化：评分 → 部署系数 × 节奏系数 → 金额；评分 → 权重倾斜 → 比例。"""
     w = model.get("score_weights", {})
@@ -970,10 +1109,15 @@ def main() -> None:
             }
         snapshot_info = {"used": True, "age_s": snapshot["age_s"], "ttl_s": args.snapshot_ttl}
     else:
-        markets = fetch_history(symbols, args.history_years, cache_dir)
+        # 行情与两个汇率同波并发：总耗时 = 最慢的那一个，而不是 8 个请求求和
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            f_markets = pool.submit(fetch_history, symbols, args.history_years, cache_dir)
+            f_usdcny = pool.submit(fetch_usdcny)
+            f_usdtusd = pool.submit(fetch_usdtusd)
+            markets = f_markets.result()
+            usdcny_live = f_usdcny.result()
+            usdtusd_live = f_usdtusd.result()
         now = time.time()
-        usdcny_live = fetch_usdcny()
-        usdtusd_live = fetch_usdtusd()
         save_fx_last(base_dir, usdcny_live, usdtusd_live)
         last_fx = load_fx_last(base_dir)
         fx = {
@@ -1016,6 +1160,17 @@ def main() -> None:
     if isinstance(user_model, dict):
         model_cfg.update(user_model)
     decision = build_decision(signal_markets, assets, model_cfg, month_status, args.amount)
+    # 新鲜度闸：行情陈旧就不出金额（旧价算出的"今天买多少"比不给建议更危险）
+    freshness = market_freshness(signal_markets, biz_today())
+    if freshness["degraded"]:
+        decision["suggested_amount_rmb"] = 0.0
+        decision["level_label"] = "数据陈旧·暂停出金额"
+        decision["reason"] = (
+            f"⚠️ 行情数据不新鲜（{freshness['reason']}），超过 {freshness['max_stale_days']} 天上限"
+            f" → 本次不出金额，只展示持仓。原评分供参考：{decision['reason']}"
+        )
+    decision["degraded"] = freshness["degraded"]
+    decision["freshness"] = freshness
     weights = decision.get("weights", {})
     suggested_amount = decision.get("suggested_amount_rmb", 0.0)
 

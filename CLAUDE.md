@@ -30,8 +30,10 @@
 - **本地 CSV 回退**：无 GCP 凭据时自动降级单机；云端模式每用户落盘缓存 `data/users/<user>/`
 
 **行情数据**
-- **Yahoo Chart v8**（`urllib` 直连）→ **yfinance 1.6.0** 兜底；**东方财富 push2**（`curl` 子进程）供 XAU/BTC 实时价：三者皆非官方接口、无 key、无额度保证
-- 口径警示：Chart 用原始 close，yfinance 兜底自动复权——两条路径复权口径不一致，跨源比较价格时注意
+- **Yahoo Chart v8**（`urllib` 直连，20s×3 次尝试带退避）→ **yfinance 1.6.0** 兜底；**东方财富 push2**（`curl` 子进程）供 XAU/BTC 实时价：三者皆非官方接口、无 key、无额度保证
+- 口径已钉死 **raw**：Chart 用原始 close，yfinance 兜底 `auto_adjust=False`。**兜底结果只进内存不落库**（落库单一由 Chart 路径负责）——改抓价链时必须维持这条，否则库内会出现复权断点
+- **落库只收已收盘 K 线**：`save_cached_closes` 剔除 `date >= utc_today()`，盘中价走显示通道（冷热分离）。落库日界用 `utc_today()`、业务日界用 `biz_today()`，两者别混
+- 行情陈旧超 7 天（三个信号标的任一）→ 决策降级：不出金额、只展示持仓（`decision.degraded` + `decision.freshness`）
 
 **认证**
 - 自写「名字 + PIN」：PBKDF2-HMAC-SHA256（20 万迭代 + 每账号随机盐），连续失败 5 次锁 15 分钟；fail-closed——secrets 缺失/损坏即拒启动，仅显式 `DCA_AUTH_MODE=local` 进单机模式
@@ -39,6 +41,7 @@
 **计算引擎**
 - 独立脚本 `scripts/dca_calculator.py` + **subprocess 隔离**：UI 与计算零共享内存，只经命令行参数与 stdout JSON 通信，是本项目最干净的边界
 - 行情快照 `data/quote_snapshot.json`（TTL 600s）复用抓价结果，TTL 内重跑近即时
+- 8 个外部请求（6 标的 + 2 汇率）**并发同波**：总耗时取最大值而非求和，subprocess 180s 上限留足余量
 
 **部署与外发**
 - **Streamlit Community Cloud**：推 `main` 自动重新部署；**容器时区 UTC**——业务"今天"一律走 `biz_today()`（Asia/Shanghai 固定 UTC+8，`src/dates.py` 与引擎 `dca_calculator.py` 双实现同规则、必须同改），禁止裸 `date.today()`
@@ -58,13 +61,13 @@ sp500-nasdaq100-gold-dca/
 │   ├── context.py            # 启动上下文：Paths / Decision / build_paths（73 行；code_dir 按 parent.parent 定位）
 │   ├── dates.py              # 业务"今天"唯一定义 biz_today()（20 行；Asia/Shanghai 固定 UTC+8，与引擎 dca_calculator.py 同规则双实现，两处必须同改）
 │   ├── services/             # 服务层：model.py 模型调用（45）/ quotes.py 行情抓取（87）/ curves.py 曲线数据（102）
-│   ├── ui/                   # 样式/遮罩/侧栏/认证：styles.py 全局 CSS（185）/ overlays.py 三遮罩（59）/ sidebar.py 侧栏（328，返回 Decision）/ auth.py 认证门闸（328，require_user()）
-│   └── tabs/                 # 六个 tab 渲染：today(93)/holdings(78)/records(182，记账写链)/history(26)/backtest(249)/strategy_doc(18)，各暴露 render(tab, ...)
+│   ├── ui/                   # 样式/遮罩/侧栏/认证：styles.py 全局 CSS（185）/ overlays.py 三遮罩（59）/ sidebar.py 侧栏（329，返回 Decision）/ auth.py 认证门闸（328，require_user()）
+│   └── tabs/                 # 六个 tab 渲染：today(100)/holdings(78)/records(182，记账写链)/history(26)/backtest(249)/strategy_doc(18)，各暴露 render(tab, ...)
 ├── CHANGELOG.md              # 改动日志：每个 commit 一行带时刻（人读版流水，见第 12 条；scripts/changelog.py 维护）
 ├── start-app.bat             # 本机双击启动 Streamlit
 ├── logs/                     # 运行日志约定落点（*.log 不入库；Cloud 容器重启即失，运行日志尚未实现）
 ├── scripts/
-│   ├── dca_calculator.py     # 计算引擎（1074 行，独立可运行，输出 JSON；--user 读 data/users/<user>/；行情快照 600s 内复用抓价结果）
+│   ├── dca_calculator.py     # 计算引擎（1229 行，独立可运行，输出 JSON；--user 读 data/users/<user>/；行情抓取并发+退避重试，落库三道护栏，7 天陈旧闸；行情快照 600s 内复用抓价结果）
 │   ├── dca_action.py         # 业务动作 CLI（203 行）：record tx/obs + override，Skill 经它与 Web 共用 storage 业务层
 │   └── changelog.py          # CHANGELOG 维护：add <hash> 生成带时刻的行，--check 校验全覆盖
 ├── data/

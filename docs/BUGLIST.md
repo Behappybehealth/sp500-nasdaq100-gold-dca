@@ -28,21 +28,21 @@
 | 指标 | 数值 |
 |---|---:|
 | **登记问题总数** | **27** |
-| ✅ 已修复并验证 | **18** |
+| ✅ 已修复并验证 | **22** |
 | 🟡 已确认待修 | **0** |
-| 🟠 修复中 | **4** |
+| 🟠 修复中 | **0** |
 | 🔴 待 1 对 1 确认 | **3** |
 | ⚪ 判定不修 | 2 |
-| **修复率** | **66.7 %**（18 / 27） |
+| **修复率** | **81.5 %**（22 / 27） |
 
 ## 按等级分布
 
 | 等级 | 判据 | 总数 | ✅已修 | 🟠修复中 | 🔴待确认 | ⚪不修 | 完成度 |
 |---|---|---:|---:|---:|---:|---:|---:|
 | **P0** | 数据会丢/会串号，或鉴权会失效。**不需要外部触发** | 5 | 5 | 0 | 0 | 0 | 100 % |
-| **P1** | 会给出错误的钱数，或让部署/运维在关键时刻失败 | 10 | 5 | 4 | 1 | 0 | 50 % |
+| **P1** | 会给出错误的钱数，或让部署/运维在关键时刻失败 | 10 | 9 | 0 | 1 | 0 | 90 % |
 | **P2** | 长期负债，不会立刻出事但会持续加重 | 12 | 8 | 0 | 2 | 2 | 66.7 % |
-| **合计** | | **27** | **18** | **4** | **3** | **2** | **66.7 %** |
+| **合计** | | **27** | **22** | **0** | **3** | **2** | **81.5 %** |
 
 ## 按日期的修复记录
 
@@ -51,7 +51,8 @@
 | **2026-08-17** | **26** | **4** | `BUG-005` `BUG-012` `BUG-013` `BUG-014` | 全量审计建册；删掉从未跑通的 Docker 那套，一个动作连带解决 4 条 |
 | **2026-08-18** | **1** | **10** | `BUG-001` `BUG-002` `BUG-003` `BUG-004` `BUG-020` `BUG-021` `BUG-022` `BUG-023` `BUG-025` `BUG-026` | P0 清舱：门闸 fail-closed、缓存与落盘按用户隔离、读失败不再伪装空表、PIN 升级 PBKDF2+锁定；同日关掉文档双副本与隐私假话、清扫死代码与孤儿行情文件、Tab5 硬编码数据出库；app.py 拆分 7/7 刀落地（1984→78 行）、新增 dca_action.py 打通 Skill/Web 业务层；A2 施工中新登记 `BUG-027`（云端 tab2 曲线读错账本路径） |
 | **2026-08-19** | **0** | **4** | `BUG-024` `BUG-027` `BUG-008` `BUG-009` | 引擎行情快照复用 + 金额输入 form 化，模型不再白跑第二遍；tab2 净值曲线按用户读账本（`tx_csv_for`），云端模式不再永远"暂无成交记录"；同日拍板 `BUG-016`（自有域名/TLS）与 `BUG-019`（Sheets OLTP 代价）判定不修（⚪），各附重开触发条件；**`BUG-008` 修复**：`biz_today()` 统一业务"今天"（Asia/Shanghai 固定 UTC+8，引擎/UI 双实现互指）+ 写入 `(user,date,asset,action)` 去重（UI 显式确认 `force=True` 放行）+ 坏日期三处拒收（records/dca_action/引擎 `invalid_transactions`）；**`BUG-009` 修复**：汇率改唯一实时源（7.20/1.0/6.73 三个写死常量清零）+ `fx_last.json` 上次成功值兜底 + `fx` 三件套（value/live/as_of）三态展示 + 估值层 None 守卫（置空不编数，决策金额不受影响） |
-| 累计 | 27 | 18 | | |
+| **2026-08-20** | **0** | **4** | `BUG-006` `BUG-007` `BUG-010` `BUG-011` | 抓价链一次重做（一条链上的四个洞，分开修等于把同一段代码改四遍）：**`BUG-006`** 落库三道闸（剔 `date >= UTC 今天` 的盘中价 + 行数不减拒写 + temp/`os.replace` 原子写，±20% 跳变只 warning 不拦），新增 `utc_today()` 与业务 `biz_today()` 分工，bar 日期改按 UTC 解释（连带修：原按本机时区，负偏移机器上 XAUT 会错位一天；10y×6 标的 15,146 点比对零差异 → 存量零重建）；**`BUG-007`** yfinance 兜底 `auto_adjust=False` 统一 raw，"兜底不落库"升级为可断言不变量；**`BUG-010`** 7 天陈旧闸（超限则金额归零 + `decision.degraded/freshness`，只展示持仓）+ 空响应算异常 + cache 分支补 yfinance 兜底 + `fetch_json` 3 次退避重试，`cache_warning`/`persist_warnings` 双通道语义分离（连带修：sidebar 原按 `data_source` 前缀判正常会静默漏判新降级路径，改语义判断）；**`BUG-011`** 8 请求（6 标的 + 2 汇率）同波并发，总耗时从求和变取最大值（实测 1.5s，串行最坏 160s 紧贴 subprocess 180s） |
+| 累计 | 27 | 22 | | |
 
 ## 🔗 连带修复追溯
 
@@ -77,12 +78,12 @@
 | [BUG-003](#bug-003认证是-fail-open-的门闸可以整体消失) | P0 | ✅ | 认证 fail-open，门闸可整体消失 | app.py:430-431 |
 | [BUG-004](#bug-004pin-的保护强度撑不住公开部署) | P0 | ✅ | PIN 强度撑不住 public 部署 | storage.py:134-135 |
 | [BUG-005](#bug-005google-私钥会被打进-docker-镜像层) | P0 | ✅ | GCP 私钥会被打进镜像层 | 旧 Dockerfile:21 |
-| [BUG-006](#bug-006行情缓存无任何护栏盘中价直接入库) | P1 | 🟠 | 行情缓存无护栏，盘中价入库 | dca_calculator.py:292-317 |
-| [BUG-007](#bug-007两条抓取路径复权口径不一致) | P1 | 🟠 | 两条抓取路径复权口径不一致 | dca_calculator.py:206/338 |
+| [BUG-006](#bug-006行情缓存无任何护栏盘中价直接入库) | P1 | ✅ | 行情缓存无护栏，盘中价入库 | dca_calculator.py:344-386 |
+| [BUG-007](#bug-007两条抓取路径复权口径不一致) | P1 | ✅ | 两条抓取路径复权口径不一致 | dca_calculator.py:389-407 |
 | [BUG-008](#bug-008今天是模糊的--重复投的钱洞) | P1 | ✅ | "今天"是模糊的 → 重复投 | 全项目无 ZoneInfo |
 | [BUG-009](#bug-009汇率抓不到就静默用常量四个常量差-7) | P1 | ✅ | 汇率静默硬编码，四常量差 7% | 四处 |
-| [BUG-010](#bug-010缓存陈旧无上限yahoo-挂三周仍照常出金额) | P1 | 🟠 | 缓存陈旧无上限 | dca_calculator.py:311-324 |
-| [BUG-011](#bug-011子进程超时紧贴上限yahoo-变慢就整页失败) | P1 | 🟠 | 子进程 180s 紧贴 160s 上限 | app.py:567 |
+| [BUG-010](#bug-010缓存陈旧无上限yahoo-挂三周仍照常出金额) | P1 | ✅ | 缓存陈旧无上限 | dca_calculator.py:840-869 |
+| [BUG-011](#bug-011子进程超时紧贴上限yahoo-变慢就整页失败) | P1 | ✅ | 子进程 180s 紧贴 160s 上限 | dca_calculator.py:488-505 |
 | [BUG-012](#bug-012docker-那套从来没跑通过一次却被标唯一事实源) | P1 | ✅ | Docker 死物被标"唯一事实源" | git 零迭代 |
 | [BUG-013](#bug-013两套多用户实现互相抵消) | P1 | ✅ | 两套多用户实现互相抵消 | 已删 |
 | [BUG-014](#bug-014加一个用户会炸掉所有用户) | P1 | ✅ | 加一个用户炸掉所有用户 | 旧 setup_user.sh:90 |
@@ -822,7 +823,7 @@ wide_table_markdown 非空 ✅   warnings 数量 = 0 ✅   stderr 为空 ✅
 
 | 等级 | 状态 | 发现日期 | 确认日期 | 修复日期 | 主要证据 |
 |---|---|---|---|---|---|
-| **P1** | 🟠 **修复中** | 2026-08-17 | 2026-08-19 | — | [dca_calculator.py:292-317](../scripts/dca_calculator.py#L292-L317) |
+| **P1** | ✅ **已修复** | 2026-08-17 | 2026-08-19 | 2026-08-20 | [dca_calculator.py:344-386](../scripts/dca_calculator.py#L344-L386)、[:58](../scripts/dca_calculator.py#L58) |
 
 - **① 现象**：盘中运行时，当天未收盘的临时价被当作"收盘价"写入 CSV 并提交进 git——已抓现行：`2026-08-14` 在 git 历史里被写过 3 个值（4398.80→4405.30→4380.40），08-18 早上工作区里 08-17 的值还在漂（GC_F 4456.90→4434.30、XAUT 4378.37→4362.37）。
 - **② 原理**：增量抓取 `period1=last_cached` 每次都重抓前沿日并按日期键覆盖（[:312-317](../scripts/dca_calculator.py#L312-L317)），落盘是整文件 `open("w")` 截断重写（[:292-298](../scripts/dca_calculator.py#L292-L298)），全程唯一校验只有 `close > 0`（[:257](../scripts/dca_calculator.py#L257)）。
@@ -841,11 +842,33 @@ wide_table_markdown 非空 ✅   warnings 数量 = 0 ✅   stderr 为空 ✅
 
 #### 🔧 实际修复
 
-> 待施工后回填。
+> **2026-08-20 修复（commit `COMMIT3_HASH`）**：
+> 1. **新增 `utc_today()`**（[:58](../scripts/dca_calculator.py#L58)）：落库安全线专用的 UTC 自然日，与业务 `biz_today()`（UTC+8，BUG-008 引入）**两个函数两个用途**——落库看 UTC（全市场收盘的统一安全线），业务日界看北京。docstring 写明为什么 UTC 午夜能一条规则覆盖美股/GC=F/24/7 的 XAUT，免得后人按标的维护收盘时刻表。
+> 2. **`save_cached_closes(path, closes) -> List[str]`** 重写（[:344-386](../scripts/dca_calculator.py#L344-L386)），返回 warning 列表由调用方透传 JSON：
+>    - **闸①盘中价不落盘**：`persistable = {d: c for d, c in closes.items() if d < cutoff}`，`cutoff = utc_today()`；全部被剔 → 不建文件、返回"无可落库数据"warning。
+>    - **闸②行数不减**：`len(persistable) < len(existing)` 直接拒写（防上游残缺数据把库削平）。
+>    - **闸③原子写**：`path.name.tmp<pid>` + `os.replace`；`OSError` 时 `tmp.unlink(missing_ok=True)` 收尾并挂 warning（不留残缺文件也不留垃圾）。
+>    - **±20% 跳变只 warning 不拦**（`_JUMP_WARN_PCT = 0.20`，[:341](../scripts/dca_calculator.py#L341)）：1987 式真崩盘必须能落库；且**只查本次真正变更的日期**（`existing.get(d) != c`），否则历史老跳变每次跑都刷一遍 warning。
+>    - **无变化不碰文件**：`persistable == existing` 时直接返回（盘中/周末重跑是常态，不该产生 mtime 抖动与无意义写盘）。
+> 3. **bar 日期改按 UTC 解释**（[:296-317](../scripts/dca_calculator.py#L296-L317)，施工中主动抓到的连带缺陷）：原 `date.fromtimestamp(ts)` 用**本机时区**，与闸①的 UTC 口径不一致。UTC+8 下恰好等价（ts 全落在 UTC 00:00–13:30），但负偏移时区会让 XAUT 的 UTC 00:00 bar 整体错位一天——同一份数据在不同机器上标不同日期。已改为 `datetime.fromtimestamp(ts, timezone.utc).date()`。
+> 4. **warning 双通道分离**（[:481-484](../scripts/dca_calculator.py#L481-L484)）：`cache_warning`（语义=数据没更新到最新，UI 与 `asset_note` 的"缓存未更新"据此标黄）与 `persist_warnings`（语义=落库护栏说了话，与新鲜度无关）分列两个键。混用会让一次跳变告警把新鲜数据误标成 stale。
 
 #### ✔️ 验证结果
 
-> 待验证后回填。
+> **2026-08-20 验证通过**（`_verify_bug006_007_010_011.py` 一次性脚本 30/30 OK + `_verify_live.py` 联网实跑 9/9 OK，均 EXIT=0，跑完即删；全程 tmp 目录隔离）：
+> - **A1** 盘中价不落盘：喂 4 天（含 UTC 今天）→ 落库 `[D-3, D-2, D-1]`，`utc_today` 那行不在库内
+> - **A2** 全部未收盘 → 不建文件且报 `无可落库数据（全部 K 线 >= UTC 2026-08-20）`
+> - **A3** 行数不减闸：库内 3 行、新序列 2 行 → 拒写且**原文件字节不变**（`拒绝覆盖——新序列 2 行 < 库内 3 行`）
+> - **A4** 无 `.tmp` 残留（原子替换）
+> - **A5** 跳变仅 warning 不拦：`-30.7%` 已落库（`got5[YEST] == 70.0`）且 warning 到位
+> - **A6** 内容无变化 → `mtime_ns` 不变、warning 为空
+> - **A7** 历史老跳变不重复报（本次无新变更日 → warning 为空）
+> - **B1–B3**（口径，详见 BUG-007）；**G3** 联网实跑后 6 个 csv 无任何 `>= UTC 今天` 的行
+> - **G6 冷热分离精确断言**：`db_end < UTC今天 and mem_end >= db_end` 全标的成立——`^GSPC/^NDX/SPY/QQQ` 为 `mem=db=2026-08-19`，`GC=F/XAUT-USD` 为 `mem=2026-08-20（盘中价）/ db=2026-08-18`。**内存序列含今日盘中 bar 是对的**（`day_change` 靠它算），落盘剔除也是对的，两者不是同一口径。
+> - **零重建证明**：10y × 6 标的共 **15,146 个数据点**逐点比对新旧 bar 日期口径，**零差异** → 存量缓存无需重建（时区改动不产生断点）。
+> - **F1 / G9** 真实 `data/` 缓存字节级未变（跑前 sha256 快照逐文件比对，CACHE_CLEAN）
+>
+> 遗留（不属本条代码缺陷）：真实 `data/market_history/*.csv` 里**存量**的 `2026-08-19` 行可能是旧代码在盘中写入的脏值（联网实跑时 tmp 副本中 6 个 csv 全被重抓修正）。按确认记录第 4 条，存量污染行的清理走独立 data commit，与代码改动分离。
 
 ---
 
@@ -853,7 +876,7 @@ wide_table_markdown 非空 ✅   warnings 数量 = 0 ✅   stderr 为空 ✅
 
 | 等级 | 状态 | 发现日期 | 确认日期 | 修复日期 | 主要证据 |
 |---|---|---|---|---|---|
-| **P1** | 🟠 **修复中** | 2026-08-17 | 2026-08-19 | — | [dca_calculator.py:254](../scripts/dca_calculator.py#L254)、[:338](../scripts/dca_calculator.py#L338) |
+| **P1** | ✅ **已修复** | 2026-08-17 | 2026-08-19 | 2026-08-20 | [dca_calculator.py:389-407](../scripts/dca_calculator.py#L389-L407) |
 
 - **① 现象**：同一标的的历史价格取决于"哪条路径抓的"——Yahoo Chart 主路径用原始收盘价，yfinance 兜底路径用后复权价。
 - **② 原理**：`pairs_from_chart_result` 直接取原始 `quote.close`（[:254](../scripts/dca_calculator.py#L254)），而 yfinance 兜底写死 `auto_adjust=True`（[:338](../scripts/dca_calculator.py#L338)）；拆股/分红时两种口径差数倍，老缓存行又永不重抓 → 缓存内部形成永久断点，跨断点的涨跌和回撤全错。
@@ -868,11 +891,18 @@ wide_table_markdown 非空 ✅   warnings 数量 = 0 ✅   stderr 为空 ✅
 
 #### 🔧 实际修复
 
-> 待施工后回填。
+> **2026-08-20 修复（commit `COMMIT3_HASH`）**：
+> 1. **`_yfinance_closes`（[:389-407](../scripts/dca_calculator.py#L389-L407)）`auto_adjust=True → False`**：与 Chart 主路径的原始 `quote.close` 及存量缓存统一 **raw 口径**。docstring 写明"一边复权一边不复权，拆股/分红日前后就会在同一份缓存里形成永久断点"，把 WHY 钉在代码里而不是只留在台账。
+> 2. **"兜底结果不落库"升级为显式不变量**：docstring 明写「本函数结果只供本次决策，不落库（落库口径单一由 Chart 路径负责）」。这是本条"零重建"论断的前提——两个 yfinance 分支（[:437](../scripts/dca_calculator.py#L437)、[:455](../scripts/dca_calculator.py#L455)）只 `cached.update(...)` 供本次计算，`save_cached_closes` 全文件只出现在两个 Chart 成功分支（[:431](../scripts/dca_calculator.py#L431)、[:450](../scripts/dca_calculator.py#L450)）。
+> 3. **缓存零重建**（与确认记录一致）：存量已是纯 raw，无污染可清。
 
 #### ✔️ 验证结果
 
-> 待验证后回填。
+> **2026-08-20 验证通过**（同 BUG-006 的两套脚本）：
+> - **B1** `auto_adjust=False` 在引擎中生效
+> - **B2** 全项目 `auto_adjust=True` 零命中（引擎 + `src/**/*.py` 全扫）
+> - **B3** **落库口径单一性可断言**：`cached.update(_yfinance_closes` 存在，且 `save_cached_closes(cache_path, cached)` 全文件**恰好 2 次**（两个 Chart 成功分支）——yfinance 兜底路径在物理上碰不到落库。
+> - **C7b** 端到端印证：Chart 打挂 + yfinance 兜底成功后，缓存文件**字节不变**（`库内仍 2 行 raw 数据`），兜底数据只进内存不进库。
 
 ---
 
@@ -961,7 +991,7 @@ wide_table_markdown 非空 ✅   warnings 数量 = 0 ✅   stderr 为空 ✅
 
 | 等级 | 状态 | 发现日期 | 确认日期 | 修复日期 | 主要证据 |
 |---|---|---|---|---|---|
-| **P1** | 🟠 **修复中** | 2026-08-17 | 2026-08-19 | — | [dca_calculator.py:311-324](../scripts/dca_calculator.py#L311-L324) |
+| **P1** | ✅ **已修复** | 2026-08-17 | 2026-08-19 | 2026-08-20 | [dca_calculator.py:840-869](../scripts/dca_calculator.py#L840-L869)、[:434-442](../scripts/dca_calculator.py#L434-L442) |
 
 - **① 现象**：Yahoo 持续失败时系统永远用旧缓存照常出买入金额，没有"超过 N 天就拒绝决策"的上限；更隐蔽的是增量抓取 `allow_empty=True`（[:315](../scripts/dca_calculator.py#L315)），Yahoo 返回空也算"增量成功"、无 warning、侧栏显示一切正常。
 - **② 原理**：有缓存时异常只降级为 `cache_stale` + warning、**不尝试 yfinance**（[:311-324](../scripts/dca_calculator.py#L311-L324)）；没有陈旧天数检查；Yahoo 单次 `urlopen` 零重试零退避（[:195-198](../scripts/dca_calculator.py#L195-L198)）。
@@ -980,11 +1010,31 @@ wide_table_markdown 非空 ✅   warnings 数量 = 0 ✅   stderr 为空 ✅
 
 #### 🔧 实际修复
 
-> 待施工后回填。
+> **2026-08-20 修复（commit `COMMIT3_HASH`）**：
+> 1. **陈旧闸**：新增 `_MAX_STALE_DAYS = 7`（[:840](../scripts/dca_calculator.py#L840)）+ `market_freshness(signal_markets, today, max_stale_days)`（[:843-869](../scripts/dca_calculator.py#L843-L869)），返回 `{degraded, stale_days, max_stale_days, per_symbol, reason}`。main 在 `build_decision` 之后过闸（[:1164](../scripts/dca_calculator.py#L1164)）：`degraded` 时 `suggested_amount_rmb = 0.0`、`level_label = "数据陈旧·暂停出金额"`、reason 说清哪个标的落后几天并**保留原评分供参考**。三个信号标的取 `market_symbol_for_asset` 的 `index_symbol`（`^GSPC`/`^NDX`/`GC=F`）；带 `error` 的标的记 `per_symbol[sym] = None` 并直接判 degraded。
+> 2. **挂载位置**：`decision.degraded` + `decision.freshness`（**挂在 decision 内、不加顶层键**）——引擎输出仍是 18 个顶层键，UI 与 Skill 的既有解包不受影响。
+> 3. **空响应算异常**：`pairs_from_chart_result` 删掉 `allow_empty` 死参数，空即 `raise RuntimeError("empty history")`（[:296-317](../scripts/dca_calculator.py#L296-L317)）。调用处注释写明 WHY：`period1` 落在库内最后一天，正常必回该日 K 线，空返回是上游异常而非"没有新数据"，静默当成功会让缓存无限期装死。
+> 4. **cache 分支补 yfinance 兜底**（[:434-442](../scripts/dca_calculator.py#L434-L442)）：有缓存时 Chart 失败也先试 `_yfinance_closes` → `data_source = "yfinance_fallback+cache"`，双双失败才退 `cache_stale`。原先"有缓存就不试 yfinance"等于 Chart 一挂就无声无息一直吃旧缓存。
+> 5. **退避重试**：`fetch_json(url, timeout=20, attempts=3)`（[:228](../scripts/dca_calculator.py#L228)）—— 0.8s/1.6s 退避，末次失败抛 `last_exc`（无 unreachable 死代码）。单请求最坏预算 3×20s + 2.4s ≈ 62s，配合 BUG-011 的并发仍远低于 subprocess 180s。
+> 6. **UI 可见性（施工中主动抓到的连带缺陷）**：[sidebar.py:149-153](../src/ui/sidebar.py#L149-L153) 原按 `data_source.startswith("cache+")` 判"全部正常"——我新增的 `yfinance_fallback+cache` 若命名成 `cache+yahoo_fallback` 就会被静默判成正常，**降级不可见**。已改为语义判断 `not mk.get("error") and not mk.get("cache_warning")`，前缀命名不再是隐式契约。
+> 7. **降级横幅**：[today.py:14-22](../src/tabs/today.py#L14-L22) 在 tab1（建议金额的唯一展示位）顶部 `st.error` 说明"不出金额 + 原因 + 别照旧价下单"；持仓与历史照常展示。
 
 #### ✔️ 验证结果
 
-> 待验证后回填。
+> **2026-08-20 验证通过**（同 BUG-006 的两套脚本）：
+> - **C1** 空响应抛异常：`empty history`（不再 `allow_empty` 静默算成功）
+> - **C2** 任一标的落后 8 天 → `degraded=true`、`stale_days=8`、reason 点名 `GC=F`
+> - **C3** 边界恰好 7 天 → **不降级**（`stale_days=7`，闸是 `> 7` 而非 `>= 7`）
+> - **C4** 带 `error` 的标的 → `degraded=true`、`per_symbol["^GSPC"]=None`、reason 含"无可用行情"
+> - **C5** `urlopen` 前两次抛错第三次成功 → `fetch_json` 返回正常、共 3 次尝试（退避 `sleep` 打桩）
+> - **C6** 三次全失败 → 抛出**最后一次**异常（`always`）
+> - **C7a** 有缓存 + Chart 挂 → `data_source=yfinance_fallback+cache`、`history_end` 推进到兜底数据的最后一天（不再死吃旧缓存）
+> - **C7c** 兜底路径挂 `cache_warning`（UI 据此标异常）；**C7d** Chart + yfinance 双挂 → `cache_stale` 且 warning 含两条原因
+> - **E1** 端到端新鲜（1 天前）→ 不降级、照常出金额；**E2** 陈旧 20 天 → `suggested_amount_rmb=0.0` + `degraded` + `stale_days=20`
+> - **E3** 降级 reason 含"不新鲜"与"原评分供参考"；**E4** 陈旧不影响持仓展示（`total_invested_rmb=1000.0`、`positions` 非空）
+> - **E5** 顶层键仍 **18 个**（degraded 挂 decision 内，零新增顶层键）
+> - **G5** 联网实跑真实数据新鲜 → 未误触发（`stale_days=1`，`per_symbol={'^GSPC': 1, '^NDX': 1, 'GC=F': 0}`）
+> - **UI 语义回归**（`all_ok` 五分支）：`normal=True` / `yfinance_fallback+cache=False` / `cache_stale=False` / `error=False` / **仅有 `persist_warnings`（跳变）时 `=True`**——最后一项证明落库告警不会把新鲜数据误标成异常，双通道分离生效。
 
 ---
 
@@ -992,7 +1042,7 @@ wide_table_markdown 非空 ✅   warnings 数量 = 0 ✅   stderr 为空 ✅
 
 | 等级 | 状态 | 发现日期 | 确认日期 | 修复日期 | 主要证据 |
 |---|---|---|---|---|---|
-| **P1** | 🟠 **修复中** | 2026-08-17 | 2026-08-19 | — | [app.py:567](../app.py#L567)、[dca_calculator.py:374-375](../scripts/dca_calculator.py#L374-L375) |
+| **P1** | ✅ **已修复** | 2026-08-17 | 2026-08-19 | 2026-08-20 | [dca_calculator.py:488-505](../scripts/dca_calculator.py#L488-L505)、[:1113-1120](../scripts/dca_calculator.py#L1113-L1120) |
 
 - **① 现象**：8 个 Yahoo 请求串行、各 20s 超时 = 最坏 160s，而 subprocess 总上限 180s——Yahoo 不必挂、只要变慢，整页 `st.error` + `st.stop()` 白屏。
 - **② 原理**：`fetch_history` 逐符号串行抓取，总耗时是求和；超时不单独捕获，任何一环慢都直接顶到总上限。
@@ -1007,11 +1057,20 @@ wide_table_markdown 非空 ✅   warnings 数量 = 0 ✅   stderr 为空 ✅
 
 #### 🔧 实际修复
 
-> 待施工后回填。
+> **2026-08-20 修复（commit `COMMIT3_HASH`）**：
+> 1. **`fetch_history` 并发**（[:488-505](../scripts/dca_calculator.py#L488-L505)）：内层 `_one(sym)` 包 try/except 收成 `{"error": ...}` 条目——**单标的异常不带走整批**（降级展示优于整页失败）；`ThreadPoolExecutor(max_workers=min(8, len(syms)))` + `pool.map` 保持输入顺序；`len(syms) <= 1` 走串行（不为一个请求付线程池开销）。并发安全的依据写进 docstring：每个标的写自己的缓存文件、无共享写入。
+> 2. **main 里 8 请求同波并发**（[:1113-1120](../scripts/dca_calculator.py#L1113-L1120)）：行情（6 标的）与两个汇率一起提交到 `ThreadPoolExecutor(max_workers=3)`，即"总耗时 = 最慢的那一个，而不是 8 个请求求和"。原先是行情批 → usdcny → usdtusd 三段串行。
+> 3. **超时预算重算**：单请求最坏 3×20s + 2.4s 退避 ≈ 62s（BUG-010 的重试），并发后总耗时取最大值 ≈ 62s，对 subprocess 180s 上限留出 118s 余量；原先 8 请求串行最坏 160s，紧贴上限。
+> 4. **UI 侧未改**（与确认一致）：引擎逐标的 error 隔离 + 行情快照（BUG-024）已覆盖。
 
 #### ✔️ 验证结果
 
-> 待验证后回填。
+> **2026-08-20 验证通过**（同 BUG-006 的两套脚本）：
+> - **D1** 6 个标的各注入 0.3s 延迟 → 实测 **< 1.0s**（串行应为 1.8s），并发生效
+> - **D2** 返回**保持输入顺序**且键齐全（`list(res) == SYMS`）
+> - **D3** 单标的抛异常（`S3`）→ 只有 `S3` 带 `error`，`S1` 等正常返回，整批不被带走
+> - **G1** 联网实跑成功退出；**G2** 8 请求真实总耗时 **1.5s**（串行最坏上限 160s，并发后远低于 60s 断言线）
+> - **G8** 落库护栏无拒写/跳变告警（并发写 6 个 csv 无互相踩踏）
 
 ---
 

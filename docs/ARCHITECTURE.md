@@ -61,7 +61,7 @@
                             ▼                  ▼
         ┌───────────────────────────┐   ┌──────────────────┐
         │ scripts/dca_calculator.py │   │   storage.py     │
-        │ 计算引擎（983 行）         │   │  存储层（594 行） │
+        │ 计算引擎（1229 行）        │   │  存储层（612 行） │
         │                           │   │                  │
         │ 读 data/config.json       │   │ 优先 Google Sheets│
         │ 读记账数据（--user 时      │◄──┤ 无凭据→本地 CSV   │
@@ -167,7 +167,7 @@ tab4（26 行）是这条链的读侧，业务上和 tab3 是一件事。
 
 | tab | 位置 | 行数 | 业务职责 | 依赖 |
 |---|---|---:|---|---|
-| 🎯 今日模拟 | `src/tabs/today.py` | 93 | 今日建议金额/部署系数/三资产分配/三档执行方案 | render(tab1, result, dec, ms, ASSETS) |
+| 🎯 今日模拟 | `src/tabs/today.py` | 100 | 今日建议金额/部署系数/三资产分配/三档执行方案；行情陈旧降级时顶部横幅说明"本次不出金额" | render(tab1, result, dec, ms, ASSETS) |
 | 📊 持仓与曲线 | `src/tabs/holdings.py` | 78 | 持仓汇总、估值、浮盈亏、XIRR、净值曲线（汇率不可用时估值显式置空） | render(tab2, result, pf, ASSETS, _paths, CURRENT_USER) |
 | ✍️ 记账 | `src/tabs/records.py` | 182 | 回报成交 / 主动跳过，二次确认后落库；同日同资产同方向去重，显式确认后放行 | render(tab3, result, dec, ASSETS, CURRENT_USER) |
 | 📜 历史记录 | `src/tabs/history.py` | 26 | 回读 transactions / observations | render(tab4, CURRENT_USER) |
@@ -203,7 +203,7 @@ tab4（26 行）是这条链的读侧，业务上和 tab3 是一件事。
 | 路径 | 行数 | 是什么 | 谁读它 | 入库 |
 |---|---:|---|---|:---:|
 | `app.py` | 66 | Streamlit 主程序，**纯装配层**：import → build_paths → storage.init → 认证一行 → 侧栏一行 → 6 个 tab render 调用 | Streamlit 直接执行 | ✅ |
-| `src/` | 1885 | **业务层**（app.py 只留装配）：`context.py`（73，启动上下文 `Paths`/`Decision`/`build_paths`）+ `dates.py`（20，业务"今天"唯一定义 `biz_today()`，Asia/Shanghai 固定 UTC+8，与引擎同规则双实现）+ `services/`（`model.py` 45 模型调用 / `quotes.py` 87 行情抓取 / `curves.py` 102 曲线数据）+ `ui/`（`styles.py` 185 全局 CSS / `overlays.py` 59 三遮罩 / `sidebar.py` 328 侧栏，返回 `Decision` / `auth.py` 328 认证门闸，`require_user()`）+ `tabs/`（`today.py` 93 / `holdings.py` 78 / `records.py` 182 / `history.py` 26 / `backtest.py` 249 / `strategy_doc.py` 18，各暴露 `render(tab, ...)` 显式收参）；不读 app.py 模块级全局 | `app.py` import | ✅ |
+| `src/` | 1893 | **业务层**（app.py 只留装配）：`context.py`（73，启动上下文 `Paths`/`Decision`/`build_paths`）+ `dates.py`（20，业务"今天"唯一定义 `biz_today()`，Asia/Shanghai 固定 UTC+8，与引擎同规则双实现）+ `services/`（`model.py` 45 模型调用 / `quotes.py` 87 行情抓取 / `curves.py` 102 曲线数据）+ `ui/`（`styles.py` 185 全局 CSS / `overlays.py` 59 三遮罩 / `sidebar.py` 329 侧栏，返回 `Decision` / `auth.py` 328 认证门闸，`require_user()`）+ `tabs/`（`today.py` 100 / `holdings.py` 78 / `records.py` 182 / `history.py` 26 / `backtest.py` 249 / `strategy_doc.py` 18，各暴露 `render(tab, ...)` 显式收参）；不读 app.py 模块级全局 | `app.py` import | ✅ |
 | `storage.py` | 612 | 存储层。所有 Google Sheets 读写都走它（含写前快照、PBKDF2 认证、成交同日同资产同方向去重，`force=True` 显式放行）；19 个公开接口明细见详设 §9 | `app.py` import | ✅ |
 | `requirements.txt` | 6 | 依赖清单。只约束包版本且几乎全无上界 | Cloud 装依赖时 | ✅ |
 | `CHANGELOG.md` | — | **全量改动的人读版流水**：每 commit 一行带 `HH:MM:SS` 时刻（取自 git），由 `scripts/changelog.py` 生成/校验 | 人 | ✅ |
@@ -216,7 +216,7 @@ tab4（26 行）是这条链的读侧，业务上和 tab3 是一件事。
 
 | 路径 | 行数 | 说明 |
 |---|---:|---|
-| `scripts/dca_calculator.py` | 1074 | **策略大脑**。完全独立可单跑，不依赖 Streamlit。输入 = CSV + config，输出 = JSON（18 个顶层键）；业务"今天"走 `biz_today()`（与 `src/dates.py` 同规则双实现），坏日期行剔除并输出 `invalid_transactions`；汇率唯一实时源、失败回落 `fx_last.json` 上次成功值（`fx` 三件套标 live/as_of，全无可估值置空）；行情快照 `data/quote_snapshot.json`（TTL 600 秒）复用抓价结果；参数与键明细见详设 §11 |
+| `scripts/dca_calculator.py` | 1229 | **策略大脑**。完全独立可单跑，不依赖 Streamlit。输入 = CSV + config，输出 = JSON（18 个顶层键）；业务"今天"走 `biz_today()`（与 `src/dates.py` 同规则双实现），坏日期行剔除并输出 `invalid_transactions`；汇率唯一实时源、失败回落 `fx_last.json` 上次成功值（`fx` 三件套标 live/as_of，全无可估值置空）；行情抓取**并发**（8 请求同波，总耗时取最大值）且带 3 次退避重试，落库三道护栏（盘中价不入库 / 行数不减 / 原子写，落库日界走 `utc_today()`），行情陈旧超 7 天则决策降级只展示持仓（`decision.degraded`）；行情快照 `data/quote_snapshot.json`（TTL 600 秒）复用抓价结果；参数与键明细见详设 §11 |
 | `scripts/dca_action.py` | 203 | 业务动作 CLI（`record tx` / `record obs` / `override`）：Skill 入口经它与 Web 共用 storage 业务层；shares 可按金额自动换算，sheets 模式写后自动 `sync_local` 刷新落盘缓存；同日同向撞重报错、`--force` 显式放行 |
 | `scripts/changelog.py` | 115 | CHANGELOG 维护工具：`add <hash>` 从 git 取提交时刻生成行草稿；`--check` 校验每个 commit 都有行且时刻与 git 一致（CLAUDE.md 第 12 条的配套） |
 
@@ -335,3 +335,4 @@ tab4（26 行）是这条链的读侧，业务上和 tab3 是一件事。
 | 2026-08-18 | **BUG-020 刀 7/7：认证收口，拆分收官**。认证门闸（303 行：登录页渲染 + fail-closed + 三阶段状态机 + 会话首同步）搬至 `src/ui/auth.py`（332 行，`require_user()` 零参数、返回用户名）；app.py 侧换 1 行调用，`contextlib`/`os`/遮罩 import 同步摘除。**app.py 385→78 行，纯装配层，BUG-020 七刀全部落地**；本文 §3/§5/§6/§9 改指新模块 | 第七刀，最高风险隔离单独成刀。两段式防残留设计原样随迁（ph.empty() 真删除 + 遮罩不透明 background，详设 §6）。**AppTest 5 条认证路径 12 项全 PASS**：local 直通 / 凭据缺失 fail-closed / 凭据损坏 fail-closed / 未登录渲染登录页且主界面拦截 / 已登录直通（sheets 状态 monkeypatch 模拟）；行情缓存备份/还原无污染 |
 | 2026-08-18 | **BUG-022 修复：新增 `scripts/dca_action.py`（187 行）业务动作 CLI**，Skill 入口经 `record tx` / `record obs` / `override` 子命令与 Web 共用 storage 业务层；shares 可按金额自动换算，sheets 模式写后自动 `sync_local` 刷新落盘缓存 | 此前 Skill 绕过业务层直接调引擎，记账/预算覆盖两边口径分叉；现在写操作全部收口到同一 `storage.py`，双入口行为一致 |
 | 2026-08-19 | **BUG-024 修复：引擎行情快照复用 + 侧栏金额表单化**。`dca_calculator.py`（938→983 行）新增 `data/quote_snapshot.json`——抓价成功后落盘 markets 摘要 + 汇率，TTL 600 秒（`--snapshot-ttl` 可调，0 禁用；任一标的抓价失败当趟不落盘），TTL 内运行跳过重复抓价与缓存增量写（下次冷跑自动追平）；输出 JSON 第 16 个顶层键 `quote_snapshot`（used/age_s/ttl_s）。侧栏金额输入收进 `st.sidebar.form("amount_form")`，键入不再逐击触发整页重跑 | 「我想投 X」每次会话此前付两遍完整计算（含 8 个串行行情请求）；实测重跑趟 t2=0.31s 为冷跑 t1=2.72s 的 11.3%（BUGLIST 验收标准 <20%） |
+| 2026-08-20 | **BUG-006/007/010/011 修复：抓价链重做**。`dca_calculator.py`（1074→1229 行）抓取层由**串行改并发**（`fetch_history` 用 `ThreadPoolExecutor`，main 把 6 标的 + 2 汇率同波提交，单标的异常收成 `error` 条目不带走整批）+ `fetch_json` 3 次尝试 0.8s/1.6s 退避；落库改由 `save_cached_closes` 三道护栏把关（剔 `date >= utc_today()` 的盘中价 / 行数不减拒写 / temp+`os.replace` 原子写，±20% 跳变只 warning，无变化不碰文件），新增 `utc_today()` 与业务 `biz_today()` 分工；yfinance 兜底统一 `auto_adjust=False` 且明确不落库（落库口径单一由 Chart 路径负责）；新增 `market_freshness` 7 天陈旧闸——超限则 `decision.suggested_amount_rmb=0` + `decision.degraded/freshness`，只展示持仓不出金额（**挂在 decision 内，顶层键仍 18 个**）。UI 侧 sidebar 改按语义判行情正常（不再匹配 `data_source` 前缀）、tab1 加降级横幅 | 8 个行情请求串行、各 20s 超时零重试，最坏 160s 紧贴 subprocess 180s 上限（实测改后 1.5s）；落库是 `open("w")` 整文件截断重写、唯一校验只有 `close > 0`，盘中价直接入库且脏值永久冻结；两条抓取路径复权口径不一致（Chart raw vs yfinance adjusted）；Yahoo 挂三周仍照常出金额，增量抓取 `allow_empty=True` 让空响应静默算成功 |
