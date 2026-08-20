@@ -40,7 +40,7 @@
 | 计算引擎 | 独立 Python 脚本 + **subprocess**（子进程隔离） | 见 §3 架构图；为什么这么做见详设 §2 |
 | 部署（生产） | **Streamlit Community Cloud** | 推送到 GitHub main 分支自动重新部署 |
 | 临时外发 | ngrok 固定域名 | 本机开着时把 8501 端口发到公网 |
-| 版本控制 | git + GitHub 私有仓库 | `Behappybehealth/sp500-nasdaq100-gold-dca` |
+| 版本控制 | git + GitHub **公开**仓库（用户有意设置） | `Behappybehealth/sp500-nasdaq100-gold-dca` |
 | 回归测试 | pytest 9.1.1 + Streamlit AppTest | 三层全离线回归：引擎纯函数 / storage 安全路径 / 整页渲染冒烟；离线由 autouse 拒网守卫强制并自测 |
 | 持续集成 | GitHub Actions | push `main` 自动跑 Windows/Python 3.14 精确锁定环境 + Linux/Python 3.12 Cloud 范围环境；不读取 secrets |
 | 代码格式 | ruff | 有格式化痕迹，但**未进 CI 强制** |

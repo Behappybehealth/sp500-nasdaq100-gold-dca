@@ -52,7 +52,7 @@
 - **pytest 9.1.1**：回归套件只收 `tests/`，离线由 `conftest` 里 autouse 的 `_deny_network` 强制（socket/DNS/子进程四口全拦、回环放行），不靠各用例自觉；Streamlit 整页冒烟用 `streamlit.testing.v1.AppTest`
 - **GitHub Actions**：push `main` 自动跑两条腿——Windows/Python 3.14 安装精确 lock，Linux/Python 3.12 安装 Cloud 范围文件；不依赖 secrets
 - **依赖两份分工**：`requirements.txt` 是 Cloud 可安装范围（全部有上界），`requirements-dev.lock` 是 Windows/Python 3.14 开发机全量精确锁定
-- **ruff** 仅作格式化、未进 CI 强制；**git** + GitHub 私有仓库
+- **ruff** 仅作格式化、未进 CI 强制；**git** + GitHub **公开**仓库（`Behappybehealth/sp500-nasdaq100-gold-dca`，用户有意设置）——**别假定它是私有的**：仓内文档与策略口径全部对外可见，写文档时按公开处理；判定用不带凭据的 `api.github.com/users/<账号>/repos`（只返回 public 仓）
 ---
 
 ## 目录结构

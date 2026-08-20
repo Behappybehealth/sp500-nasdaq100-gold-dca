@@ -1190,6 +1190,7 @@ wide_table_markdown 非空 ✅   warnings 数量 = 0 ✅   stderr 为空 ✅
 > 1. **依赖：两份分离**，不把 `requirements.txt` 钉成 `==`。云端那份保持"可安装范围 + 上界"，另建 `requirements-dev.lock`（`pip freeze` 全钉）供本地与 CI 复现。
 >    **拍板时明确的风险**：本机是 Python 3.14 + pandas 3.0.5，而 Streamlit Cloud 的 Python 版本由平台定、通常低于 3.14；若把云端那份钉成 `==3.0.5`，可能找不到对应 wheel 直接**部署失败**。分离即回避这条。
 > 2. **CI：GitHub Actions**，push `main` 自动跑 `pytest`（仓库已在 GitHub 私有，免费额度足够；无 PR 流程，所以挂在 push 上）。**测试必须全部离线**——CI 里联网抓 Yahoo 会被限流，那种红是噪音不是信号。
+>    **【2026-08-20 事实更正】** 括号里"已在 GitHub 私有"写错了：`Behappybehealth/sp500-nasdaq100-gold-dca` 实际是**公开仓**（用户有意设置，当日以不带凭据的 `api.github.com/users/.../repos` 探针确认——该端点只返回 public 仓）。拍板结论不受影响（公开仓的 Actions 免费额度更宽），但由此推出的"Actions 日志非公开"是错的，勿据此判断日志可见性。
 > 3. **`backtest/` 三个脚本：归档 + 去绝对路径**。只把 `C:\Users\xiezhibo\.claude\skills\...` 改成相对定位、让它们能跑起来并消除"全项目零绝对路径"（CLAUDE.md 第 8 条）的违规，文件头标注为一次性历史脚本，**不作回归载体**。理由：它们各自重写了一套决策链（部署系数、月度池、月末释放），与线上真跑的 `build_decision` + `monthly_budget_status` 不是同一套逻辑，修活了也测不到真链路；`main()` 还必然联网、必然写缓存、输出嵌当天日期，没有"固定输入→固定输出"的入口。价值在已跑完的 `results*.json`（Tab5 读的是它），脚本本身留作历史。
 > 4. **tests/ 第一批覆盖三层**：引擎 7 个纯函数（`metrics_from_closes` :265 / `asset_score` :871 / `score_based_weights` :940 / `build_decision` :1012 / `monthly_budget_status` :185 / `xirr` :740 / `load_cached_closes` :323）+ storage 关键路径（写入去重 `append_row` :439 的 `force` 分支、PBKDF2 `_pin_hash_v2` :213 / `_new_pin_record` :220、读失败拒写）+ 一个整页冒烟。选这三层是因为它们正好罩住 P0 批修过、且最容易被将来重构静默破坏的地方。
 >
@@ -1201,7 +1202,7 @@ wide_table_markdown 非空 ✅   warnings 数量 = 0 ✅   stderr 为空 ✅
 
 > **2026-08-20 按四项确认路径施工**：
 > 1. **依赖两份分工**：`requirements.txt` 的 6 个 Cloud 直接依赖全部补大版本上界；新增 `requirements-dev.lock`，完整记录 Windows/Python 3.14.4 开发机的 `pip freeze`（含 pytest 9.1.1 与全部间接依赖）。Cloud 继续装范围文件，不强塞 Windows lock。
-> 2. **push-main CI**：新增 `.github/workflows/ci.yml`。只在 push `main` 时触发，符合“无 PR 流程”的拍板；两条互补腿分别是 Windows/Python 3.14 安装精确 lock（验证开发机组合可复现）与 Linux/Python 3.12 安装 `requirements.txt`（验证 Cloud 入口仍可解析）。测试阶段不读 secrets、不抓行情、不连 Sheets；远端工作流尚未提交/推送，故这里只记录配置落地，不冒充 Actions 已绿。
+> 2. **push-main CI**：新增 `.github/workflows/ci.yml`。只在 push `main` 时触发，符合“无 PR 流程”的拍板；两条互补腿分别是 Windows/Python 3.14 安装精确 lock（验证开发机组合可复现）与 Linux/Python 3.12 安装 `requirements.txt`（验证 Cloud 入口仍可解析）。测试阶段不读 secrets、不抓行情、不连 Sheets；远端工作流尚未提交/推送，故这里只记录配置落地，不冒充 Actions 已绿**（首跑结果已于同日 push 后回填，见「验证结果」末条）**。
 > 3. **三层离线回归**：新增 `pytest.ini`（`testpaths=tests`，归档回测不参与收集）与 `tests/`：`test_engine.py` 罩 7 个纯函数及边界分支；`test_storage.py` 罩本地写入去重/PBKDF2/Sheets 读失败拒写与写前快照；`test_smoke.py` 用 `AppTest` 跑完整 app 六个 tab。所有 fixture 均为虚构数据；storage 与 AppTest 每条路径都显式 patch `sheets_enabled` 或强制 local，避免本机真实 `secrets.toml` 让测试误连生产表。
 > 4. **离线从「靠自觉」升级为「套件强制」**：`tests/conftest.py` 增 autouse 的 `_deny_network`，把四条出网路径一并堵死（`socket.connect` / `connect_ex` / `getaddrinfo` / `subprocess.Popen`），命中即抛 `NetworkUseInTests`；回环放行，否则 Windows 上 asyncio 的 `socketpair` 自管道会把 `AppTest` 一起打死。新增 `tests/test_offline_guard.py` 反过来罩住守卫本身（urllib 直连 / DNS / 裸 socket / curl 子进程四个口各一条，另加回环放行与异常类型），守卫哪天退化成空壳，这个文件先红——修前只有各用例自己 patch 调用点，漏一处或新增调用点就会静默出网。
 > 5. **冒烟边界按确认记录收口**：AppTest patch 的是 `src.ui.sidebar.run_model`，不启动联网子进程；虚构行情/汇率输入仍经真实 `metrics_from_closes` / `monthly_budget_status` / `build_decision` 等纯函数生成合法结果。另用 AST 读取引擎最终 result 字面量，断言 fixture 顶层键与真实输出契约一致。它验证“UI 能完整消费合法 JSON”，不声称覆盖 subprocess/标准输出解析接线。取键范围收窄到 `main()` 函数体内并对 `result.update()` 加断言拦截：引擎里 `fetch_chart` 那几处也把返回值叫 `result`（:504 / :530 / :637 / :649），全模块 walk 会把它们算进契约（当前右侧都是 `Call` 故键集未受污染，属潜伏而非已发病），且 `update()` 形态会被漏读。
@@ -1217,6 +1218,8 @@ wide_table_markdown 非空 ✅   warnings 数量 = 0 ✅   stderr 为空 ✅
 > - 三个归档脚本均 `py_compile` 通过且本机退出码 0；`backtest_single.py` 与 `backtest_compare3.py` 的重跑 JSON 与冻结产物逐字节一致。
 > - **如实记录第三份差异**：`backtest_dca.py` 可重跑但新 `results.json` 与冻结文件数值不同；脚本除路径/归档说明外未改计算，相关引擎函数、config 与仓库内截至回测截止日的 6 份行情均未变，且本次重跑的 dynamic 示例与同数据口径的 `results_compare3.json` 一致。最可信解释是冻结 `results.json` 当年由仓库外另一份行情快照生成，旧目录现已不存在，无法重建精确 provenance。该差异不冒充 byte-identical；冻结原文件已恢复、工作区干净。路径修复本身不改变计算链。
 > - 全仓项目绝对路径扫描零代码命中；三个冻结 JSON 与真实行情/账本均已恢复并保持未修改。
+> - **2026-08-20 CI 首跑回填（本条的远端验证补齐）**：`main` 推送 `8effade..73e1c82` 后 Actions 首次执行，`tests #1`（run `32360564145`，`head_sha 73e1c82`）**两条腿全绿**——`ubuntu-latest / 3.12 / requirements.txt` 47s、`windows-latest / 3.14 / requirements-dev.lock` 2m09s，run 级 `conclusion: success`（10:46:31Z → 10:48:44Z）。Linux 那条腿是本条修复的**唯一云端近似验证**：它证明用范围文件解出的依赖组合（pandas 3.x on 3.12）装得上且测试通过，这是本机 3.14 结构上测不出来的。同时消掉施工时两个只能等真跑的未知：`setup-python@v5` 解得出 windows 上的 3.14，全量 freeze 在 GH runner 上可装。
+>   **诚实边界**：只取到 run/job 级结论，**日志正文未取到**（三次尝试分别败于 MSYS 路径转换与 GBK 解码，未再重试），所以未逐条核对远端用例数是否同为 98。但 `pytest` 在零用例时退出码为 5 而非 0，`success` 已排除"空跑也算过"。
 
 ---
 

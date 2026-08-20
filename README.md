@@ -26,7 +26,7 @@ deploy/start-dca-tunnel.bat
 
 ## Streamlit Community Cloud 部署
 
-1. 把本目录推送到 GitHub（建议私有仓库）。
+1. 把本目录推送到 GitHub。**本仓实际是公开仓**（`Behappybehealth/sp500-nasdaq100-gold-dca`，有意设置）——公开仓 Cloud 默认就能部署；若你换成私有仓，还得在 Cloud 的 `Settings → Linked accounts → Source control` 里额外 `Authorize streamlit` 授予私有仓权限，否则部署拉不到代码。真实持仓、成交与凭据一律不入库（见 `.gitignore`），公开的只有代码、文档与策略口径。
 2. 打开 https://share.streamlit.io/ → New app。
 3. 选择仓库、分支，`Main file path` 填 `app.py`。
 4. 在应用后台 `Settings → Secrets` 粘贴 `.streamlit/secrets.toml` 同内容（不要提交真实 secrets 到 Git）。
