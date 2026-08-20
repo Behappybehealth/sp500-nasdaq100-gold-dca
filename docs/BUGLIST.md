@@ -29,22 +29,22 @@
 
 | 指标 | 数值 |
 |---|---:|
-| **登记问题总数** | **32** |
-| ✅ 已修复并验证 | **26** |
+| **登记问题总数** | **33** |
+| ✅ 已修复并验证 | **27** |
 | 🟡 已确认待修 | **0** |
-| 🟠 修复中 | **1** |
-| 🔴 待 1 对 1 确认 | **3** |
+| 🟠 修复中 | **0** |
+| 🔴 待 1 对 1 确认 | **4** |
 | ⚪ 判定不修 | 2 |
-| **修复率** | **81.3 %**（26 / 32） |
+| **修复率** | **81.8 %**（27 / 33） |
 
 ## 按等级分布
 
 | 等级 | 判据 | 总数 | ✅已修 | 🟠修复中 | 🔴待确认 | ⚪不修 | 完成度 |
 |---|---|---:|---:|---:|---:|---:|---:|
 | **P0** | 数据会丢/会串号，或鉴权会失效。**不需要外部触发** | 5 | 5 | 0 | 0 | 0 | 100 % |
-| **P1** | 会给出错误的钱数，或让部署/运维在关键时刻失败 | 12 | 11 | 1 | 0 | 0 | 91.7 % |
-| **P2** | 长期负债，不会立刻出事但会持续加重 | 15 | 10 | 0 | 3 | 2 | 66.7 % |
-| **合计** | | **32** | **26** | **1** | **3** | **2** | **81.3 %** |
+| **P1** | 会给出错误的钱数，或让部署/运维在关键时刻失败 | 12 | 12 | 0 | 0 | 0 | 100 % |
+| **P2** | 长期负债，不会立刻出事但会持续加重 | 16 | 10 | 0 | 4 | 2 | 62.5 % |
+| **合计** | | **33** | **27** | **0** | **4** | **2** | **81.8 %** |
 
 ## 按日期的修复记录
 
@@ -53,8 +53,8 @@
 | **2026-08-17** | **26** | **4** | `BUG-005` `BUG-012` `BUG-013` `BUG-014` | 全量审计建册；删掉从未跑通的 Docker 那套，一个动作连带解决 4 条 |
 | **2026-08-18** | **1** | **10** | `BUG-001` `BUG-002` `BUG-003` `BUG-004` `BUG-020` `BUG-021` `BUG-022` `BUG-023` `BUG-025` `BUG-026` | P0 清舱：门闸 fail-closed、缓存与落盘按用户隔离、读失败不再伪装空表、PIN 升级 PBKDF2+锁定；同日关掉文档双副本与隐私假话、清扫死代码与孤儿行情文件、Tab5 硬编码数据出库；app.py 拆分 7/7 刀落地（1984→78 行）、新增 dca_action.py 打通 Skill/Web 业务层；A2 施工中新登记 `BUG-027`（云端 tab2 曲线读错账本路径） |
 | **2026-08-19** | **0** | **4** | `BUG-024` `BUG-027` `BUG-008` `BUG-009` | 引擎行情快照复用 + 金额输入 form 化，模型不再白跑第二遍；tab2 净值曲线按用户读账本（`tx_csv_for`），云端模式不再永远"暂无成交记录"；同日拍板 `BUG-016`（自有域名/TLS）与 `BUG-019`（Sheets OLTP 代价）判定不修（⚪），各附重开触发条件；**`BUG-008` 修复**：`biz_today()` 统一业务"今天"（Asia/Shanghai 固定 UTC+8，引擎/UI 双实现互指）+ 写入 `(user,date,asset,action)` 去重（UI 显式确认 `force=True` 放行）+ 坏日期三处拒收（records/dca_action/引擎 `invalid_transactions`）；**`BUG-009` 修复**：汇率改唯一实时源（7.20/1.0/6.73 三个写死常量清零）+ `fx_last.json` 上次成功值兜底 + `fx` 三件套（value/live/as_of）三态展示 + 估值层 None 守卫（置空不编数，决策金额不受影响） |
-| **2026-08-20** | **5** | **8** | `BUG-006` `BUG-007` `BUG-010` `BUG-011` `BUG-028` `BUG-029` `BUG-030` `BUG-031` | 抓价链一次重做（一条链上的四个洞，分开修等于把同一段代码改四遍）：**`BUG-006`** 落库三道闸（剔 `date >= UTC 今天` 的盘中价 + 行数不减拒写 + temp/`os.replace` 原子写，±20% 跳变只 warning 不拦），新增 `utc_today()` 与业务 `biz_today()` 分工，bar 日期改按 UTC 解释（连带修：原按本机时区，负偏移机器上 XAUT 会错位一天；10y×6 标的 15,146 点比对零差异 → 存量零重建）；**`BUG-007`** yfinance 兜底 `auto_adjust=False` 统一 raw，"兜底不落库"升级为可断言不变量；**`BUG-010`** 7 天陈旧闸（超限则金额归零 + `decision.degraded/freshness`，只展示持仓）+ 空响应算异常 + cache 分支补 yfinance 兜底 + `fetch_json` 3 次退避重试，`cache_warning`/`persist_warnings` 双通道语义分离（连带修：sidebar 原按 `data_source` 前缀判正常会静默漏判新降级路径，改语义判断）；**`BUG-011`** 8 请求（6 标的 + 2 汇率）同波并发，总耗时从求和变取最大值（实测 1.5s，串行最坏 160s 紧贴 subprocess 180s）。**同日新登记 4 条**：`BUG-010` 的 7 天闸经用户复核后判定判据错位（判 bar 日期而非实时价新鲜度），顺此展开的实测把"价格存储只有定稿一种状态"这条设计缺口挖出来 —— `BUG-028`（闸判错对象）/ `BUG-029`（当日实时价无持久落点、评分混合口径）/ `BUG-030`（`close: null` 空洞永久化）/ `BUG-031`（落库即定稿不成立，XAUT 08-17 被事后改写 +0.83%），四条当日全部完成 1 对 1 确认**并同日修复**：**`BUG-028`** 闸改主副两道（主闸判本次有没有拿到实时价 `latest_source != "quote"`，副闸 K 线落后 > 10 天兜底死标的），`latest` 静默用旧收盘价冒充实时价的洞显式标出（新增 `latest_source` / `quote_time`），UI 侧 `_not_live()` 与降级横幅同期跟进；**`BUG-029`** 新增第二个落点 `data/market_live.json` 收当日未收盘 bar，加载时 `merge_live_bars` 合并且 **csv 优先**——定稿值一落库自动顶掉临时值，六个评分分量口径统一（修前只有 3 个含当日价）；**`BUG-030` / `BUG-031`** 同一个动作——每次回退 5 天重抓（`_REFETCH_LOOKBACK_DAYS`，请求数不变），修复后首跑即抓到真实闭环证据：GC=F 补上 `08-19` 空洞、`08-13` 被数据源从 4447.60 追平到 4363.60。**当日另新登记 `BUG-032`**（`session_state` 隐式全局状态池：11 键 60 处裸字符串、`synced` 跨两模块共管生命周期），由 CLAUDE.md「已知技术债」表收编入册——该表同期改为指针，问题清单不再双源 |
-| 累计 | 32 | 26 | | |
+| **2026-08-20** | **6** | **9** | `BUG-006` `BUG-007` `BUG-010` `BUG-011` `BUG-015` `BUG-028` `BUG-029` `BUG-030` `BUG-031` | BUG-015 补齐依赖双清单、全离线三层回归、push-main CI 与可重跑归档脚本；抓价链一次重做（一条链上的四个洞，分开修等于把同一段代码改四遍）：**`BUG-006`** 落库三道闸（剔 `date >= UTC 今天` 的盘中价 + 行数不减拒写 + temp/`os.replace` 原子写，±20% 跳变只 warning 不拦），新增 `utc_today()` 与业务 `biz_today()` 分工，bar 日期改按 UTC 解释（连带修：原按本机时区，负偏移机器上 XAUT 会错位一天；10y×6 标的 15,146 点比对零差异 → 存量零重建）；**`BUG-007`** yfinance 兜底 `auto_adjust=False` 统一 raw，"兜底不落库"升级为可断言不变量；**`BUG-010`** 7 天陈旧闸（超限则金额归零 + `decision.degraded/freshness`，只展示持仓）+ 空响应算异常 + cache 分支补 yfinance 兜底 + `fetch_json` 3 次退避重试，`cache_warning`/`persist_warnings` 双通道语义分离（连带修：sidebar 原按 `data_source` 前缀判正常会静默漏判新降级路径，改语义判断）；**`BUG-011`** 8 请求（6 标的 + 2 汇率）同波并发，总耗时从求和变取最大值（实测 1.5s，串行最坏 160s 紧贴 subprocess 180s）。**同日新登记 4 条**：`BUG-010` 的 7 天闸经用户复核后判定判据错位（判 bar 日期而非实时价新鲜度），顺此展开的实测把"价格存储只有定稿一种状态"这条设计缺口挖出来 —— `BUG-028`（闸判错对象）/ `BUG-029`（当日实时价无持久落点、评分混合口径）/ `BUG-030`（`close: null` 空洞永久化）/ `BUG-031`（落库即定稿不成立，XAUT 08-17 被事后改写 +0.83%），四条当日全部完成 1 对 1 确认**并同日修复**：**`BUG-028`** 闸改主副两道（主闸判本次有没有拿到实时价 `latest_source != "quote"`，副闸 K 线落后 > 10 天兜底死标的），`latest` 静默用旧收盘价冒充实时价的洞显式标出（新增 `latest_source` / `quote_time`），UI 侧 `_not_live()` 与降级横幅同期跟进；**`BUG-029`** 新增第二个落点 `data/market_live.json` 收当日未收盘 bar，加载时 `merge_live_bars` 合并且 **csv 优先**——定稿值一落库自动顶掉临时值，六个评分分量口径统一（修前只有 3 个含当日价）；**`BUG-030` / `BUG-031`** 同一个动作——每次回退 5 天重抓（`_REFETCH_LOOKBACK_DAYS`，请求数不变），修复后首跑即抓到真实闭环证据：GC=F 补上 `08-19` 空洞、`08-13` 被数据源从 4447.60 追平到 4363.60。**当日另新登记 `BUG-032`**（`session_state` 隐式全局状态池：11 键 60 处裸字符串、`synced` 跨两模块共管生命周期），由 CLAUDE.md「已知技术债」表收编入册——该表同期改为指针，问题清单不再双源；BUG-015 测试首跑另暴露 `BUG-033`（极端评分下最终归一化把权重轻微推出配置边界），只登记不夹带修复 |
+| 累计 | 33 | 27 | | |
 
 ## 🔗 连带修复追溯
 
@@ -89,7 +89,7 @@
 | [BUG-012](#bug-012docker-那套从来没跑通过一次却被标唯一事实源) | P1 | ✅ | Docker 死物被标"唯一事实源" | git 零迭代 |
 | [BUG-013](#bug-013两套多用户实现互相抵消) | P1 | ✅ | 两套多用户实现互相抵消 | 已删 |
 | [BUG-014](#bug-014加一个用户会炸掉所有用户) | P1 | ✅ | 加一个用户炸掉所有用户 | 旧 setup_user.sh:90 |
-| [BUG-015](#bug-015零测试零-ci依赖不钉版本回测脚本全是坏的) | P1 | 🟠 | 零测试零 CI + 回测脚本坏死 | 无 tests/ 无 .github/ |
+| [BUG-015](#bug-015零测试零-ci依赖不钉版本回测脚本全是坏的) | P1 | ✅ | 零测试零 CI + 回测脚本坏死 | 无 tests/ 无 .github/ |
 | [BUG-016](#bug-016零-tls无自有域名) | P2 | ⚪ | 零 TLS、无自有域名 | 平台子域 |
 | [BUG-017](#bug-017可观测性全空线上炸了只能等人告诉你) | P2 | 🔴 | 可观测性全空 | logging 零命中 |
 | [BUG-018](#bug-018事实源没有项目级可恢复备份) | P2 | 🔴 | 事实源没有项目级可恢复备份 | 无自动导出 / 保留周期 / 恢复演练 |
@@ -107,6 +107,7 @@
 | [BUG-030](#bug-030close-为-null-的日-bar-被丢弃且空洞会永久化) | P2 | ✅ | `close: null` 空洞会永久化 | GC=F / XAUT 的 08-19 bar close 为 null |
 | [BUG-031](#bug-031落库即定稿不成立数据源会事后回填修正) | P2 | ✅ | 落库即定稿不成立，值会被事后改写 | XAUT 08-17：4362.37 → 4398.65 |
 | [BUG-032](#bug-032session_state-是隐式全局状态池键的归属与生命周期无单一记录处) | P2 | 🔴 | `session_state` 隐式全局状态池 | 11 键 / 60 处裸字符串；`synced` 跨两模块共管 |
+| [BUG-033](#bug-033极端评分下最终权重会轻微越过配置边界) | P2 | 🔴 | 最终权重轻微越过配置边界 | sp500=0.19979818 < min_weight=0.2 |
 
 ---
 
@@ -1174,7 +1175,7 @@ wide_table_markdown 非空 ✅   warnings 数量 = 0 ✅   stderr 为空 ✅
 
 | 等级 | 状态 | 发现日期 | 确认日期 | 修复日期 | 主要证据 |
 |---|---|---|---|---|---|
-| **P1** | 🟠 **修复中** | 2026-08-17 | 2026-08-20 | — | 无 tests/ 无 .github/；[requirements.txt](../requirements.txt) 全 `>=`；`backtest_dca.py:12-17` |
+| **P1** | ✅ **已验证** | 2026-08-17 | 2026-08-20 | 2026-08-20 | 无 tests/ 无 .github/；[requirements.txt](../requirements.txt) 全 `>=`；`backtest_dca.py:12-17` |
 
 - **① 现象**：无测试目录、无 CI、依赖全是无上界 `>=`（本地实装 streamlit 1.61.1 vs 声明 `>=1.32.0`，可复现性为零）；唯一的回归载体 backtest/ 三个脚本硬编码了已失效的绝对路径（`C:\Users\...\.claude\skills\...`），现在直接跑不起来——还违反 CLAUDE.md 自己写的"全项目零绝对路径"。
 - **② 原理**：这三个脚本还自己重写了决策链（部署系数、月度池、月末释放），即使修好路径也测不到线上真跑的 `build_decision` + `monthly_budget_status`；且 `main()` 必然联网、必然写缓存、输出嵌 `date.today()`，没有"固定输入→固定输出"的可重复入口。
@@ -1198,11 +1199,24 @@ wide_table_markdown 非空 ✅   warnings 数量 = 0 ✅   stderr 为空 ✅
 
 #### 🔧 实际修复
 
-> 待施工后回填。
+> **2026-08-20 按四项确认路径施工**：
+> 1. **依赖两份分工**：`requirements.txt` 的 6 个 Cloud 直接依赖全部补大版本上界；新增 `requirements-dev.lock`，完整记录 Windows/Python 3.14.4 开发机的 `pip freeze`（含 pytest 9.1.1 与全部间接依赖）。Cloud 继续装范围文件，不强塞 Windows lock。
+> 2. **push-main CI**：新增 `.github/workflows/ci.yml`。只在 push `main` 时触发，符合“无 PR 流程”的拍板；两条互补腿分别是 Windows/Python 3.14 安装精确 lock（验证开发机组合可复现）与 Linux/Python 3.12 安装 `requirements.txt`（验证 Cloud 入口仍可解析）。测试阶段不读 secrets、不抓行情、不连 Sheets；远端工作流尚未提交/推送，故这里只记录配置落地，不冒充 Actions 已绿。
+> 3. **三层离线回归**：新增 `pytest.ini`（`testpaths=tests`，归档回测不参与收集）与 `tests/`：`test_engine.py` 罩 7 个纯函数及边界分支；`test_storage.py` 罩本地写入去重/PBKDF2/Sheets 读失败拒写与写前快照；`test_smoke.py` 用 `AppTest` 跑完整 app 六个 tab。所有 fixture 均为虚构数据；storage 与 AppTest 每条路径都显式 patch `sheets_enabled` 或强制 local，避免本机真实 `secrets.toml` 让测试误连生产表。
+> 4. **离线从「靠自觉」升级为「套件强制」**：`tests/conftest.py` 增 autouse 的 `_deny_network`，把四条出网路径一并堵死（`socket.connect` / `connect_ex` / `getaddrinfo` / `subprocess.Popen`），命中即抛 `NetworkUseInTests`；回环放行，否则 Windows 上 asyncio 的 `socketpair` 自管道会把 `AppTest` 一起打死。新增 `tests/test_offline_guard.py` 反过来罩住守卫本身（urllib 直连 / DNS / 裸 socket / curl 子进程四个口各一条，另加回环放行与异常类型），守卫哪天退化成空壳，这个文件先红——修前只有各用例自己 patch 调用点，漏一处或新增调用点就会静默出网。
+> 5. **冒烟边界按确认记录收口**：AppTest patch 的是 `src.ui.sidebar.run_model`，不启动联网子进程；虚构行情/汇率输入仍经真实 `metrics_from_closes` / `monthly_budget_status` / `build_decision` 等纯函数生成合法结果。另用 AST 读取引擎最终 result 字面量，断言 fixture 顶层键与真实输出契约一致。它验证“UI 能完整消费合法 JSON”，不声称覆盖 subprocess/标准输出解析接线。取键范围收窄到 `main()` 函数体内并对 `result.update()` 加断言拦截：引擎里 `fetch_chart` 那几处也把返回值叫 `result`（:504 / :530 / :637 / :649），全模块 walk 会把它们算进契约（当前右侧都是 `Call` 故键集未受污染，属潜伏而非已发病），且 `update()` 形态会被漏读。
+> 6. **归档回测去绝对路径**：`backtest_dca.py` / `backtest_single.py` / `backtest_compare3.py` 均改为从 `Path(__file__)` 推导仓库根与输出目录，文件头明确“一次性归档脚本、非回归载体、重跑会覆盖冻结 JSON”。`pytest.ini` 把收集边界钉在 `tests/`，避免脚本顶层执行被误当测试。
+> 7. **施工首跑发现但不夹带修复**：`score_based_weights()` 极端输入下最终归一化会把 `sp500` 推到 `0.19979818`（配置下界 `0.2`）。测试按现状给 `0.01` 容差并将缺陷另立 `BUG-033`；未经该条 1 对 1 确认，不改真实计算逻辑。
 
 #### ✔️ 验证结果
 
-> 待验证后回填。
+> **2026-08-20 本地验证通过**（Windows/Python 3.14.4）：
+> - `.venv/Scripts/python.exe -m pytest`：**98 passed / 16.50s**，完整三层套件全绿（守卫落地前基线 90 passed / 17.09s，+8 条即守卫自测）。离线不再靠临时守卫复跑证明——`_deny_network` 已是套件内 autouse 夹具，`tests/test_offline_guard.py` 实测五个出网口（urllib 直连 / DNS / 裸 socket / `create_connection` / curl 子进程）全部当场抛 `NetworkUseInTests`，且回环既放行又能真连（守卫的回环分支必须转给原函数，不能只是"不抛"）。
+> - storage/整页冒烟真实数据隔离：跑前后 `transactions.csv` / `observations.csv` 字节不变，`data/market_history/` 文件数与内容不变，`git diff -- data/` 为空；未访问真实 Google Sheets。
+> - 依赖：本机 `pip check` 通过；模拟 CPython 3.12/Linux wheel 标签对 `requirements.txt` 做 pip dry-run 解析退出 0。精确 lock 由当前 Windows/Python 3.14.4 已安装且全测通过的环境 freeze 得到；远端两平台 Actions 要等本 commit 后续 push 才能首次执行，不能在此提前写“CI 已绿”。
+> - 三个归档脚本均 `py_compile` 通过且本机退出码 0；`backtest_single.py` 与 `backtest_compare3.py` 的重跑 JSON 与冻结产物逐字节一致。
+> - **如实记录第三份差异**：`backtest_dca.py` 可重跑但新 `results.json` 与冻结文件数值不同；脚本除路径/归档说明外未改计算，相关引擎函数、config 与仓库内截至回测截止日的 6 份行情均未变，且本次重跑的 dynamic 示例与同数据口径的 `results_compare3.json` 一致。最可信解释是冻结 `results.json` 当年由仓库外另一份行情快照生成，旧目录现已不存在，无法重建精确 provenance。该差异不冒充 byte-identical；冻结原文件已恢复、工作区干净。路径修复本身不改变计算链。
+> - 全仓项目绝对路径扫描零代码命中；三个冻结 JSON 与真实行情/账本均已恢复并保持未修改。
 
 ---
 

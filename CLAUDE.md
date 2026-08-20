@@ -49,7 +49,10 @@
 - **ngrok 固定域名**：本机临时外发；`deploy/start-dca-tunnel.bat` 只能写 ASCII
 
 **工程工具**
-- **ruff** 格式化（无 CI 强制）；**git** + GitHub 私有仓库
+- **pytest 9.1.1**：回归套件只收 `tests/`，离线由 `conftest` 里 autouse 的 `_deny_network` 强制（socket/DNS/子进程四口全拦、回环放行），不靠各用例自觉；Streamlit 整页冒烟用 `streamlit.testing.v1.AppTest`
+- **GitHub Actions**：push `main` 自动跑两条腿——Windows/Python 3.14 安装精确 lock，Linux/Python 3.12 安装 Cloud 范围文件；不依赖 secrets
+- **依赖两份分工**：`requirements.txt` 是 Cloud 可安装范围（全部有上界），`requirements-dev.lock` 是 Windows/Python 3.14 开发机全量精确锁定
+- **ruff** 仅作格式化、未进 CI 强制；**git** + GitHub 私有仓库
 ---
 
 ## 目录结构
@@ -64,6 +67,11 @@ sp500-nasdaq100-gold-dca/
 │   ├── services/             # 服务层：model.py 模型调用（45）/ quotes.py 行情抓取（87）/ curves.py 曲线数据（102）
 │   ├── ui/                   # 样式/遮罩/侧栏/认证：styles.py 全局 CSS（185）/ overlays.py 三遮罩（59）/ sidebar.py 侧栏（329，返回 Decision）/ auth.py 认证门闸（328，require_user()）
 │   └── tabs/                 # 六个 tab 渲染：today(100)/holdings(78)/records(182，记账写链)/history(26)/backtest(249)/strategy_doc(18)，各暴露 render(tab, ...)
+├── requirements.txt          # Cloud/Linux 可安装范围（每个直接依赖都有上界）
+├── requirements-dev.lock     # Windows/Python 3.14 开发机完整 pip freeze（精确锁定）
+├── pytest.ini                # pytest 只收 tests/，不扫描归档回测脚本
+├── tests/                    # 全离线回归：引擎纯函数 / storage 安全路径 / AppTest 整页冒烟 / 拒网守卫自测（conftest 内 autouse 兜底拦网）
+├── .github/workflows/ci.yml  # push main 自动跑 Windows 3.14 lock + Linux 3.12 Cloud 范围
 ├── CHANGELOG.md              # 改动日志：每个 commit 一行带时刻（人读版流水，见第 12 条；scripts/changelog.py 维护）
 ├── start-app.bat             # 本机双击启动 Streamlit
 ├── logs/                     # 运行日志约定落点（*.log 不入库；Cloud 容器重启即失，运行日志尚未实现）
@@ -82,9 +90,9 @@ sp500-nasdaq100-gold-dca/
 │   └── market_history/       # 已收盘定稿收盘价（date,close 两列，增量更新+回退 5 天重抓，6 个 csv）
 ├── strategy/
 │   └── core-strategy.md      # 策略说明唯一事实源（Tab6 启动时读它渲染，改文档即改页面）
-├── backtest/                 # 一次性回测脚本 + 结果（2026-08-11 跑完，非运行时依赖）
-│   ├── backtest_dca.py / backtest_single.py / backtest_compare3.py  # ⚠️ 硬编码旧绝对路径，现在跑不起来
-│   └── results*.json / results.md / compare3.md   # Tab5「回测结果」读这里
+├── backtest/                 # 一次性回测脚本 + 冻结结果（2026-08-11 跑完，非运行时依赖）
+│   ├── backtest_dca.py / backtest_single.py / backtest_compare3.py  # 归档脚本；相对定位可重跑，但不作回归载体
+│   └── results*.json / results.md / compare3.md   # 冻结产物；Tab5「回测结果」读这里
 ├── docs/
 │   ├── README.md             # 文档门户：全部说明文件的索引（活/冻标注、读者、更新时机）
 │   ├── ARCHITECTURE.md       # 顶层架构唯一事实源（概要版，仅顶层变动同期更新）
@@ -138,6 +146,9 @@ app.py（UI + 业务逻辑，耦合较紧）
 cd X:/coding/projects/sp500-nasdaq100-gold-dca
 .venv/Scripts/streamlit run app.py
 
+# 跑全量离线回归（不得抓 Yahoo / 东财，不得连接真实 Google Sheets）
+.venv/Scripts/python.exe -m pytest
+
 # 单跑计算引擎（不带 --amount 则自动决定金额）
 .venv/Scripts/python.exe scripts/dca_calculator.py --base-dir .
 .venv/Scripts/python.exe scripts/dca_calculator.py --amount 5000 --base-dir .
@@ -156,11 +167,12 @@ cd X:/coding/projects/sp500-nasdaq100-gold-dca
 5. **数据文件不入库**（transactions / observations / budget_overrides / secrets），改动它们不需要 commit。
 6. **`deploy/bin/` 不入库但必须留在项目内**，隧道脚本靠 `%~dp0bin\ngrok.exe` 相对定位找它。
 7. **`deploy/start-dca-tunnel.bat` 只能写 ASCII**——cmd 按 OEM 码页（936）读批处理，UTF-8 中文注释会被当乱码命令执行。中文说明写进 `deploy/DEPLOY.md`。
-8. **全项目零绝对路径**，保持这个性质，搬目录才不会断。（⚠️ `backtest/*.py` 三个脚本目前违反这条，写死了已失效的 `~/.claude/skills/...`，待修）
+8. **全项目零绝对路径**，保持这个性质，搬目录才不会断。归档回测脚本也必须用 `Path(__file__)` 相对定位。
 9. **提交信息用 Conventional Commits**（`feat:` / `fix:` / `refactor:` / `chore:`）。
 10. **动手前先读 `docs/ARCHITECTURE.md` 与 `docs/BUGLIST.md`** —— 前者是顶层架构唯一事实源（改实现细节另读 `docs/ARCHITECTURE-DETAIL.md`），后者是问题唯一事实源。`BUGLIST.md` 中每条问题必须先完成“1 对 1 确认修复路径”并回填确认记录，才允许修改真实逻辑；修复后必须回填实际改动、修复日期和真实验证结果。
-11. **行为变更的 commit 必须同期核对相关活文档** —— 活/冻清单见 `docs/README.md`（文档门户）。活文档头部标 `【活·更新时机：…】`，冻文档（`docs/plans/`、`backtest/`）标 `【冻】`、只增不改、不回改。
+11. **行为变更的 commit 必须同期核对相关活文档** —— 活/冻清单见 `docs/README.md`（文档门户）。活文档头部标 `【活·更新时机：…】`；`docs/plans/` 与 `backtest/` 的结果/报告是冻结产物，只增不回改。归档 `.py` 脚本允许做不改变历史结果含义的可移植性维护。
 12. **每个 commit 同期在 `CHANGELOG.md` 追加一行**（`HH:MM:SS [类型] 一句话（hash；关联编号）`，按日期分组新在上、组内按时刻新在上）——这是全量改动的人读版流水；架构级变更另记 ARCHITECTURE 变更记录、问题生命周期另记 BUGLIST，三处粒度不同不重复。**时刻取自 git commit 时间，不手写**：`.venv/Scripts/python.exe scripts/changelog.py add <hash>` 生成行草稿，收尾跑 `--check` 校验每个 commit 都有行且时刻正确（手滑漏行/错时刻会被它拦下）。尾随约定：commit 自身那行由下一个 commit 携带入库。
+13. **测试必须离线且用虚构数据。** 测试不得访问 Yahoo / 东财 / Google Sheets，不得把真实持仓或成本写进 fixture；storage 与 AppTest 每条路径都要显式 patch `sheets_enabled` 或强制 local，防本机真实 `secrets.toml` 被 pytest 读到后误写生产表。`conftest` 的 `_deny_network` 是兜底不是替代——它抓的是漏 patch，命中即 `NetworkUseInTests`；改守卫必须同步跑 `tests/test_offline_guard.py`。
 
 ---
 

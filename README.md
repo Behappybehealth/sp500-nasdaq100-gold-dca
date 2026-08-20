@@ -12,6 +12,12 @@
 
 （本机已配 secrets 则照常登录；无凭据的机器需 `DCA_AUTH_MODE=local` 才会进单机模式，见部署指南 §3。）
 
+全量回归完全离线，不需要云端凭据：
+
+```bash
+.venv/Scripts/python.exe -m pytest
+```
+
 备用公网入口（本机常开时）：
 
 ```bash
@@ -40,6 +46,10 @@ deploy/start-dca-tunnel.bat
 - `app.py`：Streamlit 主应用。
 - `storage.py`：Google Sheets 优先、本地 CSV 回退的存储层。
 - `scripts/dca_calculator.py`：策略/行情计算引擎。
+- `tests/` + `pytest.ini`：引擎纯函数、storage 安全路径与 Streamlit 整页冒烟；只收离线虚构数据。
+- `requirements.txt`：Streamlit Cloud 可安装范围；`requirements-dev.lock`：Windows/Python 3.14 开发机完整精确锁定。
+- `.github/workflows/ci.yml`：push `main` 后自动跑 Windows 3.14 锁定环境与 Linux 3.12 Cloud 范围环境。
+- `backtest/*.py`：可相对定位重跑的归档脚本，不作回归载体；`backtest/results*` 是 Tab5 使用的冻结产物。
 - `data/config.json`：默认资产配置，需要入库。
 - `data/market_history/*.csv`：行情缓存，需要入库以避免首次部署冷启动过慢。
 - `data/transactions.csv`、`data/observations.csv`、`data/budget_overrides.json`：单机模式的本地用户数据，不入库；云端模式每用户落盘缓存在 `data/users/<用户>/`（同样不入库）。

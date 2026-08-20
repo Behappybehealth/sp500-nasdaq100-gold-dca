@@ -41,9 +41,11 @@
 | 部署（生产） | **Streamlit Community Cloud** | 推送到 GitHub main 分支自动重新部署 |
 | 临时外发 | ngrok 固定域名 | 本机开着时把 8501 端口发到公网 |
 | 版本控制 | git + GitHub 私有仓库 | `Behappybehealth/sp500-nasdaq100-gold-dca` |
-| 代码格式 | ruff | 有格式化痕迹，但**没有强制检查**（无 CI） |
+| 回归测试 | pytest 9.1.1 + Streamlit AppTest | 三层全离线回归：引擎纯函数 / storage 安全路径 / 整页渲染冒烟；离线由 autouse 拒网守卫强制并自测 |
+| 持续集成 | GitHub Actions | push `main` 自动跑 Windows/Python 3.14 精确锁定环境 + Linux/Python 3.12 Cloud 范围环境；不读取 secrets |
+| 代码格式 | ruff | 有格式化痕迹，但**未进 CI 强制** |
 
-（版本复核于 2026-08-18，与本机实装一致）
+（版本复核于 2026-08-20；本机实装与精确版本见 `requirements-dev.lock`）
 
 ## 3. 核心架构：三层 + 一个边界
 
@@ -205,7 +207,11 @@ tab4（26 行）是这条链的读侧，业务上和 tab3 是一件事。
 | `app.py` | 66 | Streamlit 主程序，**纯装配层**：import → build_paths → storage.init → 认证一行 → 侧栏一行 → 6 个 tab render 调用 | Streamlit 直接执行 | ✅ |
 | `src/` | 1893 | **业务层**（app.py 只留装配）：`context.py`（73，启动上下文 `Paths`/`Decision`/`build_paths`）+ `dates.py`（20，业务"今天"唯一定义 `biz_today()`，Asia/Shanghai 固定 UTC+8，与引擎同规则双实现）+ `services/`（`model.py` 45 模型调用 / `quotes.py` 87 行情抓取 / `curves.py` 102 曲线数据）+ `ui/`（`styles.py` 185 全局 CSS / `overlays.py` 59 三遮罩 / `sidebar.py` 329 侧栏，返回 `Decision` / `auth.py` 328 认证门闸，`require_user()`）+ `tabs/`（`today.py` 100 / `holdings.py` 78 / `records.py` 182 / `history.py` 26 / `backtest.py` 249 / `strategy_doc.py` 18，各暴露 `render(tab, ...)` 显式收参）；不读 app.py 模块级全局 | `app.py` import | ✅ |
 | `storage.py` | 612 | 存储层。所有 Google Sheets 读写都走它（含写前快照、PBKDF2 认证、成交同日同资产同方向去重，`force=True` 显式放行）；19 个公开接口明细见详设 §9 | `app.py` import | ✅ |
-| `requirements.txt` | 6 | 依赖清单。只约束包版本且几乎全无上界 | Cloud 装依赖时 | ✅ |
+| `requirements.txt` | 16 | **Cloud/Linux 可安装范围**：6 个直接依赖都有下界与大版本上界，不强钉本机 Windows wheel | Streamlit Cloud + CI Linux/Python 3.12 腿 | ✅ |
+| `requirements-dev.lock` | 83 | **Windows/Python 3.14 开发机精确锁定**：完整 `pip freeze`，含 pytest 与全部间接依赖 | 本机复现 + CI Windows/Python 3.14 腿 | ✅ |
+| `pytest.ini` | 7 | pytest 只收 `tests/`，不把归档回测脚本当测试收集 | pytest | ✅ |
+| `tests/` | — | 全离线回归：引擎纯函数、storage 本地/Sheets 安全路径、Streamlit AppTest 整页冒烟、拒网守卫自测；离线由 `conftest` autouse 守卫强制，fixture 全虚构 | pytest / CI | ✅ |
+| `.github/workflows/ci.yml` | — | push `main` 自动跑两条 pytest 腿；无 secrets、无行情网络依赖 | GitHub Actions | ✅ |
 | `CHANGELOG.md` | — | **全量改动的人读版流水**：每 commit 一行带 `HH:MM:SS` 时刻（取自 git），由 `scripts/changelog.py` 生成/校验 | 人 | ✅ |
 | `start-app.bat` | — | 本机双击启动 | 你 | ✅ |
 | `CLAUDE.md` | — | 给 AI 编程助手的项目说明 | AI 助手 | ✅ |
@@ -240,11 +246,11 @@ tab4（26 行）是这条链的读侧，业务上和 tab3 是一件事。
 
 | 路径 | 说明 |
 |---|---|
-| `backtest_dca.py` / `backtest_single.py` / `backtest_compare3.py` | 回测脚本。⚠️ 全部写死旧绝对路径 `C:\Users\xiezhibo\.claude\skills\...`，现在跑不起来 |
-| `results_compare3.json` | Tab5 第一段读它（三策略对比） |
-| `results_single_compare.json` | Tab5 第三段读它（单品种动态 vs 固定） |
-| `results_rolling.json` | Tab5 第三段四张滚动表 + 第四段横向对比读它（从 app.py 硬编码无损导出，33 行 × 338 格与原字面量逐格相等） |
-| `results.json` / `results_single.json` / `results.md` / `compare3.md` | 中间产物与文字报告，应用不读 |
+| `backtest_dca.py` / `backtest_single.py` / `backtest_compare3.py` | **归档的一次性脚本**：均按 `__file__` 相对定位，可随仓库搬移后重跑；各自重写了历史决策链，故不作回归测试载体。重跑会覆盖邻接 JSON，须先复制留底 |
+| `results_compare3.json` | **冻结产物**；Tab5 第一段读它（三策略对比） |
+| `results_single_compare.json` | **冻结产物**；Tab5 第三段读它（单品种动态 vs 固定） |
+| `results_rolling.json` | **冻结产物**；Tab5 第三段四张滚动表 + 第四段横向对比读它（从 app.py 硬编码无损导出，33 行 × 338 格与原字面量逐格相等） |
+| `results.json` / `results_single.json` / `results.md` / `compare3.md` | 冻结的中间产物与文字报告，应用不读 |
 
 ### 9.5 `strategy/` — 策略文档
 
@@ -337,4 +343,5 @@ tab4（26 行）是这条链的读侧，业务上和 tab3 是一件事。
 | 2026-08-18 | **BUG-022 修复：新增 `scripts/dca_action.py`（187 行）业务动作 CLI**，Skill 入口经 `record tx` / `record obs` / `override` 子命令与 Web 共用 storage 业务层；shares 可按金额自动换算，sheets 模式写后自动 `sync_local` 刷新落盘缓存 | 此前 Skill 绕过业务层直接调引擎，记账/预算覆盖两边口径分叉；现在写操作全部收口到同一 `storage.py`，双入口行为一致 |
 | 2026-08-19 | **BUG-024 修复：引擎行情快照复用 + 侧栏金额表单化**。`dca_calculator.py`（938→983 行）新增 `data/quote_snapshot.json`——抓价成功后落盘 markets 摘要 + 汇率，TTL 600 秒（`--snapshot-ttl` 可调，0 禁用；任一标的抓价失败当趟不落盘），TTL 内运行跳过重复抓价与缓存增量写（下次冷跑自动追平）；输出 JSON 第 16 个顶层键 `quote_snapshot`（used/age_s/ttl_s）。侧栏金额输入收进 `st.sidebar.form("amount_form")`，键入不再逐击触发整页重跑 | 「我想投 X」每次会话此前付两遍完整计算（含 8 个串行行情请求）；实测重跑趟 t2=0.31s 为冷跑 t1=2.72s 的 11.3%（BUGLIST 验收标准 <20%） |
 | 2026-08-20 | **BUG-006/007/010/011 修复：抓价链重做**。`dca_calculator.py`（1074→1229 行）抓取层由**串行改并发**（`fetch_history` 用 `ThreadPoolExecutor`，main 把 6 标的 + 2 汇率同波提交，单标的异常收成 `error` 条目不带走整批）+ `fetch_json` 3 次尝试 0.8s/1.6s 退避；落库改由 `save_cached_closes` 三道护栏把关（剔 `date >= utc_today()` 的盘中价 / 行数不减拒写 / temp+`os.replace` 原子写，±20% 跳变只 warning，无变化不碰文件），新增 `utc_today()` 与业务 `biz_today()` 分工；yfinance 兜底统一 `auto_adjust=False` 且明确不落库（落库口径单一由 Chart 路径负责）；新增 `market_freshness` 7 天陈旧闸——超限则 `decision.suggested_amount_rmb=0` + `decision.degraded/freshness`，只展示持仓不出金额（**挂在 decision 内，顶层键仍 18 个**）。UI 侧 sidebar 改按语义判行情正常（不再匹配 `data_source` 前缀）、tab1 加降级横幅 | 8 个行情请求串行、各 20s 超时零重试，最坏 160s 紧贴 subprocess 180s 上限（实测改后 1.5s）；落库是 `open("w")` 整文件截断重写、唯一校验只有 `close > 0`，盘中价直接入库且脏值永久冻结；两条抓取路径复权口径不一致（Chart raw vs yfinance adjusted）；Yahoo 挂三周仍照常出金额，增量抓取 `allow_empty=True` 让空响应静默算成功 |
+| 2026-08-20 | **BUG-015 工程安全网落地**：依赖拆成 Cloud/Linux 可安装范围 `requirements.txt` 与 Windows/Python 3.14 精确锁 `requirements-dev.lock`；新增只收 `tests/` 的 pytest 三层离线回归（引擎纯函数 / storage 安全路径 / AppTest 整页冒烟），离线改由 `conftest` 内 autouse 的 `_deny_network` 强制（socket/DNS/子进程四口全拦、回环放行）并由 `test_offline_guard.py` 反向罩住；GitHub Actions 在 push `main` 时分别验证 Windows 3.14 锁定环境与 Linux 3.12 Cloud 范围环境；三个一次性回测脚本去掉失效绝对路径并明确归档、不作回归载体 | 原项目零测试零 CI、依赖既不可复现又可能无界漂移，归档脚本还因旧路径无法运行；现在既验证开发机精确组合，也验证 Cloud 范围仍可安装，且 CI 全离线不受 Yahoo/Sheets 波动干扰。离线单靠各用例自觉 patch 是不可靠的——漏一处或新增抓取路径就静默出网，守卫把这条硬约束变成可执行的 |
 | 2026-08-20 | **BUG-028~031 修复：价格存储改「两个落点一条界线」+ 陈旧闸改判实时价**。`dca_calculator.py`（1229→1378 行）：① 新增 `data/market_live.json` 承接当日未收盘 bar（`load/save_market_live` + `split_live_bars` 只收 `date >= utc_today()` + `merge_live_bars` 加载时合并且 **csv 优先**），与 `save_cached_closes` 的剔除闸构成同一条界线的互补两侧——盘中看到的价有持久落点，收盘定稿值落库即自动顶掉临时值，无需清理逻辑；② 新鲜度闸判据从「bar 日期」改为「本次有没有拿到实时价」（新增 `latest_source: "quote" \| "last_close"`，主闸 `!= "quote"` 即降级；`_MAX_STALE_DAYS` 7→10 降级为兜底死标的的副闸）；③ 增量抓取 `period1` 回退 5 天（`_REFETCH_LOOKBACK_DAYS`），请求数不增而数据源的 null 空洞回填与错值修正自动追平。UI 侧 sidebar 新增 `_not_live()`（把 `latest_source` 标记显示出来，缺键保守视为非实时）、tab1 降级文案改取引擎 `freshness.reason` 不写死天数。**顶层键仍 18 个**；`freshness.per_symbol` 形状由 `{sym: int}` 扩为 `{sym: {stale_days, latest_source, quote_time}}` | 旧闸判的是"库里最后一根 K 线多老"，而决策实际用的是 `latest_price`——实测 GC=F 库内 08-18、实时价 08-20，闸放行却没人保证那个价是新的；拿不到实时价时 `latest = closes[-1]` **静默**用旧收盘价冒充，输出无任何标记。落库只收已收盘 K 线后，当日值在项目里**没有任何落点**（盘中记账拿不到自己看到的价）；`close=null` 的空洞与数据源事后修正因"只从库内最后一天往后抓"永久冻结。首跑即验证到真实案例：GC=F `08-13` 被修正 4447.60→4363.60、`08-19` 空洞补上，XAUT `08-13` 修正 + `08-16` 空洞补上 |

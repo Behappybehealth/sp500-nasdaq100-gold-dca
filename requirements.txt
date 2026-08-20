@@ -1,6 +1,15 @@
-streamlit>=1.32.0
-yfinance>=0.2.40
-pandas>=2.0.0
-numpy>=1.24.0
-st-gsheets-connection>=0.1.0
+# 云端可安装范围（Streamlit Community Cloud 装的是本文件）
+#
+# 为什么这里不钉 `==`：Cloud 的 Python 版本由平台选定、通常低于本机的 3.14，
+# 钉成本机实装版本可能找不到对应 wheel 直接部署失败。所以本文件只给"范围 + 上界"，
+# 复现开发机用另一份 requirements-dev.lock（全钉，见 BUG-015 确认记录）。
+#
+# 上界的作用：拦住上游大版本改动把线上打挂（pandas 2→3 就有不兼容改动）。
+# 下界是历史声明、并未实测——真正验证过的组合看 requirements-dev.lock。
+
+streamlit>=1.32.0,<2
+yfinance>=0.2.40,<2
+pandas>=2.0.0,<4
+numpy>=1.24.0,<3
+st-gsheets-connection>=0.1.0,<1
 gspread>=5.8.0,<6

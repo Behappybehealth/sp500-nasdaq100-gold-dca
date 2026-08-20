@@ -179,22 +179,34 @@ sidebar 判"行情全部正常"按语义（`src/ui/sidebar.py` 的 `_not_live()`
 
 ---
 
-## 5. 依赖声明与版本漂移
+## 5. 依赖声明、精确复现与 Cloud 可安装性
 
-`requirements.txt` 全 6 行，只约束包版本，且几乎全是无上界的 `>=`：
+依赖刻意分成两份，因为「复刻 Windows/Python 3.14 开发机」与「让 Streamlit Cloud 的 Linux/较低 Python 装得上」不是同一个目标：
 
-```
-streamlit>=1.32.0        本机实装 1.61.1
-yfinance>=0.2.40         本机实装 1.6.0
-pandas>=2.0.0            本机实装 3.0.5   ← 跨了一个大版本
-numpy>=1.24.0            本机实装 2.5.2
-st-gsheets-connection>=0.1.0   本机实装 0.1.0
-gspread>=5.8.0,<6        本机实装 5.12.4  ← 唯一有上界的
-```
+| 文件 | 约束 | 消费方 | 保证什么 |
+|---|---|---|---|
+| `requirements.txt` | 6 个直接依赖的范围；每项都有下界和大版本上界 | Streamlit Cloud + CI Linux/Python 3.12 腿 | Cloud 平台可解析出兼容 wheel，同时阻止未来大版本无界漂移 |
+| `requirements-dev.lock` | Windows/Python 3.14.4 的完整 `pip freeze`，直接/间接依赖全部 `==` | 本机开发 + CI Windows/Python 3.14 腿 | 精确复刻已验证开发组合 |
 
-无 lock 文件。**声明的和实装的差很远，等于没有可复现性** —— 上游一发版就可能把线上打挂；复刻环境时以 CLAUDE.md「技术栈」节的实装版本为准。
+Cloud 不装 lock：里面含 Windows 平台包，而且本机钉定版本未必为 Cloud 的 Python/Linux 提供 wheel。反过来，开发复现不能只装范围文件，否则今天和下周可能解析到不同的间接依赖。因此 CI 跑两条互补腿：Windows 3.14 安装 lock 验证精确组合，Linux 3.12 安装范围文件验证实际部署入口仍能解析；后者单独安装同版本 pytest（测试工具不是 Cloud 运行时依赖）。两条测试都完全离线运行，安装依赖本身当然仍需访问包仓库。
 
-（复核于 2026-08-19）
+变更 Python 或平台时的重建步骤：按 `requirements.txt` 新建干净 venv → 安装并跑全量测试 → 用该环境的 `python -m pip freeze` 覆盖 `requirements-dev.lock` → 再跑一次全量测试。不能在另一平台手工删改几行后仍称其为同一份精确 lock。
+
+（复核于 2026-08-20）
+
+### 5.1 离线测试边界
+
+`pytest.ini` 把收集范围固定为 `tests/`，避免 `backtest/*.py` 这类顶层即执行的一次性脚本被 pytest 误跑。测试分三层：
+
+1. `test_engine.py` 直接 import 独立引擎脚本，给纯函数固定输入并断言确定输出；不调用 `main()`，因此不抓行情、不写缓存。
+2. `test_storage.py` 分本地临时目录与内存假 Sheets 两路；每条路径都显式 patch `storage.sheets_enabled`。这不是多余防御：仓库本机存在真实 `.streamlit/secrets.toml`，若依赖“测试机通常没 secrets”，pytest 可能直接写生产表。
+3. `test_smoke.py` 用 `streamlit.testing.v1.AppTest` 完整执行 app 六个 tab，但 patch `src.ui.sidebar.run_model` 返回虚构结果、patch XAU/BTC 报价服务。虚构行情与汇率仍流过真实引擎纯函数，日期一律相对 `biz_today()` 生成；AST 再从 `dca_calculator.py` 的最终 result 字面量抽取顶层键，防 fixture 契约悄悄漂移。
+
+这条整页冒烟有明确边界：它证明“认证 local 路径、侧栏和六个 tab 能消费一份合法引擎 JSON”，**不证明** UI→subprocess→stdout JSON 的真实接线，也不证明外部行情 API 可用。后两者仍由手工启动/独立集成验证承担；把网络塞进 CI 会让 Yahoo 限流变成假红灯。fixture 只用虚构组合与成本数据，真实持仓不得入库。
+
+上面三层各自 patch 掉自己那几个调用点，但「离线」若只靠每个用例自觉，漏一处或将来新增一条抓取路径就会静默出网。因此 `conftest.py` 另设 autouse 的 `_deny_network` 作为兜底：`socket.connect` / `connect_ex` / `getaddrinfo` / `subprocess.Popen` 四个口一并拦，命中抛 `NetworkUseInTests`。堵四个而不是一个，是因为本项目出网路径互不相干——引擎 `urllib` 直连 Chart、yfinance 兜底、`curl` 子进程抓东财、gspread 连 Sheets，只拦 `urllib` 剩三条照样出去。回环必须放行：Windows 上 asyncio 用 `socketpair()` 做自管道，连它一起拦会把 `AppTest` 打死，那是自伤不是防护。守卫自身由 `test_offline_guard.py` 反向罩住（四个口各一条 + 回环放行 + 异常类型），否则它退化成空壳时套件仍会全绿。
+
+（复核于 2026-08-20）
 
 ---
 

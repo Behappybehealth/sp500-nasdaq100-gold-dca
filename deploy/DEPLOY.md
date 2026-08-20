@@ -18,7 +18,7 @@
 
 ## 2. Streamlit Community Cloud（生产）
 
-**部署机制：推 `main` 分支即自动重新部署。** 没有额外的构建步骤、没有 Dockerfile 参与。
+**部署机制：推 `main` 分支即自动重新部署。** 没有额外的构建步骤、没有 Dockerfile 参与。同一次 push 也会独立触发 GitHub Actions 离线测试；当前未配置为 Streamlit 部署的前置门禁，所以 CI 红灯不会自动阻止平台拉取部署，必须主动查看 Actions 结果。
 
 ```bash
 git push origin main
@@ -64,14 +64,16 @@ DCA_AUTH_MODE=local .venv/Scripts/streamlit run app.py
 
 单机模式不登录、数据只存本机 CSV，页面顶部有黄色警示条。
 
-单跑计算引擎（不起网页）：
+单跑计算引擎（不起网页）或全量回归：
 
 ```bash
 .venv/Scripts/python.exe scripts/dca_calculator.py --base-dir .
+.venv/Scripts/python.exe -m pytest
 ```
 
-**本机环境实况（2026-08-17 实测）**：Python 3.14.4 / streamlit 1.61.1 / pandas 3.0.5 / numpy 2.5.2 / yfinance 1.6.0 / gspread 5.12.4。
-`requirements.txt` 里全是无上界的 `>=`（如 `pandas>=2.0.0`），**与实装版本差很远，等于没有可复现性**。
+测试只收 `tests/`，必须完全离线并使用虚构数据；不需要也不允许连接 Yahoo、东财或真实 Google Sheets。
+
+**依赖两份分工**：`requirements.txt` 是 Streamlit Cloud/Linux 可安装范围（每个直接依赖都有上界）；`requirements-dev.lock` 是 Windows/Python 3.14.4 开发机完整精确锁定。本机复现装 lock，Cloud 只装范围文件；GitHub Actions 分两条腿分别验证两者，不把含 Windows 平台包的 lock 强塞给 Cloud。
 
 ---
 

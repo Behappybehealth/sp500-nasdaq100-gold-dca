@@ -2,6 +2,10 @@
 
 Compares the dynamic model (score-driven deploy multiplier + tilted weights + skip + month-end release)
 against a fixed-amount, neutral-weight baseline, over identical budget rules.
+
+【归档脚本 · 非回归载体】一次性回测，结果已定稿在 backtest/results.json；Tab5「回测结果」
+读的是那份 json，不会调用本脚本。重跑会覆盖同目录的 results.json，想留底先拷走。
+路径按 __file__ 相对定位，随项目搬家不会断。
 """
 import json
 import math
@@ -9,12 +13,12 @@ import sys
 from datetime import date, timedelta
 from pathlib import Path
 
-sys.path.insert(0, r'C:\Users\xiezhibo\.claude\skills\sp500-nasdaq100-gold-dca\scripts')
-import dca_calculator as m
+BASE = Path(__file__).resolve().parent.parent  # project root (this script lives in backtest/)
+sys.path.insert(0, str(BASE / 'scripts'))
+import dca_calculator as m  # noqa: E402  -- needs the sys.path wiring above
 
-BASE = Path(r'C:\Users\xiezhibo\.claude\skills\sp500-nasdaq100-gold-dca')
 CACHE = BASE / 'data' / 'market_history'
-OUT = Path(r'C:\Users\xiezhibo\backtest-dca-5y')
+OUT = Path(__file__).resolve().parent  # results land next to this script
 config = m.read_json(BASE / 'data' / 'config.json')
 assets = config['assets']
 model = dict(m.DEFAULT_MODEL)

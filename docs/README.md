@@ -15,6 +15,9 @@
 | [CLAUDE.md](../CLAUDE.md) | AI 助手 | 规矩变动同期 | AI 入口：技术栈、目录树、红线规矩 |
 | [README.md](../README.md) | 访客 | 门面信息变动同期 | 项目门面 |
 | [CHANGELOG.md](../CHANGELOG.md) | 所有人 | 每个 commit 同期 | 全量改动的人读版流水（每行带时刻，scripts/changelog.py 生成与校验） |
+| [requirements.txt](../requirements.txt) / [requirements-dev.lock](../requirements-dev.lock) | 部署 / 开发 | 直接依赖或开发环境变动同期 | Cloud/Linux 可安装范围 + Windows/Python 3.14 开发机精确锁，两份分工不混用 |
+| [pytest.ini](../pytest.ini) / [tests/](../tests/) | 开发 / CI | 行为或测试策略变动同期 | 全离线三层回归，只收 tests/，fixture 必须虚构 |
+| [.github/workflows/ci.yml](../.github/workflows/ci.yml) | 开发 / 运维 | CI 触发或环境矩阵变动同期 | push main 自动验证精确开发组合与 Cloud 可安装组合 |
 
 ## 数据产物（冻，重跑才更新）
 
@@ -22,6 +25,9 @@
 |---|---|
 | [backtest/results.md](../backtest/results.md) | 5 年全样本滚动回测报告（2026-08-11 跑完） |
 | [backtest/compare3.md](../backtest/compare3.md) | 三策略对比回测报告 |
+| `backtest/results*.json` | Tab5 使用或留档的冻结数值产物；不得用归档脚本重跑后静默覆盖 |
+
+`backtest/*.py` 是**归档脚本而非冻结果**：允许做不改变历史结果含义的可移植性维护（例如相对路径），可重跑但不作 pytest 回归载体；重跑前必须复制冻结 JSON，跑后比较并恢复。
 
 ## 历史快照（冻，只增不改）
 
@@ -36,5 +42,5 @@
 
 ## 规矩（与 CLAUDE.md 第 11 条互为表里）
 
-1. 活文档头部标 `【活·更新时机：…】`；冻文档标 `【冻·历史快照】`。
-2. 行为变更的 commit 必须同期核对上表相关活文档；冻文档不回改。
+1. 活文档头部标 `【活·更新时机：…】`；历史计划与回测结果/报告属于冻结内容。
+2. 行为变更的 commit 必须同期核对上表相关活文档；冻结内容不回改。归档 `.py` 脚本允许做行为保持的维护，但不能借此改写冻结产物。
