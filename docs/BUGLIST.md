@@ -1677,7 +1677,7 @@ exceptions: none
 > 1. 确认记录第 4 条（yfinance 兜底按"拿不到实时价"处理 → 拦）已按原判断落地，见下方 F7。
 > 2. **`quote_time` 只记录展示、不设闸**：确认记录提的是"判 `regularMarketTime` 新鲜度"，实际只用它的**有无**（等价于 `regularMarketPrice` 的有无）判闸，没有再加"时间戳距今超 N 小时即拦"。理由：死标的场景已由副闸 10 天覆盖，再加时间闸会在长假/长周末误拦（美股连休 4 天时 `regularMarketTime` 必然是 4 天前，而那确实是最新可得值）。`quote_time` 仍逐标的输出，随时可加闸。
 >
-> commit：本次提交（落点随后回填）。
+> commit：`dbaa6d8`。
 
 #### ✔️ 验证结果
 
@@ -1730,7 +1730,7 @@ exceptions: none
 > 1. **日期归属改为取数据源自己的 bar 时间戳**，不按 `regularMarketTime` 自行推算交易日归属（确认记录第 5 条的字面写法）。做法：`split_live_bars` 只把 `date >= utc_today()` 的 pair 切出来。**同一意图、更小风险**——休市标的根本不会开出当日 bar，自然没有当日点、也不会和上一收盘撞成重复点（见下方 L4）；24/7 标的自然有。自造时区归属规则是错位的温床，而 `split_live_bars` 与 `save_cached_closes` 的剔除闸恰好是同一条界线的互补两侧，既不重复也不漏。
 > 2. **文件结构由 `{date, close, market_time, fetched_at}` 改为 `{bars: {date: close}, quote_time, fetched_at}`**：`bars` 用 dict 承接（同一标的理论上可有多根当日 bar），`quote_time` 沿用引擎既有键名。语义不变。
 >
-> commit：本次提交（落点随后回填）。
+> commit：`dbaa6d8`。
 
 #### ✔️ 验证结果
 
@@ -1773,7 +1773,7 @@ exceptions: none
 > - `scripts/dca_calculator.py:390`：新增 `_REFETCH_LOOKBACK_DAYS = 5`。
 > - `scripts/dca_calculator.py:506`：增量分支 `period1 = last_cached - timedelta(days=_REFETCH_LOOKBACK_DAYS)`。请求数不变（同一个 Chart 调用，只是 `range` 稍大），落库三道护栏原样生效。
 >
-> commit：本次提交（落点随后回填）。
+> commit：`dbaa6d8`。
 
 #### ✔️ 验证结果
 
@@ -1809,7 +1809,7 @@ exceptions: none
 
 > **2026-08-20 修复**：与 `BUG-030` 同一个动作（`scripts/dca_calculator.py:390` 的 `_REFETCH_LOOKBACK_DAYS = 5` + `:506` 的 `period1` 回退），不另加代码。两条问题分别登记、分别验证。
 >
-> commit：本次提交（落点随后回填）。
+> commit：`dbaa6d8`。
 
 #### ✔️ 验证结果
 
