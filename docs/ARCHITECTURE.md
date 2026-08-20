@@ -63,7 +63,7 @@
                             ▼                  ▼
         ┌───────────────────────────┐   ┌──────────────────┐
         │ scripts/dca_calculator.py │   │   storage.py     │
-        │ 计算引擎（1378 行）        │   │  存储层（612 行） │
+        │ 计算引擎（1391 行）        │   │  存储层（612 行） │
         │                           │   │                  │
         │ 读 data/config.json       │   │ 优先 Google Sheets│
         │ 读记账数据（--user 时      │◄──┤ 无凭据→本地 CSV   │
@@ -222,7 +222,7 @@ tab4（26 行）是这条链的读侧，业务上和 tab3 是一件事。
 
 | 路径 | 行数 | 说明 |
 |---|---:|---|
-| `scripts/dca_calculator.py` | 1378 | **策略大脑**。完全独立可单跑，不依赖 Streamlit。输入 = CSV + config，输出 = JSON（18 个顶层键）；业务"今天"走 `biz_today()`（与 `src/dates.py` 同规则双实现），坏日期行剔除并输出 `invalid_transactions`；汇率唯一实时源、失败回落 `fx_last.json` 上次成功值（`fx` 三件套标 live/as_of，全无可估值置空）；行情抓取**并发**（8 请求同波，总耗时取最大值）且带 3 次退避重试，落库三道护栏（盘中价不入库 / 行数不减 / 原子写，落库日界走 `utc_today()`）且每次回退 5 天重抓让数据源的回填与修正自动追平，当日未收盘值另落 `market_live.json`（加载时 merge、csv 优先）；**拿不到实时价即降级**（`latest_source != "quote"`，副闸 K 线落后 > 10 天）只展示持仓（`decision.degraded`）；行情快照 `data/quote_snapshot.json`（TTL 600 秒）复用抓价结果；参数与键明细见详设 §11 |
+| `scripts/dca_calculator.py` | 1391 | **策略大脑**。完全独立可单跑，不依赖 Streamlit。输入 = CSV + config，输出 = JSON（18 个顶层键）；业务"今天"走 `biz_today()`（与 `src/dates.py` 同规则双实现），坏日期行剔除并输出 `invalid_transactions`；汇率唯一实时源、失败回落 `fx_last.json` 上次成功值（`fx` 三件套标 live/as_of，全无可估值置空）；行情抓取**并发**（8 请求同波，总耗时取最大值）且带 3 次退避重试，落库三道护栏（盘中价不入库 / 行数不减 / 原子写，落库日界走 `utc_today()`）且每次回退 5 天重抓让数据源的回填与修正自动追平，当日未收盘值另落 `market_live.json`（加载时 merge、csv 优先）；**拿不到实时价即降级**（`latest_source != "quote"`，副闸 K 线落后 > 10 天）只展示持仓（`decision.degraded`）；行情快照 `data/quote_snapshot.json`（TTL 600 秒）复用抓价结果；参数与键明细见详设 §11 |
 | `scripts/dca_action.py` | 203 | 业务动作 CLI（`record tx` / `record obs` / `override`）：Skill 入口经它与 Web 共用 storage 业务层；shares 可按金额自动换算，sheets 模式写后自动 `sync_local` 刷新落盘缓存；同日同向撞重报错、`--force` 显式放行 |
 | `scripts/changelog.py` | 115 | CHANGELOG 维护工具：`add <hash>` 从 git 取提交时刻生成行草稿；`--check` 校验每个 commit 都有行且时刻与 git 一致（CLAUDE.md 第 12 条的配套） |
 

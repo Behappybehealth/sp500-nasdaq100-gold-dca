@@ -331,16 +331,36 @@ def test_weights_no_defense_boost_when_equity_trend_healthy(assets, model):
 
 
 def test_weights_stay_inside_bounds(assets, model):
-    """极端评分下权重仍应贴住 min/max 区间。
+    """极端评分下权重必须严格落在 min/max 区间内，且仍然和为 1。
 
-    ⚠️ 容差 0.01：三轮"归一 → 钳位 → 再归一"是不动点近似，末次归一会把边界推出
-    极小残差（实测极端组合下 sp500 = 0.19980，比 min_weight 0.2 低 2e-4）。
-    该残差已登记 BUG-033；这里按实测行为设容差，收敛收紧后本测试照样通过。
+    两个不变量同时成立才有意义：`max_weight` 是风控上限（"标普最多 55%"），
+    和为 1 决定当日总额不多花也不少花。断言不留容差——留容差就等于承认上限可破。
     """
     w = eng.score_based_weights(_scores(-0.8, 0.9, -0.5, trend=0.4), assets, model)
     for key, info in assets.items():
-        assert w[key] >= info["min_weight"] - 0.01, f"{key} 跌破下限过多"
-        assert w[key] <= info["max_weight"] + 0.01, f"{key} 突破上限过多"
+        assert w[key] >= info["min_weight"], f"{key} 跌破下限"
+        assert w[key] <= info["max_weight"], f"{key} 突破上限"
+    assert sum(w.values()) == pytest.approx(1.0)
+
+
+def test_weights_bounds_hold_across_score_grid(assets, model):
+    """扫评分网格：任何组合都不得越界。
+
+    单点断言挡不住这个缺陷——旧实现在 61% 的评分组合上越界，却恰好在
+    `test_weights_stay_inside_bounds` 那一点只差 6e-05，被容差吞掉了（BUG-033）。
+    最坏的一例是突破上限 9.2e-03（sp500 到 0.5592），不在被抽查的那点上。
+    """
+    grid = [i / 5 for i in range(-5, 6)]  # -1.0 .. 1.0 步长 0.2
+    for sp in grid:
+        for ndx in grid:
+            for gold in grid:
+                for trend in (-1.0, 0.0, 1.0):
+                    w = eng.score_based_weights(_scores(sp, ndx, gold, trend=trend), assets, model)
+                    label = f"sp={sp} ndx={ndx} gold={gold} trend={trend}"
+                    for key, info in assets.items():
+                        assert w[key] >= info["min_weight"], f"{key} 跌破下限（{label}）"
+                        assert w[key] <= info["max_weight"], f"{key} 突破上限（{label}）"
+                    assert sum(w.values()) == pytest.approx(1.0), f"和不为 1（{label}）"
 
 
 def test_weights_missing_score_treated_as_zero(assets, model):

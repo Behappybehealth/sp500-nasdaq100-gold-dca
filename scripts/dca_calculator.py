@@ -952,15 +952,28 @@ def score_based_weights(scores: Dict[str, dict], assets: Dict[str, dict], model:
             sc += defense * max(0.0, -eq_trend_avg)
         neutral = float(info.get("neutral_weight", 0.0))
         weights[key] = max(neutral * 0.2, neutral * (1.0 + tilt * sc))
-    for _ in range(3):
-        total = sum(weights.values()) or 1.0
-        weights = {k: v / total for k, v in weights.items()}
-        weights = {
-            k: min(max(v, float(assets[k].get("min_weight", 0.0))), float(assets[k].get("max_weight", 1.0)))
-            for k, v in weights.items()
-        }
-    total = sum(weights.values()) or 1.0
-    return {k: v / total for k, v in weights.items()}
+    lo = {k: float(assets[k].get("min_weight", 0.0)) for k in weights}
+    hi = {k: float(assets[k].get("max_weight", 1.0)) for k in weights}
+    # 和为 1 与「全部落在 [min, max]」必须同时成立：解 λ 使 Σ clamp(λ·w, lo, hi) = 1。
+    # 该和对 λ 单调不减且连续，λ→0 时取 Σlo、λ→∞ 时取 Σhi，故 Σlo ≤ 1 ≤ Σhi 时解必存在。
+    if sum(lo.values()) > 1.0 or sum(hi.values()) < 1.0:
+        total = sum(weights.values()) or 1.0  # 区间本身容不下 1，只能保住和为 1
+        return {k: v / total for k, v in weights.items()}
+
+    def total_at(lam: float) -> float:
+        return sum(min(max(lam * weights[k], lo[k]), hi[k]) for k in weights)
+
+    low, high = 0.0, 1.0
+    while total_at(high) < 1.0:
+        high *= 2.0
+    for _ in range(200):
+        mid = (low + high) / 2.0
+        if total_at(mid) < 1.0:
+            low = mid
+        else:
+            high = mid
+    lam = (low + high) / 2.0
+    return {k: min(max(lam * v, lo[k]), hi[k]) for k, v in weights.items()}
 
 
 _MAX_STALE_DAYS = 10

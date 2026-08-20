@@ -330,7 +330,7 @@ Cloud 不装 lock：里面含 Windows 平台包，而且本机钉定版本未必
 
 ---
 
-## 11. 计算引擎接口（scripts/dca_calculator.py，1378 行）
+## 11. 计算引擎接口（scripts/dca_calculator.py，1391 行）
 
 **参数五个**：`--amount`、`--base-dir`、`--history-years`、`--user`（多用户模式：记账数据从 `data/users/<user>/` 读取，config 与行情缓存保持共享；含路径穿越防护）、`--snapshot-ttl`（行情快照 TTL 秒数，默认 600，0=禁用。没有 `--no-refresh`）。
 
@@ -344,7 +344,7 @@ Cloud 不装 lock：里面含 Windows 平台包，而且本机钉定版本未必
 
 **决策新鲜度闸**：`market_freshness()`（:969）在 `build_decision` 之后过闸（:1307）——主闸判 `latest_source != "quote"`（本次没拿到实时价）、副闸判 K 线落后 > `_MAX_STALE_DAYS`（:966，10 天），三个信号标的任一被拦或带 `error` → 金额归零 + `level_label="行情不可用·暂停出金额"`，原评分保留在 reason 里供参考。结果挂 `decision.degraded` 与 `decision.freshness.{stale_days,max_stale_days,per_symbol,reason}`，**不新增顶层键**（UI 与 Skill 的既有解包不受影响）。判据与两闸分工见 §4。
 
-**输出**：print 一大段 JSON（:1374），**18 个顶层键**——字面量构造 17 个（:1354–1372：`as_of` / `input_amount_rmb` / `effective_amount_rmb` / `usdcny` / `usdtcny` / `fx` / `monthly_budget_status` / `config` / `has_local_transactions` / `invalid_transactions` / `last_records` / `since_last_record` / `markets` / `quote_snapshot` / `portfolio` / `decision` / `suggested_weights`），随后 :1373 追加 `wide_table_markdown`（由 `render_wide_table()` :1097 生成，app.py 侧 `parse_wide_table()` 解析回 DataFrame，src/services/model.py:42）。
+**输出**：print 一大段 JSON（:1387），**18 个顶层键**——字面量构造 17 个（:1367–1385：`as_of` / `input_amount_rmb` / `effective_amount_rmb` / `usdcny` / `usdtcny` / `fx` / `monthly_budget_status` / `config` / `has_local_transactions` / `invalid_transactions` / `last_records` / `since_last_record` / `markets` / `quote_snapshot` / `portfolio` / `decision` / `suggested_weights`），随后 :1373 追加 `wide_table_markdown`（由 `render_wide_table()` :1097 生成，app.py 侧 `parse_wide_table()` 解析回 DataFrame，src/services/model.py:42）。
 
 单独跑它：
 
