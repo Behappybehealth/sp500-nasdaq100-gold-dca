@@ -386,6 +386,80 @@ def save_cached_closes(path: Path, closes: Dict[str, float]) -> List[str]:
     return warnings
 
 
+_LIVE_NAME = "market_live.json"
+_REFETCH_LOOKBACK_DAYS = 5
+
+
+def load_market_live(path: Optional[Path]) -> Dict[str, dict]:
+    """读当日实时价缓存（`data/market_live.json`），只保留仍属"今天"的条目。
+
+    存的是**当日尚未收盘的那根 K 线**：盘中记账时"我看到的那个价"需要一个落点，
+    否则它只活在进程内存里，进程一退就没了——而 csv 按设计只收已收盘定稿值
+    （见 save_cached_closes 第一道闸），当日值无处可去。
+
+    日期 < UTC 今天的条目一律丢弃：那一天已经收盘，定稿值该由 csv 提供
+    （增量抓取回退 _REFETCH_LOOKBACK_DAYS 天，会把它抓回来覆盖）。
+    坏文件当空处理——这是缓存不是事实源，读不出来只是少一个当日点。
+    """
+    if not path or not path.exists():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    cutoff = utc_today().isoformat()
+    out: Dict[str, dict] = {}
+    for sym, entry in raw.items():
+        bars = entry.get("bars") if isinstance(entry, dict) else None
+        if not isinstance(bars, dict):
+            continue
+        fresh = {}
+        for day, close in bars.items():
+            value = as_float(close)
+            if is_iso_date(str(day)) and str(day) >= cutoff and value > 0:
+                fresh[str(day)] = value
+        if fresh:
+            out[sym] = {**entry, "bars": fresh}
+    return out
+
+
+def save_market_live(path: Optional[Path], entries: Dict[str, dict]) -> None:
+    """整体覆写当日实时价缓存。写失败静默——加速/留痕缓存，不是事实源。"""
+    if not path:
+        return
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(entries, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def split_live_bars(pairs: List[tuple]) -> Dict[str, float]:
+    """从本次抓到的 K 线里挑出"当日尚未收盘"那部分（`date >= UTC 今天`）。
+
+    与 save_cached_closes 第一道闸是同一条界线：被它剔出 csv 的正是这些点，
+    这里把它们接住。**日期用数据源自己的 bar 时间戳，不自己按"今天"推算** ——
+    休市的标的不会开出今天的 bar，于是自然没有当日点（此时最新可得价就是上一
+    收盘价，走 meta 的实时价通道），24 小时交易的标的才会有。
+    """
+    cutoff = utc_today().isoformat()
+    return {day: close for day, close in pairs if day >= cutoff}
+
+
+def merge_live_bars(closes: Dict[str, float], live_bars: Dict[str, float]) -> Dict[str, float]:
+    """把当日实时价并进收盘序列——**csv 有该日期则以 csv 为准**。
+
+    定稿值一落库就自动顶掉临时值，不需要任何清理逻辑；反过来若让 live 覆盖
+    csv，收盘后每次跑都会拿盘中价盖掉定稿价。
+    """
+    merged = dict(closes)
+    for day, close in live_bars.items():
+        merged.setdefault(day, close)
+    return merged
+
+
 def _yfinance_closes(symbol: str, years: int) -> Dict[str, float]:
     """yfinance 兜底序列，**raw 口径**（auto_adjust=False，与 Chart 主路径一致）。
 
@@ -407,10 +481,12 @@ def _yfinance_closes(symbol: str, years: int) -> Dict[str, float]:
     return out
 
 
-def get_symbol_history(symbol: str, years: int, cache_dir: Optional[Path]) -> dict:
+def get_symbol_history(symbol: str, years: int, cache_dir: Optional[Path], live_entry: Optional[dict] = None) -> dict:
     today = biz_today()
     cache_path = cache_file_for(cache_dir, symbol) if cache_dir else None
-    cached = load_cached_closes(cache_path) if cache_path else {}
+    cached = load_cached_closes(cache_path) if cache_path else {}  # 只含已收盘定稿值
+    live_bars: Dict[str, float] = dict((live_entry or {}).get("bars") or {})
+    fresh_live: Optional[Dict[str, float]] = None  # 本次抓到的当日 bar；None=没抓到，别动存量
     latest: Optional[float] = None
     currency = None
     data_source = ""
@@ -421,12 +497,21 @@ def get_symbol_history(symbol: str, years: int, cache_dir: Optional[Path]) -> di
     if cached:
         last_cached = date.fromisoformat(max(cached))
         try:
-            result = fetch_chart(symbol, period1=last_cached, period2=today + timedelta(days=1))
-            # 不允许空响应：period1 落在库内最后一天，正常必回该日 K 线；
+            # period1 回退 5 天而不是只抓前沿那一天：数据源会给 close=null 的空洞
+            # （实测 GC=F / XAUT 的 2026-08-19），也会事后改写已收盘的值（实测 XAUT
+            # 08-17 +0.83%）。只抓前沿则一有更晚日期落库，那两种错就永久留在库里。
+            # 回退不增加请求数，同一个 Chart 调用只是 range 大一点。
+            result = fetch_chart(
+                symbol,
+                period1=last_cached - timedelta(days=_REFETCH_LOOKBACK_DAYS),
+                period2=today + timedelta(days=1),
+            )
+            # 不允许空响应：period1 落在库内最后一天之前，正常必回 K 线；
             # 空返回是上游异常而不是"没有新数据"，静默当成功会让缓存无限期装死
             pairs, latest, meta = pairs_from_chart_result(result)
             for day, close in pairs:
                 cached[day] = close
+            live_bars = fresh_live = split_live_bars(pairs)
             if cache_path:
                 persist_warnings = save_cached_closes(cache_path, cached)
             currency = meta.get("currency")
@@ -446,6 +531,7 @@ def get_symbol_history(symbol: str, years: int, cache_dir: Optional[Path]) -> di
             pairs, latest, meta = pairs_from_chart_result(result)
             for day, close in pairs:
                 cached[day] = close
+            live_bars = fresh_live = split_live_bars(pairs)
             if cache_path:
                 persist_warnings = save_cached_closes(cache_path, cached)
             currency = meta.get("currency")
@@ -458,18 +544,26 @@ def get_symbol_history(symbol: str, years: int, cache_dir: Optional[Path]) -> di
             except Exception as yf_exc:  # pragma: no cover - network/data dependent
                 return {"error": f"yahoo_chart: {chart_exc}; yfinance: {yf_exc}"}
 
-    days = sorted(cached)
-    closes = [cached[d] for d in days]
+    series = merge_live_bars(cached, live_bars)
+    days = sorted(series)
+    closes = [series[d] for d in days]
     if latest is None:
+        # 拿不到实时价就只能回落最后一根收盘——**必须留痕**，否则旧价冒充实时价
+        # 一路走到金额上都没人看得见。新鲜度闸按这个标记拦（market_freshness）。
         latest = closes[-1]
-    # 不追加 latest 到序列：避免实时价与最后一根K线收盘价近似时产生重复点，
-    # 否则 day_change / return_1d 会恒为 0。
+        latest_source = "last_close"
+    else:
+        latest_source = "quote"
+    # 不额外追加 latest 到序列：当日那根 K 线（若数据源已开出）已经由 live 合并进来，
+    # 日期由数据源的 bar 时间戳决定；自己按"今天"造点会在休市时产生与昨天等值的
+    # 重复点，把 day_change / return_1d 压成 0。
     metrics = metrics_from_closes(closes, latest, days[0], days[-1])
     # 日涨跌幅 = 最新价 vs 前一交易日收盘：盘中（最后一根为当日未完结K线）时 closes[-2] 即昨收；
     # 收盘后（最新价==最后收盘价）时即最近一个完整交易日的涨跌，不会出现恒为 0 的情况
     previous_close = closes[-2] if len(closes) > 1 else closes[-1]
     metrics["previous_close"] = previous_close
     metrics["day_change"] = latest / previous_close - 1 if previous_close else None
+    metrics["latest_source"] = latest_source
     metrics["currency"] = currency
     metrics["data_source"] = data_source
     metrics["history_points"] = len(closes)
@@ -482,27 +576,59 @@ def get_symbol_history(symbol: str, years: int, cache_dir: Optional[Path]) -> di
         metrics["cache_warning"] = warning  # 语义=数据没更新到最新（UI 据此标黄）
     if persist_warnings:
         metrics["persist_warnings"] = persist_warnings  # 语义=落库护栏说了话，与新鲜度无关
+    # 私有键：由 fetch_history 汇总后整体落盘，避免多线程抢同一个 json；出函数前被 pop。
+    # 兜底路径给 None（没抓到当日 bar ≠ 当日 bar 不存在），存量当日值原样留着
+    metrics["_live_bars"] = fresh_live
     return metrics
 
 
-def fetch_history(symbols: Iterable[str], years: int = 10, cache_dir: Optional[Path] = None) -> Dict[str, dict]:
+def fetch_history(
+    symbols: Iterable[str],
+    years: int = 10,
+    cache_dir: Optional[Path] = None,
+    live_path: Optional[Path] = None,
+) -> Dict[str, dict]:
     """并发抓取全部标的（原先串行 → 总耗时是求和，最坏 160s 紧贴 subprocess 的 180s 上限）。
 
     每个标的写自己的缓存文件、互不共享写入，因此并发安全；总耗时从"求和"变"取最大值"。
     单个标的抛异常收成 error 条目，不带走整批——降级展示优于整页失败。
+
+    当日实时价的**读取**在线程里（只读，安全），**落盘**收到这里统一做一次：
+    market_live.json 是一个全标的共用的文件，放线程里写会互相覆盖。
     """
     syms = list(symbols)
+    live_all = load_market_live(live_path)
 
     def _one(sym: str) -> dict:
         try:
-            return get_symbol_history(sym, years, cache_dir)
+            return get_symbol_history(sym, years, cache_dir, live_all.get(sym))
         except Exception as exc:  # network/data dependent
             return {"error": f"{type(exc).__name__}: {exc}"}
 
     if len(syms) <= 1:
-        return {s: _one(s) for s in syms}
-    with ThreadPoolExecutor(max_workers=min(8, len(syms))) as pool:
-        return dict(zip(syms, pool.map(_one, syms)))
+        out = {s: _one(s) for s in syms}
+    else:
+        with ThreadPoolExecutor(max_workers=min(8, len(syms))) as pool:
+            out = dict(zip(syms, pool.map(_one, syms)))
+
+    updated = dict(live_all)
+    changed = False
+    for sym, metrics in out.items():
+        bars = metrics.pop("_live_bars", None)
+        if bars is None:  # 整体失败或走了兜底路径 → 本次没有当日 bar 的可信信息，不动存量
+            continue
+        changed = True
+        if bars:
+            updated[sym] = {
+                "bars": bars,
+                "quote_time": metrics.get("quote_time"),
+                "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            }
+        else:
+            updated.pop(sym, None)  # 数据源没开出当日 bar（休市）→ 没有当日值可存
+    if changed and updated != live_all:
+        save_market_live(live_path, updated)
+    return out
 
 
 def fetch_usdcny() -> Optional[float]:
@@ -837,28 +963,43 @@ def score_based_weights(scores: Dict[str, dict], assets: Dict[str, dict], model:
     return {k: v / total for k, v in weights.items()}
 
 
-_MAX_STALE_DAYS = 7
+_MAX_STALE_DAYS = 10
 
 
 def market_freshness(signal_markets: Dict[str, dict], today: date, max_stale_days: int = _MAX_STALE_DAYS) -> dict:
-    """信号标的的数据新鲜度闸：任一标的没数据、或最新收盘落后超过上限，即判 degraded。
+    """信号标的的新鲜度闸：**判决策实际用的那个价新不新，不判 K 线日期**。
 
-    没有这道闸，Yahoo 挂三周系统照样用三周前的价格算"今天该买多少"——
-    降级后只展示持仓、不出金额，让人看见问题而不是拿旧价下单。
+    K 线日期只是价格新鲜度的代理，而代理会在三种与"价新不新"无关的情况下失真：
+    休市、数据源 close 为 null 的空洞、24 小时标的的 bar 边界。实测 GC=F 库内
+    最后一根 08-18、实时价 08-20 03:35——按 K 线日期判会放行一个落后两天的价格。
+
+    主闸：本次拿到了 regularMarketPrice（`latest_source == "quote"`）才放行。休市
+    时它等于上一收盘价，那就是**最新可得的值**，合法；拿不到就是拿不到，不许旧
+    收盘价冒充实时价（yfinance 兜底与 cache_stale 都没有 meta，归入拿不到）。
+
+    副闸：K 线日期落后超 max_stale_days 天照样拦——兜住"实时价正常、序列却因
+    数据源长期返回 null 而不再前进"。这道是宽松兜底，不是主判据。
     """
-    per_symbol: Dict[str, Optional[int]] = {}
+    per_symbol: Dict[str, dict] = {}
     reasons: List[str] = []
     for sym, mk in signal_markets.items():
         end = (mk or {}).get("history_end")
         if not mk or mk.get("error") or not end or not is_iso_date(str(end)):
-            per_symbol[sym] = None
+            per_symbol[sym] = {"stale_days": None, "latest_source": None, "quote_time": None}
             reasons.append(f"{sym} 无可用行情")
             continue
         days = (today - date.fromisoformat(str(end))).days
-        per_symbol[sym] = days
-        if days > max_stale_days:
-            reasons.append(f"{sym} 最新收盘 {end}（落后 {days} 天）")
-    valid = [d for d in per_symbol.values() if d is not None]
+        source = mk.get("latest_source")
+        per_symbol[sym] = {
+            "stale_days": days,
+            "latest_source": source,
+            "quote_time": mk.get("quote_time"),
+        }
+        if source != "quote":
+            reasons.append(f"{sym} 拿不到实时价（回落 {end} 收盘价）")
+        elif days > max_stale_days:
+            reasons.append(f"{sym} K 线停在 {end}（落后 {days} 天）")
+    valid = [v["stale_days"] for v in per_symbol.values() if v["stale_days"] is not None]
     return {
         "degraded": bool(reasons),
         "stale_days": max(valid) if valid else None,
@@ -1092,8 +1233,10 @@ def main() -> None:
     if not isinstance(cache_cfg, dict):
         cache_cfg = {}
     cache_dir = None
+    live_path = None
     if cache_cfg.get("enabled", True):
         cache_dir = base_dir / str(cache_cfg.get("dir", "data/market_history"))
+        live_path = base_dir / "data" / _LIVE_NAME  # 当日未收盘 bar 的落点（收盘序列仍归 csv）
     snapshot = load_quote_snapshot(base_dir, args.snapshot_ttl)
     if snapshot is not None:
         # 快照命中的本次运行跳过行情抓取与缓存增量更新；下次冷跑会自动追平缓存
@@ -1111,7 +1254,7 @@ def main() -> None:
     else:
         # 行情与两个汇率同波并发：总耗时 = 最慢的那一个，而不是 8 个请求求和
         with ThreadPoolExecutor(max_workers=3) as pool:
-            f_markets = pool.submit(fetch_history, symbols, args.history_years, cache_dir)
+            f_markets = pool.submit(fetch_history, symbols, args.history_years, cache_dir, live_path)
             f_usdcny = pool.submit(fetch_usdcny)
             f_usdtusd = pool.submit(fetch_usdtusd)
             markets = f_markets.result()
@@ -1160,13 +1303,13 @@ def main() -> None:
     if isinstance(user_model, dict):
         model_cfg.update(user_model)
     decision = build_decision(signal_markets, assets, model_cfg, month_status, args.amount)
-    # 新鲜度闸：行情陈旧就不出金额（旧价算出的"今天买多少"比不给建议更危险）
+    # 新鲜度闸：拿不到实时价就不出金额（旧价算出的"今天买多少"比不给建议更危险）
     freshness = market_freshness(signal_markets, biz_today())
     if freshness["degraded"]:
         decision["suggested_amount_rmb"] = 0.0
-        decision["level_label"] = "数据陈旧·暂停出金额"
+        decision["level_label"] = "行情不可用·暂停出金额"
         decision["reason"] = (
-            f"⚠️ 行情数据不新鲜（{freshness['reason']}），超过 {freshness['max_stale_days']} 天上限"
+            f"⚠️ 行情不可用于决策（{freshness['reason']}）"
             f" → 本次不出金额，只展示持仓。原评分供参考：{decision['reason']}"
         )
     decision["degraded"] = freshness["degraded"]
@@ -1188,9 +1331,15 @@ def main() -> None:
         last_record_date = max(last_record_date, obs_date) if last_record_date else obs_date
     since_last_record: Dict[str, dict] = {}
     if last_record_date and cache_dir:
+        # 当日 bar 一并合进来：last_record_date 落在今天时（今天记的账），"当时价"
+        # 该是今天那根 bar，不是昨天的收盘——与评分序列同一条 merge 规则
+        live_since = load_market_live(live_path)
         for key, info in assets.items():
             sym = market_symbol_for_asset(key, info)
-            closes = load_cached_closes(cache_file_for(cache_dir, sym))
+            closes = merge_live_bars(
+                load_cached_closes(cache_file_for(cache_dir, sym)),
+                (live_since.get(sym) or {}).get("bars") or {},
+            )
             then = close_at_or_before(closes, last_record_date)
             latest = (markets.get(sym) or {}).get("latest_price")
             if then and latest:

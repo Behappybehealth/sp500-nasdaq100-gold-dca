@@ -16,8 +16,7 @@ def render(tab, result: dict, dec: dict, ms: dict, assets: dict):
         if dec.get("degraded"):
             _fr = dec.get("freshness") or {}
             st.error(
-                f"⚠️ 行情数据陈旧（超过 {_fr.get('max_stale_days', 7)} 天上限）→ 本次不出金额："
-                f"{_fr.get('reason') or '信号标的无可用行情'}。"
+                f"⚠️ 行情不可用于决策 → 本次不出金额：{_fr.get('reason') or '信号标的无可用行情'}。"
                 "持仓与历史照常展示；请先排查数据源，不要照旧价下单。"
             )
         c1, c2, c3, c4 = st.columns(4)

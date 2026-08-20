@@ -100,14 +100,16 @@ return json.loads(out.stdout)          # 把对方打印的 JSON 转成 Python �
 十年历史行情不可能每次都重抓。所以缓存是这样的（`data/market_history/*.csv`，两列 `date,close`）：
 
 ```python
-dca_calculator.py:421-424   if cached: last_cached = ...; fetch_chart(period1=last_cached, ...)  # 从缓存最后一天开始抓
+dca_calculator.py:503-509   if cached: last_cached = ...; fetch_chart(period1=last_cached - 5 天, ...)  # 从缓存最后一天回退 5 天开始抓
 dca_calculator.py:344-386   save_cached_closes() 三道护栏 + temp/os.replace 原子替换
+dca_calculator.py:389-462   market_live.json 读写 + split/merge（当日未收盘 bar 的另一个落点）
 ```
 
-`period1 = last_cached` 意味着**最前沿那一天每次运行都会被重抓并按日期键覆盖**。
+`period1 = last_cached - _REFETCH_LOOKBACK_DAYS`（5 天）意味着**最近 5 天每次运行都会被重抓并按日期键覆盖**。
 
-- **好处**：当天的价格会自动从盘中价修正成收盘价（自愈一天）
-- **代价**：只要有更晚的日期落库，前一天就再也不会被重新请求 —— **脏值永久冻结**（这也是每次跑引擎/AppTest 前要备份行情缓存、跑后还原比对的原因）
+- **好处**：① 当天的价格自动从盘中价修正成收盘价；② 数据源事后回填的 `close=null` 空洞会被补上；③ 数据源事后修正的错值会被追平。②③ 是刻意的——首次上线当天就抓到真实案例：GC=F `2026-08-13` 被数据源从 4447.60 修正到 4363.60、`08-19` 的空洞补上（详见 BUG-030/031）
+- **代价**：① 5 天窗口之外的存量差异仍然冻结（接受为既有事实，不做全量重抓）；② 最近 5 天的值每次跑都可能因数据源的浮点表示微差被改写（实测 `_NDX` `08-19` 29426.023438→29426.019531，差 4e-6），于是 `git status` 常有无意义 diff——这是拿"自动追平"换来的，别当成 bug
+- ⚠️ 每次跑引擎/AppTest 前仍要备份行情缓存、跑后比对：护栏拦得住残缺，拦不住"数据源整段给错"
 
 **落库三道护栏**（`save_cached_closes` 返回 warning 列表，调用方透传到 JSON 的 `persist_warnings`）：
 
@@ -121,6 +123,20 @@ dca_calculator.py:344-386   save_cached_closes() 三道护栏 + temp/os.replace 
 
 ⚠️ **`utc_today()`（落库安全线）与 `biz_today()`（业务日界，UTC+8）是两个函数两个用途**，别互相替换。K 线日期也按 UTC 解释（`datetime.fromtimestamp(ts, timezone.utc).date()`）——用本机时区会让 XAUT 的 UTC 00:00 bar 在负偏移时区整体错位一天，同一份数据在不同机器上标不同日期。
 
+**两个落点、一条界线**：护栏①把当日值挡在 csv 之外，那"我盘中看到的那个价"就必须另有落点，否则盘中记账时它在项目里根本不存在。
+
+| 落点 | 收什么 | 谁写 | 入库 |
+|---|---|---|---|
+| `data/market_history/*.csv` | 已收盘定稿收盘价（`date < utc_today()`） | `save_cached_closes`（剔除当日） | ✅ |
+| `data/market_live.json` | 当日未收盘 bar（`date >= utc_today()`） | `save_market_live`（`split_live_bars` 只留当日） | ❌ |
+
+两个函数用的是**同一条界线的互补两侧**，所以既不会重复也不会漏。加载时 `merge_live_bars(csv, live)` 合并成一条序列，**csv 优先**（`setdefault`）——定稿值一落库就自动顶掉临时值，不需要任何清理逻辑；反过来写会让盘中价每次盖掉定稿价。
+
+两个必须守住的细节：
+
+- **当日 bar 的日期取自数据源自己的 bar 时间戳**，不按 `regularMarketTime` 自行推算交易日归属。休市标的根本不会开出当日 bar → 自然没有当日点、也不会和上一收盘撞成重复点；24/7 标的自然有。自造时区归属规则是错位的温床
+- **`fresh_live is None` 表示"本次没拿到当日 bar 的可信信息，别动存量"**（兜底路径与 `error` 条目都是 None）。若此时照写存量，就会给陈旧值盖上新的 `fetched_at`——把旧值伪装成刚抓的，比不写危险得多。写只发生一次：`fetch_history` 收齐全部线程后统一做（`market_live.json` 是全标的共用文件，放线程里写会互相覆盖）
+
 **抓取路径与降级顺序**：
 
 ```
@@ -128,7 +144,7 @@ Yahoo Chart v8（urllib 直连，20s 超时 × 3 次尝试，0.8s/1.6s 退避）
    ↓ 失败且有缓存
 yfinance 兜底（auto_adjust=False，结果只进内存不落库）→ data_source="yfinance_fallback+cache"
    ↓ 也失败
-标 data_source="cache_stale" + cache_warning（吃旧缓存，且受 7 天陈旧闸约束）
+标 data_source="cache_stale" + cache_warning（吃旧缓存，且必然被实时价主闸拦下）
    ↓ 失败且无缓存
 yfinance 兜底（同样不落库）→ "yfinance_full_no_cache"；再失败才返回 error
 
@@ -142,9 +158,22 @@ yfinance 兜底（同样不落库）→ "yfinance_full_no_cache"；再失败才�
 - `cache_warning` = 数据没更新到最新 → sidebar 标"部分异常"、宽表 `asset_note` 写"缓存未更新"
 - `persist_warnings` = 落库护栏说了话（拒写/跳变/落库失败），**与新鲜度无关**
 
-sidebar 判"行情全部正常"按语义（`not error and not cache_warning`）而非 `data_source` 前缀——前缀匹配一加新降级路径就会静默漏判。
+sidebar 判"行情全部正常"按语义（`src/ui/sidebar.py` 的 `_not_live()`：`cache_warning` 或 `latest_source != "quote"` 即视为非实时，缺键也保守算非实时）而非 `data_source` 前缀——前缀匹配一加新降级路径就会静默漏判。引擎标了降级而界面不显示，等于没降级。
 
-**新鲜度闸**（`market_freshness`，`_MAX_STALE_DAYS = 7`）：三个信号标的（`^GSPC` / `^NDX` / `GC=F`）任一 `history_end` 距 `biz_today()` 超 7 天、或带 `error` → `decision.suggested_amount_rmb = 0`、`level_label = "数据陈旧·暂停出金额"`，只展示持仓不出金额（旧价算出的"今天买多少"比不给建议更危险）。挂载在 `decision.degraded` + `decision.freshness` 内，**不新增顶层键**。
+**新鲜度闸主副两道**（`market_freshness`，:969）：判据是**决策实际用的那个价新不新**，不是"库里最后一根 K 线多老"。
+
+| 闸 | 判据 | 拦什么 |
+|---|---|---|
+| 主闸 | `latest_source != "quote"` | 本次没拿到 `regularMarketPrice`，`latest` 回落成最后一根收盘价 |
+| 副闸 | `history_end` 距 `biz_today()` > `_MAX_STALE_DAYS`（10 天） | 数据源长期返 quote 但 K 线早已停更的死标的 |
+
+三个信号标的（`^GSPC` / `^NDX` / `GC=F`）任一被拦或带 `error` → `decision.suggested_amount_rmb = 0`、`level_label = "行情不可用·暂停出金额"`，只展示持仓不出金额（旧价算出的"今天买多少"比不给建议更危险）。挂载在 `decision.degraded` + `decision.freshness` 内，**不新增顶层键**。
+
+- **主闸是本闸的重点**：拿不到实时价时 `latest = closes[-1]` 会**静默**用旧收盘价冒充实时价。新增 `latest_source: "quote" | "last_close"` 把这件事显式标出来，与 `fx.{live,as_of}` 的三态语义对齐——降级不可见等于没降级
+- **休市不算不新鲜**：实时价等于上一根收盘价照样是 `quote`（数据源确实回了当前报价），闸放行。用户的"不能使用昨天的值"落点是"禁止在拿不到实时价时用旧值冒充"，不是禁止用昨天的收盘价
+- **副闸 7→10 天且语义降级**：旧值 7 天是主判据，现在只是兜底，放宽减少误拦。边界是 `>` 而非 `>=`，落后正好 10 天不拦
+- **yfinance 兜底一律 `last_close`**：兜底只给收盘序列、不给实时报价，按拿不到实时价处理 → 被主闸拦
+- `freshness.per_symbol` 形状是 `{sym: {stale_days, latest_source, quote_time}}`（旧形状 `{sym: int|None}`，引擎外无消费者）。`quote_time` 只记录展示、不设闸——死标的场景已由副闸覆盖，再加一道时间闸会误拦长假
 
 （行号复核于 2026-08-20）
 
@@ -285,21 +314,21 @@ gspread>=5.8.0,<6        本机实装 5.12.4  ← 唯一有上界的
 
 ---
 
-## 11. 计算引擎接口（scripts/dca_calculator.py，1229 行）
+## 11. 计算引擎接口（scripts/dca_calculator.py，1378 行）
 
 **参数五个**：`--amount`、`--base-dir`、`--history-years`、`--user`（多用户模式：记账数据从 `data/users/<user>/` 读取，config 与行情缓存保持共享；含路径穿越防护）、`--snapshot-ttl`（行情快照 TTL 秒数，默认 600，0=禁用。没有 `--no-refresh`）。
 
-**输入文件**：`data/config.json`、`data/market_history/`、`data/quote_snapshot.json`（存在且未过期时免抓价）、`data/fx_last.json`（汇率上次成功值兜底，分字段带 `fetched_at`）、记账三件套——无 `--user` 时读 `data/{transactions,observations}.csv` + `data/budget_overrides.json`，有 `--user` 时读 `data/users/<user>/` 下同名文件。
+**输入文件**：`data/config.json`、`data/market_history/`（已收盘定稿收盘价）、`data/market_live.json`（当日未收盘 bar，加载时 merge 进序列且 csv 优先，见 §4）、`data/quote_snapshot.json`（存在且未过期时免抓价）、`data/fx_last.json`（汇率上次成功值兜底，分字段带 `fetched_at`）、记账三件套——无 `--user` 时读 `data/{transactions,observations}.csv` + `data/budget_overrides.json`，有 `--user` 时读 `data/users/<user>/` 下同名文件。
 
-**抓取层**：`fetch_json(url, timeout=20, attempts=3)`（:228）—— 0.8s/1.6s 退避，末次失败抛最后一个异常。`fetch_history()`（:488）**并发**抓全部标的（`ThreadPoolExecutor`，`max_workers=min(8, N)`；单标的抛异常收成 `error` 条目，不带走整批），main 里行情与两个汇率**同波提交**（:1113），总耗时从 8 请求求和（最坏 160s，紧贴 subprocess 180s）变成取最大值（实测 1.5s，最坏约 62s）。
+**抓取层**：`fetch_json(url, timeout=20, attempts=3)`（:228）—— 0.8s/1.6s 退避，末次失败抛最后一个异常。`fetch_history(symbols, years, cache_dir, live_path)`（:585）**并发**抓全部标的（`ThreadPoolExecutor`，`max_workers=min(8, N)`；单标的抛异常收成 `error` 条目，不带走整批），main 里行情与两个汇率**同波提交**（:1257）。`market_live.json` 的**读在线程内**（只读安全）、**写在 join 之后统一一次**（全标的共用文件，线程内写会互相覆盖）；`get_symbol_history` 用私有键 `_live_bars` 把当日 bar 回传，`fetch_history` 出口 `pop` 掉——不会进 JSON 输出也不会进快照，总耗时从 8 请求求和（最坏 160s，紧贴 subprocess 180s）变成取最大值（实测 1.5s，最坏约 62s）。
 
-**行情快照**：`load_quote_snapshot()`（:576）/ `save_quote_snapshot()`（:594），落盘 `data/quote_snapshot.json`（`fetched_at` / markets 摘要 / `usdcny` / `usdtusd` / `fx` 段，仅几 KB）。TTL 内命中（:1097）则跳过行情抓取与缓存增量写——下次冷跑自动追平，不丢历史；任一标的抓价失败（带 `error`）当趟不落盘，防止坏快照连环命中。快照只是加速缓存：过期自动失效、缺失自动全抓，不入库。
+**行情快照**：`load_quote_snapshot()`（:702）/ `save_quote_snapshot()`（:720），落盘 `data/quote_snapshot.json`（`fetched_at` / markets 摘要 / `usdcny` / `usdtusd` / `fx` 段，仅几 KB）。TTL 内命中则跳过行情抓取与缓存增量写——下次冷跑自动追平，不丢历史；任一标的抓价失败（带 `error`）当趟不落盘，防止坏快照连环命中。快照存 markets 原文，故 `latest_source` / `quote_time` 两个新键自动随快照复用，闸在 TTL 内照样判得准。快照只是加速缓存：过期自动失效、缺失自动全抓，不入库。
 
-**汇率链**（汇率是变量，全项目无一处写死常量）：`fetch_usdcny()`（:508）/ `fetch_usdtusd()`（:520）抓不到返回 `None`；抓取成功落盘 `data/fx_last.json`（`save_fx_last` :544，分字段只覆写成功的那个），失败时 `_fx_entry()`（:562）回落上次成功值，输出 `fx.{usdcny,usdtusd}.{value,live,as_of}` 三件套——连上次值都没有则 `value=null`，估值层（`portfolio_summary` :656-721）据此把 RMB 估值置空而不是编数（决策金额不依赖汇率，照出）。
+**汇率链**（汇率是变量，全项目无一处写死常量）：`fetch_usdcny()`（:634）/ `fetch_usdtusd()`（:646）抓不到返回 `None`；抓取成功落盘 `data/fx_last.json`（`save_fx_last` :670，分字段只覆写成功的那个），失败时 `_fx_entry()`（:688）回落上次成功值，输出 `fx.{usdcny,usdtusd}.{value,live,as_of}` 三件套——连上次值都没有则 `value=null`，估值层（`portfolio_summary` :782-855）据此把 RMB 估值置空而不是编数（决策金额不依赖汇率，照出）。
 
-**决策新鲜度闸**：`market_freshness()`（:843，`_MAX_STALE_DAYS = 7`）在 `build_decision` 之后过闸（:1164）——三个信号标的任一落后超 7 天或带 `error` → 金额归零 + `level_label="数据陈旧·暂停出金额"`，原评分保留在 reason 里供参考。结果挂 `decision.degraded` 与 `decision.freshness.{stale_days,max_stale_days,per_symbol,reason}`，**不新增顶层键**（UI 与 Skill 的既有解包不受影响）。
+**决策新鲜度闸**：`market_freshness()`（:969）在 `build_decision` 之后过闸（:1307）——主闸判 `latest_source != "quote"`（本次没拿到实时价）、副闸判 K 线落后 > `_MAX_STALE_DAYS`（:966，10 天），三个信号标的任一被拦或带 `error` → 金额归零 + `level_label="行情不可用·暂停出金额"`，原评分保留在 reason 里供参考。结果挂 `decision.degraded` 与 `decision.freshness.{stale_days,max_stale_days,per_symbol,reason}`，**不新增顶层键**（UI 与 Skill 的既有解包不受影响）。判据与两闸分工见 §4。
 
-**输出**：print 一大段 JSON（:1225），**18 个顶层键**——字面量构造 17 个（:1205–1223：`as_of` / `input_amount_rmb` / `effective_amount_rmb` / `usdcny` / `usdtcny` / `fx` / `monthly_budget_status` / `config` / `has_local_transactions` / `invalid_transactions` / `last_records` / `since_last_record` / `markets` / `quote_snapshot` / `portfolio` / `decision` / `suggested_weights`），随后 :1224 追加 `wide_table_markdown`（由 `render_wide_table()` :956 生成，app.py 侧 `parse_wide_table()` 解析回 DataFrame，src/services/model.py:42）。
+**输出**：print 一大段 JSON（:1374），**18 个顶层键**——字面量构造 17 个（:1354–1372：`as_of` / `input_amount_rmb` / `effective_amount_rmb` / `usdcny` / `usdtcny` / `fx` / `monthly_budget_status` / `config` / `has_local_transactions` / `invalid_transactions` / `last_records` / `since_last_record` / `markets` / `quote_snapshot` / `portfolio` / `decision` / `suggested_weights`），随后 :1373 追加 `wide_table_markdown`（由 `render_wide_table()` :1097 生成，app.py 侧 `parse_wide_table()` 解析回 DataFrame，src/services/model.py:42）。
 
 单独跑它：
 

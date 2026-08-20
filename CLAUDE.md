@@ -32,8 +32,9 @@
 **行情数据**
 - **Yahoo Chart v8**（`urllib` 直连，20s×3 次尝试带退避）→ **yfinance 1.6.0** 兜底；**东方财富 push2**（`curl` 子进程）供 XAU/BTC 实时价：三者皆非官方接口、无 key、无额度保证
 - 口径已钉死 **raw**：Chart 用原始 close，yfinance 兜底 `auto_adjust=False`。**兜底结果只进内存不落库**（落库单一由 Chart 路径负责）——改抓价链时必须维持这条，否则库内会出现复权断点
-- **落库只收已收盘 K 线**：`save_cached_closes` 剔除 `date >= utc_today()`，盘中价走显示通道（冷热分离）。落库日界用 `utc_today()`、业务日界用 `biz_today()`，两者别混
-- 行情陈旧超 7 天（三个信号标的任一）→ 决策降级：不出金额、只展示持仓（`decision.degraded` + `decision.freshness`）
+- **两个落点、一条界线**：已收盘定稿值归 `data/market_history/*.csv`（`save_cached_closes` 剔除 `date >= utc_today()`）；当日未收盘值归 `data/market_live.json`（`split_live_bars` 只收 `date >= utc_today()`）。加载时 `merge_live_bars` 合并，**csv 有该日期则 csv 优先**——定稿值一落库自动顶掉临时值，无需清理逻辑。落库日界用 `utc_today()`、业务日界用 `biz_today()`，两者别混
+- **每次重抓最近 5 天**（`_REFETCH_LOOKBACK_DAYS`）：`period1` 从「库内最后一天 − 5」起，请求数不增（同一个 Chart 调用 range 大一点）。数据源事后回填 null 空洞、修正错值都会自动追平；5 天之外的存量差异接受为既有事实
+- **决策必须用得到实时价才放行**：主闸看本次有没有拿到 `regularMarketPrice`（`latest_source == "quote"`），拿不到即降级——旧收盘价冒充实时价是最危险的静默失败。副闸兜底死标的：K 线落后 > 10 天（`_MAX_STALE_DAYS`）仍拦。降级 = 不出金额、只展示持仓（`decision.degraded` + `decision.freshness`）
 
 **认证**
 - 自写「名字 + PIN」：PBKDF2-HMAC-SHA256（20 万迭代 + 每账号随机盐），连续失败 5 次锁 15 分钟；fail-closed——secrets 缺失/损坏即拒启动，仅显式 `DCA_AUTH_MODE=local` 进单机模式
@@ -67,17 +68,18 @@ sp500-nasdaq100-gold-dca/
 ├── start-app.bat             # 本机双击启动 Streamlit
 ├── logs/                     # 运行日志约定落点（*.log 不入库；Cloud 容器重启即失，运行日志尚未实现）
 ├── scripts/
-│   ├── dca_calculator.py     # 计算引擎（1229 行，独立可运行，输出 JSON；--user 读 data/users/<user>/；行情抓取并发+退避重试，落库三道护栏，7 天陈旧闸；行情快照 600s 内复用抓价结果）
+│   ├── dca_calculator.py     # 计算引擎（1378 行，独立可运行，输出 JSON；--user 读 data/users/<user>/；行情抓取并发+退避重试，落库三道护栏+每次回退 5 天重抓，实时价主闸+10 天副闸；行情快照 600s 内复用抓价结果）
 │   ├── dca_action.py         # 业务动作 CLI（203 行）：record tx/obs + override，Skill 经它与 Web 共用 storage 业务层
 │   └── changelog.py          # CHANGELOG 维护：add <hash> 生成带时刻的行，--check 校验全覆盖
 ├── data/
 │   ├── config.json           # 策略参数与资产定义
 │   ├── budget_overrides.json # 月度预算覆盖（不入库）
 │   ├── fx_last.json          # 汇率上次成功值兜底（不入库；实时失败时引擎读它并在 fx 段标 live:false+as_of）
+│   ├── market_live.json      # 当日未收盘 K 线（不入库；只存仍属"今天"的 bar，加载时 merge 进序列且 csv 优先）
 │   ├── transactions.csv      # 成交记录（不入库；仅单机模式用，云端模式见 users/）
 │   ├── observations.csv      # 跳过/观察记录（不入库；同上）
 │   ├── users/                # 云端模式每用户落盘缓存（不入库，sync_local 生成，覆盖前轮转留底 10 份）
-│   └── market_history/       # 行情缓存（date,close 两列，增量更新，6 个 csv）
+│   └── market_history/       # 已收盘定稿收盘价（date,close 两列，增量更新+回退 5 天重抓，6 个 csv）
 ├── strategy/
 │   └── core-strategy.md      # 策略说明唯一事实源（Tab6 启动时读它渲染，改文档即改页面）
 ├── backtest/                 # 一次性回测脚本 + 结果（2026-08-11 跑完，非运行时依赖）

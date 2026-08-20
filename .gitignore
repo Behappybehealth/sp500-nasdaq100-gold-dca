@@ -9,6 +9,8 @@ data/xau_spot_last.json
 data/quote_snapshot.json
 # 汇率上次成功值兜底（引擎抓成功时刷新，失败时读它兜底；本地缓存）
 data/fx_last.json
+# 当日未收盘 K 线的落点（盘中记账时"我看到的那个价"要有落点；收盘定稿值仍归 market_history/csv）
+data/market_live.json
 # 多用户模式下 sync_local 的每用户落盘缓存（BUG-001 修复后产生）
 data/users/
 

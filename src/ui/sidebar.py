@@ -30,6 +30,14 @@ QUOTE_ROWS = [
 ]
 
 
+def _not_live(mk: dict) -> bool:
+    """这个价是不是"非实时"——数据没更新到最新，或实时价没抓到只能用最后收盘。
+
+    引擎的 latest_source 标记必须在界面上看得见：降级不可见等于没降级。
+    """
+    return bool(mk.get("cache_warning")) or mk.get("latest_source") != "quote"
+
+
 def _quote_html(name, price, chg, stale=False):
     """涨绿跌红（国际惯例）。"""
     if chg is None:
@@ -186,7 +194,7 @@ def render(paths: Paths, user: str) -> Decision:
                             "黄金 XAU 美元（期货估算）",
                             mk["latest_price"],
                             mk.get("day_change"),
-                            bool(mk.get("cache_warning")),
+                            _not_live(mk),
                         ),
                         unsafe_allow_html=True,
                     )
@@ -204,7 +212,7 @@ def render(paths: Paths, user: str) -> Decision:
                 name,
                 mk["latest_price"],
                 mk.get("day_change"),
-                bool(mk.get("cache_warning")),
+                _not_live(mk),
             ),
             unsafe_allow_html=True,
         )

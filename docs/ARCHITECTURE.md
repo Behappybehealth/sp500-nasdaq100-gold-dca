@@ -61,7 +61,7 @@
                             ▼                  ▼
         ┌───────────────────────────┐   ┌──────────────────┐
         │ scripts/dca_calculator.py │   │   storage.py     │
-        │ 计算引擎（1229 行）        │   │  存储层（612 行） │
+        │ 计算引擎（1378 行）        │   │  存储层（612 行） │
         │                           │   │                  │
         │ 读 data/config.json       │   │ 优先 Google Sheets│
         │ 读记账数据（--user 时      │◄──┤ 无凭据→本地 CSV   │
@@ -167,7 +167,7 @@ tab4（26 行）是这条链的读侧，业务上和 tab3 是一件事。
 
 | tab | 位置 | 行数 | 业务职责 | 依赖 |
 |---|---|---:|---|---|
-| 🎯 今日模拟 | `src/tabs/today.py` | 100 | 今日建议金额/部署系数/三资产分配/三档执行方案；行情陈旧降级时顶部横幅说明"本次不出金额" | render(tab1, result, dec, ms, ASSETS) |
+| 🎯 今日模拟 | `src/tabs/today.py` | 99 | 今日建议金额/部署系数/三资产分配/三档执行方案；行情不可用于决策时顶部横幅说明"本次不出金额"（原因取引擎 `freshness.reason`，不写死天数） | render(tab1, result, dec, ms, ASSETS) |
 | 📊 持仓与曲线 | `src/tabs/holdings.py` | 78 | 持仓汇总、估值、浮盈亏、XIRR、净值曲线（汇率不可用时估值显式置空） | render(tab2, result, pf, ASSETS, _paths, CURRENT_USER) |
 | ✍️ 记账 | `src/tabs/records.py` | 182 | 回报成交 / 主动跳过，二次确认后落库；同日同资产同方向去重，显式确认后放行 | render(tab3, result, dec, ASSETS, CURRENT_USER) |
 | 📜 历史记录 | `src/tabs/history.py` | 26 | 回读 transactions / observations | render(tab4, CURRENT_USER) |
@@ -216,7 +216,7 @@ tab4（26 行）是这条链的读侧，业务上和 tab3 是一件事。
 
 | 路径 | 行数 | 说明 |
 |---|---:|---|
-| `scripts/dca_calculator.py` | 1229 | **策略大脑**。完全独立可单跑，不依赖 Streamlit。输入 = CSV + config，输出 = JSON（18 个顶层键）；业务"今天"走 `biz_today()`（与 `src/dates.py` 同规则双实现），坏日期行剔除并输出 `invalid_transactions`；汇率唯一实时源、失败回落 `fx_last.json` 上次成功值（`fx` 三件套标 live/as_of，全无可估值置空）；行情抓取**并发**（8 请求同波，总耗时取最大值）且带 3 次退避重试，落库三道护栏（盘中价不入库 / 行数不减 / 原子写，落库日界走 `utc_today()`），行情陈旧超 7 天则决策降级只展示持仓（`decision.degraded`）；行情快照 `data/quote_snapshot.json`（TTL 600 秒）复用抓价结果；参数与键明细见详设 §11 |
+| `scripts/dca_calculator.py` | 1378 | **策略大脑**。完全独立可单跑，不依赖 Streamlit。输入 = CSV + config，输出 = JSON（18 个顶层键）；业务"今天"走 `biz_today()`（与 `src/dates.py` 同规则双实现），坏日期行剔除并输出 `invalid_transactions`；汇率唯一实时源、失败回落 `fx_last.json` 上次成功值（`fx` 三件套标 live/as_of，全无可估值置空）；行情抓取**并发**（8 请求同波，总耗时取最大值）且带 3 次退避重试，落库三道护栏（盘中价不入库 / 行数不减 / 原子写，落库日界走 `utc_today()`）且每次回退 5 天重抓让数据源的回填与修正自动追平，当日未收盘值另落 `market_live.json`（加载时 merge、csv 优先）；**拿不到实时价即降级**（`latest_source != "quote"`，副闸 K 线落后 > 10 天）只展示持仓（`decision.degraded`）；行情快照 `data/quote_snapshot.json`（TTL 600 秒）复用抓价结果；参数与键明细见详设 §11 |
 | `scripts/dca_action.py` | 203 | 业务动作 CLI（`record tx` / `record obs` / `override`）：Skill 入口经它与 Web 共用 storage 业务层；shares 可按金额自动换算，sheets 模式写后自动 `sync_local` 刷新落盘缓存；同日同向撞重报错、`--force` 显式放行 |
 | `scripts/changelog.py` | 115 | CHANGELOG 维护工具：`add <hash>` 从 git 取提交时刻生成行草稿；`--check` 校验每个 commit 都有行且时刻与 git 一致（CLAUDE.md 第 12 条的配套） |
 
@@ -230,8 +230,9 @@ tab4（26 行）是这条链的读侧，业务上和 tab3 是一件事。
 | `data/observations.csv` | 跳过/观察记录 | ❌ | 同上 |
 | `data/budget_overrides.json` | 按月覆盖预算 | ❌ | 同上 |
 | `data/fx_last.json` | 汇率上次成功值（分字段带 `fetched_at`） | ❌ | 抓取成功时刷新；实时失败时引擎读它兜底并在 `fx` 段标 `live:false` + `as_of` |
+| `data/market_live.json` | **当日未收盘 K 线**（每标的 `{bars, quote_time, fetched_at}`） | ❌ | 盘中记账时"我看到的那个价"的落点。只存仍属 `utc_today()` 的 bar；加载时 merge 进序列但 **csv 优先**，定稿值落库即自动顶掉。本次没抓到当日 bar 的可信信息时不动存量（不会把陈旧值伪装成刚抓的） |
 | `data/*.localbak` | 轮转留底文件 | ❌ | 带时间戳的真轮转（覆盖前自动留底 10 份） |
-| `data/market_history/*.csv` | **行情缓存**，6 个文件，两列（`date,close`） | ✅ | **入库是刻意的** —— 让 Cloud 部署不用冷启动重抓十年数据 |
+| `data/market_history/*.csv` | **已收盘定稿收盘价**，6 个文件，两列（`date,close`） | ✅ | **入库是刻意的** —— 让 Cloud 部署不用冷启动重抓十年数据。每次抓取回退 5 天重抓，故最近 5 天的值可能被数据源事后修正（正常，见 BUG-030/031） |
 
 **行情缓存 6 个文件**：`_GSPC.csv`（标普指数）、`SPY.csv`（标普 ETF）、`_NDX.csv`（纳指）、`QQQ.csv`（纳指 ETF）、`GC_F.csv`（黄金期货）、`XAUT_USD.csv`（黄金代币）。孤儿 `GLD.csv`（不在抓取名单、冻结在 2026-08-10）已从仓库移除，取回：`git show f1ed967:data/market_history/GLD.csv`。
 
@@ -336,3 +337,4 @@ tab4（26 行）是这条链的读侧，业务上和 tab3 是一件事。
 | 2026-08-18 | **BUG-022 修复：新增 `scripts/dca_action.py`（187 行）业务动作 CLI**，Skill 入口经 `record tx` / `record obs` / `override` 子命令与 Web 共用 storage 业务层；shares 可按金额自动换算，sheets 模式写后自动 `sync_local` 刷新落盘缓存 | 此前 Skill 绕过业务层直接调引擎，记账/预算覆盖两边口径分叉；现在写操作全部收口到同一 `storage.py`，双入口行为一致 |
 | 2026-08-19 | **BUG-024 修复：引擎行情快照复用 + 侧栏金额表单化**。`dca_calculator.py`（938→983 行）新增 `data/quote_snapshot.json`——抓价成功后落盘 markets 摘要 + 汇率，TTL 600 秒（`--snapshot-ttl` 可调，0 禁用；任一标的抓价失败当趟不落盘），TTL 内运行跳过重复抓价与缓存增量写（下次冷跑自动追平）；输出 JSON 第 16 个顶层键 `quote_snapshot`（used/age_s/ttl_s）。侧栏金额输入收进 `st.sidebar.form("amount_form")`，键入不再逐击触发整页重跑 | 「我想投 X」每次会话此前付两遍完整计算（含 8 个串行行情请求）；实测重跑趟 t2=0.31s 为冷跑 t1=2.72s 的 11.3%（BUGLIST 验收标准 <20%） |
 | 2026-08-20 | **BUG-006/007/010/011 修复：抓价链重做**。`dca_calculator.py`（1074→1229 行）抓取层由**串行改并发**（`fetch_history` 用 `ThreadPoolExecutor`，main 把 6 标的 + 2 汇率同波提交，单标的异常收成 `error` 条目不带走整批）+ `fetch_json` 3 次尝试 0.8s/1.6s 退避；落库改由 `save_cached_closes` 三道护栏把关（剔 `date >= utc_today()` 的盘中价 / 行数不减拒写 / temp+`os.replace` 原子写，±20% 跳变只 warning，无变化不碰文件），新增 `utc_today()` 与业务 `biz_today()` 分工；yfinance 兜底统一 `auto_adjust=False` 且明确不落库（落库口径单一由 Chart 路径负责）；新增 `market_freshness` 7 天陈旧闸——超限则 `decision.suggested_amount_rmb=0` + `decision.degraded/freshness`，只展示持仓不出金额（**挂在 decision 内，顶层键仍 18 个**）。UI 侧 sidebar 改按语义判行情正常（不再匹配 `data_source` 前缀）、tab1 加降级横幅 | 8 个行情请求串行、各 20s 超时零重试，最坏 160s 紧贴 subprocess 180s 上限（实测改后 1.5s）；落库是 `open("w")` 整文件截断重写、唯一校验只有 `close > 0`，盘中价直接入库且脏值永久冻结；两条抓取路径复权口径不一致（Chart raw vs yfinance adjusted）；Yahoo 挂三周仍照常出金额，增量抓取 `allow_empty=True` 让空响应静默算成功 |
+| 2026-08-20 | **BUG-028~031 修复：价格存储改「两个落点一条界线」+ 陈旧闸改判实时价**。`dca_calculator.py`（1229→1378 行）：① 新增 `data/market_live.json` 承接当日未收盘 bar（`load/save_market_live` + `split_live_bars` 只收 `date >= utc_today()` + `merge_live_bars` 加载时合并且 **csv 优先**），与 `save_cached_closes` 的剔除闸构成同一条界线的互补两侧——盘中看到的价有持久落点，收盘定稿值落库即自动顶掉临时值，无需清理逻辑；② 新鲜度闸判据从「bar 日期」改为「本次有没有拿到实时价」（新增 `latest_source: "quote" \| "last_close"`，主闸 `!= "quote"` 即降级；`_MAX_STALE_DAYS` 7→10 降级为兜底死标的的副闸）；③ 增量抓取 `period1` 回退 5 天（`_REFETCH_LOOKBACK_DAYS`），请求数不增而数据源的 null 空洞回填与错值修正自动追平。UI 侧 sidebar 新增 `_not_live()`（把 `latest_source` 标记显示出来，缺键保守视为非实时）、tab1 降级文案改取引擎 `freshness.reason` 不写死天数。**顶层键仍 18 个**；`freshness.per_symbol` 形状由 `{sym: int}` 扩为 `{sym: {stale_days, latest_source, quote_time}}` | 旧闸判的是"库里最后一根 K 线多老"，而决策实际用的是 `latest_price`——实测 GC=F 库内 08-18、实时价 08-20，闸放行却没人保证那个价是新的；拿不到实时价时 `latest = closes[-1]` **静默**用旧收盘价冒充，输出无任何标记。落库只收已收盘 K 线后，当日值在项目里**没有任何落点**（盘中记账拿不到自己看到的价）；`close=null` 的空洞与数据源事后修正因"只从库内最后一天往后抓"永久冻结。首跑即验证到真实案例：GC=F `08-13` 被修正 4447.60→4363.60、`08-19` 空洞补上，XAUT `08-13` 修正 + `08-16` 空洞补上 |
