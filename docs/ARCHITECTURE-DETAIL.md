@@ -190,6 +190,8 @@ sidebar 判"行情全部正常"按语义（`src/ui/sidebar.py` 的 `_not_live()`
 
 Cloud 不装 lock：里面含 Windows 平台包，而且本机钉定版本未必为 Cloud 的 Python/Linux 提供 wheel。反过来，开发复现不能只装范围文件，否则今天和下周可能解析到不同的间接依赖。因此 CI 跑两条互补腿：Windows 3.14 安装 lock 验证精确组合，Linux 3.12 安装范围文件验证实际部署入口仍能解析；后者单独安装同版本 pytest（测试工具不是 Cloud 运行时依赖）。两条测试都完全离线运行，安装依赖本身当然仍需访问包仓库。
 
+**下界不全是历史声明**：streamlit 的下界 `>=1.61.1` 是功能性的——UI 全部布局调用走 `width=` 参数（1.46+ 才有），装到更低版本启动即 TypeError；`tests/test_deprecated_api.py` 用 AST 断言源码侧 `use_container_width` 零残留、安装侧下界不回落。其余依赖的下界仍是历史声明，真正验证过的组合看 lock。
+
 变更 Python 或平台时的重建步骤：按 `requirements.txt` 新建干净 venv → 安装并跑全量测试 → 用该环境的 `python -m pip freeze` 覆盖 `requirements-dev.lock` → 再跑一次全量测试。不能在另一平台手工删改几行后仍称其为同一份精确 lock。
 
 （复核于 2026-08-20）
@@ -388,3 +390,21 @@ Cloud 不装 lock：里面含 Windows 平台包，而且本机钉定版本未必
 **能力边界**（写在这里免得下次误判）：Cloud 日志面板只留近期、容器重启即失，`logs/dca.log` 在 Cloud 上同样是临时的；且**没有任何告警**——出事仍然要有人去开页面才知道。现有能力是"出事当场能查真因"，不是"长期留存 + 主动告警"。
 
 （复核于 2026-08-21）
+
+---
+
+## 13. 备份制度：Apps Script 每日快照（deploy/backup/Code.gs）
+
+事实源在 Google Sheets，备份刻意留在**同一个 Google 账号内**：一段绑定在源表格上的 Apps Script（容器绑定脚本）由每日时间驱动触发器调用 `dailyBackup()`——四张表（`users` / `transactions` / `observations` / `budget_overrides`）各导出一份 CSV，连同 `manifest.json`（各表行数 + SHA-256）落进 Drive 的 `dca-backups/YYYY-MM-DD_HHMMSS/`；超过 30 天的快照目录自动进回收站（Drive 回收站另有一层兜底窗口）。
+
+**为什么不放本机、也不走 GitHub Actions**：本机是公司电脑——可靠性不被信赖，且快照含财务记录与 users 表的 PIN 哈希/盐，再堆上去等于扩大公司环境持有敏感资产的面积；Actions 路上仓库是公开的，artifacts 人人可下，快照必须全程加密或另建私有仓，还要把 GCP 服务账号 key 再存一份进 GitHub Secrets——新增信任方与凭据落点。Apps Script 方案零新增凭据、零新增信任方：数据本就在 Google，备份只是账号内的复制，执行与落点都离开公司电脑。代价是备份与源同一账号，**账号级灾难（被盗/被封）不在这条防线内**；若未来需要账号级独立副本，可叠加 Actions→私有仓层，架构上是叠加不是返工。
+
+**全项目唯一不随 git 部署的线上代码**：Code.gs 的生效路径是「改仓内源码 → 重新粘贴进 script.google.com 的绑定项目」，两边漂移以仓内文件为准。选容器绑定（`SpreadsheetApp.getActiveSpreadsheet()`）而不是独立脚本 + 硬编码 ID，是为了零配置零凭据——换表格部署时不可能悄悄备份错表；这条由测试断言守（`openById` 全脚本只许出现一次，即恢复目标那处）。
+
+**恢复只有一个入口且带守卫**：`restoreSnapshot(dateStr, targetId)` 必须显式给目标表格 ID，并拒绝恢复到源表自身——演练（DEPLOY.md §6.2，一次性 scratch 表上跑「写入 → 清空 → 恢复 → 比对」闭环）与真实灾备共用这同一个函数，生产表不可能被手滑覆写。
+
+**告警是白得的**：`dailyBackup` 任何异常先 `MailApp` 发邮件再把异常抛给执行日志——§12 留下的「零告警」边界在这条每日任务上被补掉：静默失败不存在，备份停了收件箱会知道。
+
+**离线回归守源码不变量，不守行为**（Apps Script 没有本地运行时）：`tests/test_backup_script.py` 断言 TABLES 与 storage.py 实际工作表名同步（含经 `TABLES` 字典键间接读写的那条路径——只扫字面量会漏）、保留天数 30、恢复守卫与失败告警在场、DEPLOY.md 覆盖触发器与演练步骤。CSV 写出/解析的往返正确性不由离线测试声称，由台账钉死的恢复演练真跑覆盖。
+
+（新增于 2026-08-21）

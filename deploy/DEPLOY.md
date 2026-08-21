@@ -145,13 +145,40 @@ git checkout 574c7a7 -- deploy/Dockerfile   # 取回
 
 ---
 
-## 6. 备份现状（⚠️ 缺口）
+## 6. 备份制度（Apps Script 每日快照）
 
-**线上真正的数据在 Google Sheets，项目目前没有自己可控、自动执行且验证过可恢复的备份。** Google Sheets 的平台版本历史可能是最后一道救命绳，但它不等于本项目已经建立了备份制度。
+**线上真正的数据在 Google Sheets，备份也留在同一个 Google 账号内**：一段绑定在源表格上的 Apps Script 每天自动把四张表导出到 Drive 的 `dca-backups/` 文件夹，保留 30 天。设计取舍与边界见 [docs/BUGLIST.md](../docs/BUGLIST.md) BUG-018 确认记录。
 
-`storage.py` 以 Sheets 为「唯一事实源」，本地侧已有的保护：
+机制一句话：`deploy/backup/Code.gs`（仓内唯一事实源）→ 快照 `dca-backups/YYYY-MM-DD_HHMMSS/{users,transactions,observations,budget_overrides}.csv + manifest.json`（行数 + SHA-256）→ 超 30 天自动进回收站 → 失败自动邮件告警。users 表含 PIN 哈希与盐，**快照文件夹不要共享给任何人**。
 
-- 本地 `data/*.localbak` 是带时间戳的轮转留底（滚动保留最近 10 份），`sheets` 写前会先快照 `<表名>_bak` 工作表，快照失败则放弃写入
-- Sheets 读取故障会抛错拒写，不会把空表当成"没有数据"覆写上去
+### 6.1 首次部署（约 10 分钟，只需做一次）
 
-**仍缺的是项目自己可控的备份制度**：没有自动导出、命名快照、保留周期和恢复演练，只能被动依赖 Google 平台可能提供的版本历史。这是当前最急的缺口之一，完整清单与验证标准见 [docs/BUGLIST.md](../docs/BUGLIST.md) 备份相关条目。
+1. 打开源表格（app 在用的那张 Google Sheet）→ **扩展 → Apps Script**
+2. 把 `deploy/backup/Code.gs` **全文粘贴**进编辑器（替换默认内容），保存，项目起名随意（如 `dca-backup`）
+3. 手动跑一次：函数下拉选 `dailyBackup` → ▶ 运行。**首次会弹授权**（读写本表格 + Drive + 发邮件三项权限）→ 高级 → 前往 → 允许
+4. 跑完看 Drive：应出现 `dca-backups/当天日期的/` 文件夹，里面有 4 个 CSV + `manifest.json`——打开 users.csv 确认能看到表头 `name,pin_hash,...`（内容只核对表头与行数，**不要外传该文件**）
+5. 建触发器：左侧 ⏰ 触发器 → 添加触发器 → `dailyBackup` / 时间驱动 / 日定时器 / 建议选 **21:00–22:00**（当日记账基本都完成后）
+
+### 6.2 恢复演练（台账要求必须真跑一次）
+
+1. 新建一张**一次性表格**（起名如 `dca-restore-drill`），从它的 URL 复制 ID（`/d/` 与 `/edit` 之间那段）
+2. 在 Apps Script 编辑器顶部函数框选 `restoreSnapshot`，把参数行改成当日快照，例如：
+   ```javascript
+   restoreSnapshot("2026-08-21", "粘贴drill表的ID");
+   ```
+   （编辑器直接运行带参函数的方法：临时加一行 `function drill() { restoreSnapshot("2026-08-21", "ID"); }` 再运行 `drill`）
+3. 打开 drill 表：四个工作表应已出现，逐表核对行数与执行日志的恢复报告一致
+4. **破坏—恢复闭环**：在 drill 表里手动清空 `transactions` 工作表 → 再跑一次恢复 → 数据回来，演练通过
+5. drill 表用完即删。守卫已验证：把目标 ID 填成源表 ID 会被直接拒绝
+
+### 6.3 日常维护
+
+- **改备份逻辑** = 改仓内 `Code.gs` → 重新粘贴到 Apps Script（**不随 git 自动部署**，两边漂移以仓内为准）
+- 想看备份活没活着：Drive 里 `dca-backups/` 应该有昨天日期的文件夹；失败会收到 `[DCA] 每日备份失败` 邮件
+- 30 天前的快照自动进回收站（Drive 回收站另有 30 天兜底，双重窗口）
+
+### 6.4 边界（如实）
+
+- 备份与源**同一 Google 账号**：账号被盗/被封两者俱损，账号级灾难不在这条防线内（要账号级独立副本可叠加 Actions→私有仓层，见 BUG-018 确认记录）
+- 快照粒度一天一次：最坏丢**当天**的记账（白天记、晚上备、白天出事）
+- 本机侧的既有保护不受影响：`data/*.localbak` 轮转留底 10 份 + Sheets 写前 `_bak` 快照 + 读失败拒写，与本制度互补

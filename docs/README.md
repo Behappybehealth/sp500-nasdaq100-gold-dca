@@ -11,7 +11,7 @@
 | [ARCHITECTURE-DETAIL.md](ARCHITECTURE-DETAIL.md) | 开发 / AI | 行为变更同期 | 架构详设：实现细节、设计动机与代价、踩坑记录、全局耦合实测 |
 | [BUGLIST.md](BUGLIST.md) | 开发 / AI | 确认门四段推进 | 问题唯一事实源（每条须 1 对 1 确认后才可修） |
 | [策略说明](../strategy/core-strategy.md) | 所有人 | 策略调整同期 | 三资产动态定投策略完整文档 |
-| [部署与外发指南](../deploy/DEPLOY.md) | 部署者 | 部署方式变动同期 | 只写真实在用的 Cloud / 本机 / ngrok 三条路径 |
+| [部署与外发指南](../deploy/DEPLOY.md) | 部署者 | 部署方式变动同期 | 只写真实在用的 Cloud / 本机 / ngrok 三条路径 + §6 备份制度（Apps Script 每日快照，含部署与恢复演练指引） |
 | [CLAUDE.md](../CLAUDE.md) | AI 助手 | 规矩变动同期 | AI 入口：技术栈、目录树、红线规矩 |
 | [README.md](../README.md) | 访客 | 门面信息变动同期 | 项目门面 |
 | [CHANGELOG.md](../CHANGELOG.md) | 所有人 | 每个 commit 同期 | 全量改动的人读版流水（每行带时刻，scripts/changelog.py 生成与校验） |

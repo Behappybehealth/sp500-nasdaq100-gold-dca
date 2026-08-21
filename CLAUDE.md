@@ -26,7 +26,7 @@
 
 **数据与存储**
 - **pandas 3.0.5 + numpy 2.5.2**：pandas 3 与 2 有不兼容改动，照搬网络示例前先核对版本
-- **Google Sheets**（gspread 5.12.4）：多用户模式的唯一事实源；只能整表读、整表写——读失败抛错拒写，写前快照 `_bak`
+- **Google Sheets**（gspread 5.12.4）：多用户模式的唯一事实源；只能整表读、整表写——读失败抛错拒写，写前快照 `_bak`；每日快照备份走 Apps Script（`deploy/backup/Code.gs`，部署与演练见 DEPLOY.md §6）
 - **本地 CSV 回退**：无 GCP 凭据时自动降级单机；云端模式每用户落盘缓存 `data/users/<user>/`
 
 **行情数据**
@@ -78,7 +78,7 @@ sp500-nasdaq100-gold-dca/
 ├── requirements.txt          # Cloud/Linux 可安装范围（每个直接依赖都有上界）
 ├── requirements-dev.lock     # Windows/Python 3.14 开发机完整 pip freeze（精确锁定）
 ├── pytest.ini                # pytest 只收 tests/，不扫描归档回测脚本
-├── tests/                    # 全离线回归 123 条：引擎 46 / storage 25 / AppTest 冒烟 20 / 拒网守卫 8 / 运行日志 7 / 状态键登记表 17（conftest 内 autouse 兜底拦网 + 日志隔离）
+├── tests/                    # 全离线回归 130 条：引擎 46 / storage 25 / AppTest 冒烟 20 / 拒网守卫 8 / 运行日志 7 / 状态键登记表 17 / 弃用 API 2 / 备份脚本源码不变量 5（conftest 内 autouse 兜底拦网 + 日志隔离）
 ├── .github/workflows/ci.yml  # push main 自动跑 Windows 3.14 lock + Linux 3.12 Cloud 范围
 ├── CHANGELOG.md              # 改动日志：每个 commit 一行带时刻（人读版流水，见第 12 条；scripts/changelog.py 维护）
 ├── start-app.bat             # 本机双击启动 Streamlit
@@ -108,7 +108,8 @@ sp500-nasdaq100-gold-dca/
 │   ├── BUGLIST.md            # 问题唯一事实源（逐条确认后才可修复）
 │   └── plans/                # 计划、设计与历史审计快照
 ├── deploy/                   # 部署与外发（Docker 那套已于 2026-08-17 删除，见 DEPLOY.md 第 5 节）
-│   ├── DEPLOY.md             # 部署指南：Cloud（生产）/ 本机 / ngrok
+│   ├── DEPLOY.md             # 部署指南：Cloud（生产）/ 本机 / ngrok / 备份制度（§6）
+│   ├── backup/Code.gs        # 事实源每日快照脚本（Apps Script，仓内是唯一事实源；⚠️ 不随 git 部署，改后须重新粘贴到表格绑定项目，见 DEPLOY.md §6）
 │   ├── start-dca-tunnel.bat  # ngrok 固定域名外发（⚠️ 只能写 ASCII，见 DEPLOY.md）
 │   └── bin/                  # ngrok.exe（33 MB，随项目走但不入库，删了只能重下）
 └── .streamlit/
