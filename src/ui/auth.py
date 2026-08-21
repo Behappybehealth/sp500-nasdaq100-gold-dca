@@ -14,6 +14,16 @@ import os
 import storage
 import streamlit as st
 
+from ..state import (
+    K_ACTIVATING,
+    K_ACT_ERR,
+    K_AUTH,
+    K_BOOT_ERR,
+    K_LOGIN_ERR,
+    K_NAMES,
+    K_SYNCED,
+    K_USER,
+)
 from .overlays import show_auth_mask, show_sync_mask
 
 # 日志频道（配置在 src/obs.py）。认证只记账号名与结果码，**绝不记 PIN**。
@@ -50,7 +60,7 @@ def _render_login_page(names, ph):
                 "<div class='fz-hint'>首次使用：创建管理员账号</div>",
                 unsafe_allow_html=True,
             )
-            _berr = st.session_state.pop("_boot_err", None)
+            _berr = st.session_state.pop(K_BOOT_ERR, None)
             if _berr:
                 st.error(_berr)
             with st.form("bootstrap_form"):
@@ -79,7 +89,7 @@ def _render_login_page(names, ph):
                     elif not (4 <= len(reg_pin or "") <= 8):
                         st.error("PIN 需要 6-8 位")
                     else:
-                        st.session_state["_auth"] = {
+                        st.session_state[K_AUTH] = {
                             "stage": "bootstrap",
                             "name": reg_name.strip(),
                             "pin": reg_pin,
@@ -90,13 +100,13 @@ def _render_login_page(names, ph):
                             "正在创建管理员", [("创建账号", "on"), ("准备数据", "off")]
                         )
                         st.rerun()
-        elif st.session_state.get("activating"):
-            who = st.session_state["activating"]
+        elif st.session_state.get(K_ACTIVATING):
+            who = st.session_state[K_ACTIVATING]
             st.markdown(
                 f"<div class='fz-hint'>👋 你好，{who}！首次登录请设置你的 PIN<br><span>只有你自己知道，管理员也看不到</span></div>",
                 unsafe_allow_html=True,
             )
-            _aerr = st.session_state.pop("_act_err", None)
+            _aerr = st.session_state.pop(K_ACT_ERR, None)
             if _aerr:
                 st.error(_aerr)
             with st.form("activate_form"):
@@ -118,7 +128,7 @@ def _render_login_page(names, ph):
                     elif not (4 <= len(act_pin or "") <= 8):
                         st.error("PIN 需要 6-8 位")
                     else:
-                        st.session_state["_auth"] = {
+                        st.session_state[K_AUTH] = {
                             "stage": "activate",
                             "who": who,
                             "pin": act_pin,
@@ -131,10 +141,10 @@ def _render_login_page(names, ph):
                         )
                         st.rerun()
             if st.button("← 返回登录", key="back_login"):
-                st.session_state.pop("activating", None)
+                st.session_state.pop(K_ACTIVATING, None)
                 st.rerun()
         else:
-            _lerr = st.session_state.pop("_login_err", None)
+            _lerr = st.session_state.pop(K_LOGIN_ERR, None)
             if _lerr:
                 st.error(_lerr)
             with st.form("login_form"):
@@ -152,7 +162,7 @@ def _render_login_page(names, ph):
                     if not nm or not login_pin:
                         st.error("请输入账号和密码")
                     else:
-                        st.session_state["_auth"] = {
+                        st.session_state[K_AUTH] = {
                             "stage": "login",
                             "name": nm,
                             "pin": login_pin,
@@ -193,11 +203,11 @@ def require_user() -> str:
             )
         st.stop()
     else:  # sheets 就绪 → 名字+PIN 门闸
-        if "user" not in st.session_state:
+        if K_USER not in st.session_state:
             _login_ph = (
                 st.empty()
             )  # 登录页统一挂载点：每趟运行都在门闸首位创建，保证 delta 路径稳定
-            _auth = st.session_state.get("_auth")
+            _auth = st.session_state.get(K_AUTH)
             if _auth is not None:
                 # —— 第二阶段（点击后的下一趟运行）：先挂整屏「登录中」遮罩，再做一切网络校验/同步。
                 # 点击那一趟零网络请求（用户名单走会话缓存），遮罩因此能在点击后立即出现。——
@@ -215,10 +225,10 @@ def require_user() -> str:
                         _log.error("login_error name=%s err=%s", _auth.get("name"), e)
                         _status, _canon, _fresh = "error", None, None
                     if _fresh is not None:
-                        st.session_state["_names"] = _fresh  # 顺手刷新会话名单缓存
-                    st.session_state.pop("_auth", None)
+                        st.session_state[K_NAMES] = _fresh  # 顺手刷新会话名单缓存
+                    st.session_state.pop(K_AUTH, None)
                     if _status == "ok" and _canon:
-                        st.session_state["user"] = _canon
+                        st.session_state[K_USER] = _canon
                         show_auth_mask(
                             "正在登录",
                             [("验证账号", "done"), ("同步云端数据", "on")],
@@ -230,19 +240,19 @@ def require_user() -> str:
                             _log.warning(
                                 "post_login_sync_failed user=%s err=%s", _canon, e
                             )
-                        st.session_state["synced"] = True
+                        st.session_state[K_SYNCED] = True
                     elif _status == "pending":
-                        st.session_state["activating"] = _canon
+                        st.session_state[K_ACTIVATING] = _canon
                     elif _status == "no_user":
-                        st.session_state["_login_err"] = "账号不存在，请联系管理员开通"
+                        st.session_state[K_LOGIN_ERR] = "账号不存在，请联系管理员开通"
                     elif _status == "bad_pin":
-                        st.session_state["_login_err"] = "账号或密码不对"
+                        st.session_state[K_LOGIN_ERR] = "账号或密码不对"
                     elif _status == "locked":
-                        st.session_state["_login_err"] = (
+                        st.session_state[K_LOGIN_ERR] = (
                             "失败次数过多，账号已锁定，请 15 分钟后重试"
                         )
                     else:
-                        st.session_state["_login_err"] = "网络异常，请稍后重试"
+                        st.session_state[K_LOGIN_ERR] = "网络异常，请稍后重试"
                     if _status in ("no_user", "bad_pin", "locked"):
                         _log.warning(
                             "auth_denied name=%s status=%s", _auth.get("name"), _status
@@ -259,10 +269,10 @@ def require_user() -> str:
                     except Exception as e:
                         _log.error("set_pin_error user=%s err=%s", _auth.get("who"), e)
                         _ok, _msg = False, "网络异常，请稍后重试"
-                    st.session_state.pop("_auth", None)
+                    st.session_state.pop(K_AUTH, None)
                     if _ok:
-                        st.session_state.pop("activating", None)
-                        st.session_state["user"] = _auth["who"]
+                        st.session_state.pop(K_ACTIVATING, None)
+                        st.session_state[K_USER] = _auth["who"]
                         show_auth_mask(
                             "正在设置 PIN",
                             [("写入云端", "done"), ("同步云端数据", "on")],
@@ -276,9 +286,9 @@ def require_user() -> str:
                                 _auth.get("who"),
                                 e,
                             )
-                        st.session_state["synced"] = True
+                        st.session_state[K_SYNCED] = True
                     else:
-                        st.session_state["_act_err"] = (
+                        st.session_state[K_ACT_ERR] = (
                             _msg  # activating 保留，回设置 PIN 页报错
                         )
                     st.rerun()
@@ -289,7 +299,7 @@ def require_user() -> str:
                     try:
                         _fresh = storage.list_users_fresh()
                         if _fresh:  # 防呆：自举页是会话缓存名单渲染的，可能已过期
-                            st.session_state["_names"] = _fresh
+                            st.session_state[K_NAMES] = _fresh
                             _ok, _msg = False, "系统已有账号，请直接登录"
                         else:
                             _ok, _msg = storage.create_user(
@@ -298,10 +308,10 @@ def require_user() -> str:
                     except Exception as e:
                         _log.error("bootstrap_error name=%s err=%s", _auth.get("name"), e)
                         _ok, _msg = False, "网络异常，请稍后重试"
-                    st.session_state.pop("_auth", None)
+                    st.session_state.pop(K_AUTH, None)
                     if _ok:
-                        st.session_state["_names"] = [_auth["name"]]
-                        st.session_state["user"] = _auth["name"]
+                        st.session_state[K_NAMES] = [_auth["name"]]
+                        st.session_state[K_USER] = _auth["name"]
                         show_auth_mask(
                             "正在创建账号",
                             [("创建管理员账号", "done"), ("同步云端数据", "on")],
@@ -315,19 +325,19 @@ def require_user() -> str:
                                 _auth.get("name"),
                                 e,
                             )
-                        st.session_state["synced"] = True
+                        st.session_state[K_SYNCED] = True
                     elif _msg == "系统已有账号，请直接登录":
-                        st.session_state["_login_err"] = (
+                        st.session_state[K_LOGIN_ERR] = (
                             _msg  # 名单已刷新，下一趟进登录页报错
                         )
                     else:
-                        st.session_state["_boot_err"] = _msg
+                        st.session_state[K_BOOT_ERR] = _msg
                     st.rerun()
                 else:
-                    st.session_state.pop("_auth", None)  # 未知阶段：丢弃，回登录页
+                    st.session_state.pop(K_AUTH, None)  # 未知阶段：丢弃，回登录页
                     st.rerun()
             # —— 登录页渲染：名单走会话缓存，本页运行零网络请求 ——
-            names = st.session_state.get("_names")
+            names = st.session_state.get(K_NAMES)
             if names is None:
                 try:
                     names = storage.list_users()  # 仅每会话首次加载触网一次
@@ -336,13 +346,13 @@ def require_user() -> str:
                     _log.error("user_list_unavailable_login_blocked err=%s", e)
                     st.error("☁️ 云端存储暂时不可用，请稍后刷新重试。")
                     st.stop()
-                st.session_state["_names"] = names
+                st.session_state[K_NAMES] = names
             # 登录页整体挂进固定容器：提交趟/校验趟里容器保持为空 → 上一趟登录页被整体摘除
             with _login_ph.container():
                 _render_login_page(names, _login_ph)
             st.stop()
-        user = st.session_state["user"]
-        if not st.session_state.get("synced"):
+        user = st.session_state[K_USER]
+        if not st.session_state.get(K_SYNCED):
             _ld = show_sync_mask("正在同步云端数据…", "首次进入稍等几秒")
             try:
                 storage.sync_local(user)  # 每会话首次进入同步一次云端数据到本地缓存
@@ -350,6 +360,6 @@ def require_user() -> str:
                 # 同步失败不阻塞进入（侧栏🔄可重同步），但必须可见——否则建议会基于陈旧缓存静默出错
                 _log.warning("session_sync_failed user=%s err=%s", user, e)
                 st.warning("⚠️ 云端同步失败，本次建议基于本地缓存，可能不是最新。请稍后点侧栏 🔄 重试。")
-            st.session_state["synced"] = True
+            st.session_state[K_SYNCED] = True
             _ld.empty()
     return user

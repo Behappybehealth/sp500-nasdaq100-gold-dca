@@ -13,6 +13,7 @@ import streamlit as st
 import storage
 
 from ..dates import biz_today
+from ..state import K_PENDING_OBS, K_PENDING_TX, K_TX_DUP
 
 
 def render(tab, result: dict, dec: dict, assets: dict, user: str):
@@ -88,7 +89,7 @@ def render(tab, result: dict, dec: dict, assets: dict, user: str):
                     st.error(f"日期「{tx_date}」不是合法的 YYYY-MM-DD，未写入。")
                 else:
                     shares = tx_shares if tx_shares else round(tx_amount / tx_fx / tx_price, 6)
-                    st.session_state["pending_tx"] = {
+                    st.session_state[K_PENDING_TX] = {
                         "date": tx_date,
                         "action": tx_action,
                         "asset": tx_asset,
@@ -101,8 +102,8 @@ def render(tab, result: dict, dec: dict, assets: dict, user: str):
                         "fx_rate": tx_fx,
                         "notes": tx_notes,
                     }
-        if st.session_state.get("pending_tx"):
-            p = st.session_state["pending_tx"]
+        if st.session_state.get(K_PENDING_TX):
+            p = st.session_state[K_PENDING_TX]
             st.warning(
                 f"请确认写入：{p['date']} {p['action']} {assets[p['asset']]['name_cn']}（{p['symbol']}）"
                 f"｜金额 ¥{p['amount_rmb']:,.2f}｜净值 {p['price']} U｜数量 {p['shares']}｜汇率 {p['fx_rate']}｜手续费 ¥{p['fee_rmb']}｜{p['notes']}"
@@ -113,36 +114,36 @@ def render(tab, result: dict, dec: dict, assets: dict, user: str):
                     storage.append_row("transactions", user, p)
                 except ValueError as _e:
                     # 同日同资产同方向去重拦截：让用户决定是取消还是确认"这真是新一笔"
-                    st.session_state["tx_dup"] = str(_e)
+                    st.session_state[K_TX_DUP] = str(_e)
                 except Exception as _e:
                     st.error(f"写入失败：云端存储暂时不可用（{_e}）。历史数据未被覆盖，请稍后重试。")
                 else:
-                    st.session_state.pop("pending_tx")
+                    st.session_state.pop(K_PENDING_TX)
                     st.cache_data.clear()
                     st.success("已写入成交记录")
                     st.rerun()
             if b2.button("❌ 取消", use_container_width=True):
-                st.session_state.pop("pending_tx")
+                st.session_state.pop(K_PENDING_TX)
                 st.rerun()
-        if st.session_state.get("tx_dup"):
-            st.warning(f"⚠️ {st.session_state['tx_dup']}")
+        if st.session_state.get(K_TX_DUP):
+            st.warning(f"⚠️ {st.session_state[K_TX_DUP]}")
             d1, d2 = st.columns(2)
             if d1.button("仍要写入（确认是新一笔）", use_container_width=True):
                 try:
                     storage.append_row(
-                        "transactions", user, st.session_state["pending_tx"], force=True
+                        "transactions", user, st.session_state[K_PENDING_TX], force=True
                     )
                 except Exception as _e:
                     st.error(f"写入失败：云端存储暂时不可用（{_e}）。历史数据未被覆盖，请稍后重试。")
                 else:
-                    st.session_state.pop("pending_tx")
-                    st.session_state.pop("tx_dup")
+                    st.session_state.pop(K_PENDING_TX)
+                    st.session_state.pop(K_TX_DUP)
                     st.cache_data.clear()
                     st.success("已写入成交记录（已确认为新一笔）")
                     st.rerun()
             if d2.button("❌ 取消写入", use_container_width=True, key="btn_dup_cancel"):
-                st.session_state.pop("tx_dup")
-                st.session_state.pop("pending_tx")
+                st.session_state.pop(K_TX_DUP)
+                st.session_state.pop(K_PENDING_TX)
                 st.rerun()
 
         st.markdown("---")
@@ -153,7 +154,7 @@ def render(tab, result: dict, dec: dict, assets: dict, user: str):
             obs_submit = st.form_submit_button("生成复述")
         if obs_submit:
             w = result["suggested_weights"]
-            st.session_state["pending_obs"] = {
+            st.session_state[K_PENDING_OBS] = {
                 "date": str(biz_today()),
                 "action": "observe",
                 "total_suggested_rmb": dec["suggested_amount_rmb"],
@@ -165,14 +166,14 @@ def render(tab, result: dict, dec: dict, assets: dict, user: str):
                 "reason": obs_reason,
                 "notes": obs_notes,
             }
-        if st.session_state.get("pending_obs"):
+        if st.session_state.get(K_PENDING_OBS):
             st.warning(
-                f"请确认写入观察记录：{json.dumps(st.session_state['pending_obs'], ensure_ascii=False)}"
+                f"请确认写入观察记录：{json.dumps(st.session_state[K_PENDING_OBS], ensure_ascii=False)}"
             )
             if st.button("✅ 确认写入观察", use_container_width=True):
                 try:
                     storage.append_row(
-                        "observations", user, st.session_state.pop("pending_obs")
+                        "observations", user, st.session_state.pop(K_PENDING_OBS)
                     )
                 except Exception as _e:
                     st.error(f"写入失败：云端存储暂时不可用（{_e}）。历史数据未被覆盖，请稍后重试。")

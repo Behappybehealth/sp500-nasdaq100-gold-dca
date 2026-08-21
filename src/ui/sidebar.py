@@ -16,6 +16,7 @@ from ..context import Decision, Paths
 from ..dates import biz_today
 from ..services.model import run_model
 from ..services.quotes import fetch_btc, fetch_xau_spot
+from ..state import K_SYNCED, invalidate_sync
 from .overlays import show_loading
 
 # ---- ① 实时行情（标题后第一位，一目了然）----
@@ -251,7 +252,7 @@ def render(paths: Paths, user: str) -> Decision:
             _refresh = st.form_submit_button("🔄 刷新", use_container_width=True)
     if _refresh:
         st.cache_data.clear()
-        st.session_state.pop("synced", None)  # 触发重进时重新从云端同步
+        invalidate_sync()  # 触发重进时重新从云端同步（协议收敛在 src/state.py）
         st.rerun()
     # 用户提交了非零金额 → 用实际金额重跑模型（行情快照命中时几乎即时）
     if amount_in > 0:
@@ -329,7 +330,8 @@ def render(paths: Paths, user: str) -> Decision:
             )
             if st.button("开始上传", key="btn_import"):
                 counts = storage.import_local_to_sheets(user)
-                st.session_state["synced"] = True
+                # 防御性置位：走到侧栏必然已经过 auth.py 的会话首同步，这里其实已是 True
+                st.session_state[K_SYNCED] = True
                 st.success(
                     f"已上传：成交 {counts['transactions']} 条｜观察 {counts['observations']} 条｜预算 {counts['budget_overrides']} 项"
                 )
