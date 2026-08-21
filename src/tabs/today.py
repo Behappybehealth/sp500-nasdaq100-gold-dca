@@ -59,7 +59,7 @@ def render(tab, result: dict, dec: dict, ms: dict, assets: dict):
         st.subheader("累计持仓结果完整表格")
         st.dataframe(
             parse_wide_table(result["wide_table_markdown"]),
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
 
@@ -95,5 +95,5 @@ def render(tab, result: dict, dec: dict, ms: dict, assets: dict):
                     ),
                 }
             )
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
         st.caption("决策依据：" + dec["reason"])

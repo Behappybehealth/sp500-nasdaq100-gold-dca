@@ -48,7 +48,7 @@ def render(tab, backtest_dir: Path):
                         "正收益路径": f"{o['win_rate']:.2%}",
                     }
                 )
-            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
 
             # 按持有期的分桶对比
             st.markdown("**按持有期分（三策略）**")
@@ -82,7 +82,7 @@ def render(tab, backtest_dir: Path):
                             else "",
                         }
                     )
-            st.dataframe(pd.DataFrame(b_rows), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(b_rows), width="stretch", hide_index=True)
 
             # 代表性路径
             st.markdown("**代表性起点路径（三策略对比）**")
@@ -104,7 +104,7 @@ def render(tab, backtest_dir: Path):
                             "最长连续浮亏": f"{e.get('max_consec_uw', 0)}天",
                         }
                     )
-            st.dataframe(pd.DataFrame(ex_rows), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(ex_rows), width="stretch", hide_index=True)
 
         # ========== ② 策略对比说明 ==========
         st.markdown("---")
@@ -174,12 +174,12 @@ def render(tab, backtest_dir: Path):
                         "最长连续浮亏": "—",
                     }
                 )
-            st.dataframe(pd.DataFrame(s_rows), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(s_rows), width="stretch", hide_index=True)
 
         # ---- 标普500 滚动表 ----
         st.markdown("#### 标普500（^GSPC，2016-01 → 2026-08，每日定投 ¥100）")
         if d3:
-            st.dataframe(pd.DataFrame(d3["sp500"]), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(d3["sp500"]), width="stretch", hide_index=True)
         st.caption(
             "定投 ≥5 年的所有起点均正收益。最差路径回撤 -32.6%（2020 疫情 + 2022 加息），但坚持 5 年后最差仍 +9.5%。"
         )
@@ -187,7 +187,7 @@ def render(tab, backtest_dir: Path):
         # ---- 纳指100 滚动表 ----
         st.markdown("#### 纳指100（QQQ，2016-01 → 2024-12，每月定投 ¥1000）")
         if d3:
-            st.dataframe(pd.DataFrame(d3["nasdaq100"]), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(d3["nasdaq100"]), width="stretch", hide_index=True)
         st.caption(
             "纳指100 是过去 10 年最强资产之一：5 年定投最差仍 +14.6%，7 年最差 +45.1%。但回撤最深（-28.6%~-30.7%），心理承受力要求高。"
         )
@@ -195,7 +195,7 @@ def render(tab, backtest_dir: Path):
         # ---- 黄金 滚动表 ----
         st.markdown("#### 黄金 XAUT/USD（2020-02 → 2026-08，每月定投 $100）")
         if d3:
-            st.dataframe(pd.DataFrame(d3["gold"]), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(d3["gold"]), width="stretch", hide_index=True)
         st.caption(
             "黄金 2020 年以来表现极强：3 年定投仅 0.4% 概率亏损，5 年全部正收益且最差仍 +46.6%。但注意 XAUT 历史仅 ~6 年，7 年/10 年无数据。"
         )
@@ -206,7 +206,7 @@ def render(tab, backtest_dir: Path):
             "⚠️ 沪深300 不在当前策略标的中，但作为 A 股代表，其回测结果有重要参考价值。"
         )
         if d3:
-            st.dataframe(pd.DataFrame(d3["hs300"]), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(d3["hs300"]), width="stretch", hide_index=True)
         st.caption(
             "沪深300 是四标的中表现最弱的：5 年定投亏损概率高达 52%，中位收益 -0.6%。但 10 年定投全部正收益（+13.3%~+28.4%），说明 A 股需要更长持有期。"
         )
@@ -215,7 +215,7 @@ def render(tab, backtest_dir: Path):
         st.markdown("---")
         st.markdown("### 四、四标的横向对比（关键指标速览）")
         if d3:
-            st.dataframe(pd.DataFrame(d3["cross"]), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(d3["cross"]), width="stretch", hide_index=True)
 
         # ========== ⑤ 综合结论 ==========
         st.markdown("---")

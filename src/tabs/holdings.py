@@ -59,7 +59,7 @@ def render(tab, result: dict, pf: dict, assets: dict, paths: Paths, user: str):
                     "中性权重%": round(info["neutral_weight"] * 100, 1),
                 }
             )
-        st.dataframe(pd.DataFrame(wrows), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(wrows), width="stretch", hide_index=True)
 
         st.subheader("近一年价格走势（缓存收盘）")
         series = load_price_series(paths)

@@ -127,7 +127,7 @@ def render(paths: Paths, user: str) -> Decision:
                 st.markdown("---")
                 with st.form("admin_add_user"):
                     _nn = st.text_input("新用户名字")
-                    if st.form_submit_button("添加账号", use_container_width=True):
+                    if st.form_submit_button("添加账号", width="stretch"):
                         try:
                             _ok, _msg = storage.admin_add_user(_nn)
                         except Exception as _e:
@@ -249,7 +249,7 @@ def render(paths: Paths, user: str) -> Decision:
                 label_visibility="collapsed",
             )
         with _col_r:
-            _refresh = st.form_submit_button("🔄 刷新", use_container_width=True)
+            _refresh = st.form_submit_button("🔄 刷新", width="stretch")
     if _refresh:
         st.cache_data.clear()
         invalidate_sync()  # 触发重进时重新从云端同步（协议收敛在 src/state.py）
@@ -290,7 +290,7 @@ def render(paths: Paths, user: str) -> Decision:
             label_visibility="collapsed",
         )
     with _col_s:
-        if st.button("💾 保存", use_container_width=True, key="btn_save_budget"):
+        if st.button("💾 保存", width="stretch", key="btn_save_budget"):
             try:
                 _bval = float(budget_in)
             except (TypeError, ValueError):

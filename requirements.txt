@@ -5,9 +5,11 @@
 # 复现开发机用另一份 requirements-dev.lock（全钉，见 BUG-015 确认记录）。
 #
 # 上界的作用：拦住上游大版本改动把线上打挂（pandas 2→3 就有不兼容改动）。
-# 下界是历史声明、并未实测——真正验证过的组合看 requirements-dev.lock。
+# streamlit 的下界钉在 1.61.1：UI 全部用 1.46+ 才有的 width="stretch" 布局参数，
+# 低于此版本直接 TypeError 起不来；同时它也是开发机实装实测版本。其余依赖的下界
+# 是历史声明、并未实测——真正验证过的组合看 requirements-dev.lock。
 
-streamlit>=1.32.0,<2
+streamlit>=1.61.1,<2
 yfinance>=0.2.40,<2
 pandas>=2.0.0,<4
 numpy>=1.24.0,<3

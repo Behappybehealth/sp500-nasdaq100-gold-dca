@@ -81,7 +81,7 @@ def _render_login_page(names, ph):
                     placeholder="请再次输入 PIN",
                     label_visibility="collapsed",
                 )
-                if st.form_submit_button("创建并进入", use_container_width=True):
+                if st.form_submit_button("创建并进入", width="stretch"):
                     if not reg_name.strip():
                         st.error("名字不能为空")
                     elif reg_pin != reg_pin2:
@@ -122,7 +122,7 @@ def _render_login_page(names, ph):
                     placeholder="请再次输入 PIN",
                     label_visibility="collapsed",
                 )
-                if st.form_submit_button("设置 PIN 并进入", use_container_width=True):
+                if st.form_submit_button("设置 PIN 并进入", width="stretch"):
                     if act_pin != act_pin2:
                         st.error("两次输入的 PIN 不一致")
                     elif not (4 <= len(act_pin or "") <= 8):
@@ -157,7 +157,7 @@ def _render_login_page(names, ph):
                     placeholder="请输入密码",
                     label_visibility="collapsed",
                 )
-                if st.form_submit_button("登 录", use_container_width=True):
+                if st.form_submit_button("登 录", width="stretch"):
                     nm = login_name.strip()
                     if not nm or not login_pin:
                         st.error("请输入账号和密码")

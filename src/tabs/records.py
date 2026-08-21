@@ -109,7 +109,7 @@ def render(tab, result: dict, dec: dict, assets: dict, user: str):
                 f"｜金额 ¥{p['amount_rmb']:,.2f}｜净值 {p['price']} U｜数量 {p['shares']}｜汇率 {p['fx_rate']}｜手续费 ¥{p['fee_rmb']}｜{p['notes']}"
             )
             b1, b2 = st.columns(2)
-            if b1.button("✅ 确认写入", use_container_width=True):
+            if b1.button("✅ 确认写入", width="stretch"):
                 try:
                     storage.append_row("transactions", user, p)
                 except ValueError as _e:
@@ -122,13 +122,13 @@ def render(tab, result: dict, dec: dict, assets: dict, user: str):
                     st.cache_data.clear()
                     st.success("已写入成交记录")
                     st.rerun()
-            if b2.button("❌ 取消", use_container_width=True):
+            if b2.button("❌ 取消", width="stretch"):
                 st.session_state.pop(K_PENDING_TX)
                 st.rerun()
         if st.session_state.get(K_TX_DUP):
             st.warning(f"⚠️ {st.session_state[K_TX_DUP]}")
             d1, d2 = st.columns(2)
-            if d1.button("仍要写入（确认是新一笔）", use_container_width=True):
+            if d1.button("仍要写入（确认是新一笔）", width="stretch"):
                 try:
                     storage.append_row(
                         "transactions", user, st.session_state[K_PENDING_TX], force=True
@@ -141,7 +141,7 @@ def render(tab, result: dict, dec: dict, assets: dict, user: str):
                     st.cache_data.clear()
                     st.success("已写入成交记录（已确认为新一笔）")
                     st.rerun()
-            if d2.button("❌ 取消写入", use_container_width=True, key="btn_dup_cancel"):
+            if d2.button("❌ 取消写入", width="stretch", key="btn_dup_cancel"):
                 st.session_state.pop(K_TX_DUP)
                 st.session_state.pop(K_PENDING_TX)
                 st.rerun()
@@ -170,7 +170,7 @@ def render(tab, result: dict, dec: dict, assets: dict, user: str):
             st.warning(
                 f"请确认写入观察记录：{json.dumps(st.session_state[K_PENDING_OBS], ensure_ascii=False)}"
             )
-            if st.button("✅ 确认写入观察", use_container_width=True):
+            if st.button("✅ 确认写入观察", width="stretch"):
                 try:
                     storage.append_row(
                         "observations", user, st.session_state.pop(K_PENDING_OBS)
