@@ -14,6 +14,7 @@ import storage  # 存储层：Google Sheets 优先，本地 CSV 回退
 import streamlit as st
 
 from src.context import build_paths
+from src.obs import setup_logging
 from src.ui import auth, sidebar
 from src.ui.styles import inject_css
 from src.tabs import backtest, history, holdings, records, strategy_doc, today
@@ -25,6 +26,9 @@ CODE_DIR = _paths.code_dir
 DATA_DIR = _paths.data_dir
 ASSETS = _paths.assets
 BACKTEST_DIR = _paths.backtest_dir
+
+# ---- 运行日志：必须在 storage.init 之前，否则首次读写的失败无处落（src/obs.py，幂等）----
+setup_logging(CODE_DIR / "logs")
 
 storage.init(DATA_DIR)
 

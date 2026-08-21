@@ -20,6 +20,7 @@
 import csv
 import hashlib
 import json
+import logging
 import secrets
 import shutil
 import time
@@ -33,6 +34,11 @@ try:
     from gspread.exceptions import WorksheetNotFound as _WsNotFound
 except Exception:  # pragma: no cover - gspread 是 st-gsheets-connection 的硬依赖，本地纯 CSV 模式可能没装
     _WsNotFound = None  # type: ignore[assignment]
+
+
+# 日志频道（配置在 src/obs.py，由 app.py 启动时调一次）。
+# 这里只 getLogger、不 import src/——数据层不反向依赖业务层。未配置 handler 时静默无输出，不报错。
+_log = logging.getLogger("dca.storage")
 
 
 class SheetReadError(RuntimeError):
@@ -159,6 +165,7 @@ def _read_ws(name: str, fields: list, fresh: bool = False) -> pd.DataFrame:
     except Exception as e:
         if _is_missing_ws(e):
             return pd.DataFrame(columns=fields)
+        _log.error("sheet_read_failed table=%s err=%s", name, e)
         raise SheetReadError(f"读取工作表 {name} 失败：{e}") from e
     if df is None or df.empty:
         return pd.DataFrame(columns=fields)
@@ -182,6 +189,7 @@ def _write_ws(name: str, df: pd.DataFrame) -> None:
         if _is_missing_ws(e):
             cur = None  # 首次写这张表，没有可快照的内容
         else:
+            _log.error("write_precheck_read_failed table=%s err=%s", name, e)
             raise SheetWriteError(f"写前读取 {name} 失败，已放弃写入：{e}") from e
     if cur is not None and not cur.dropna(how="all").empty:
         bak = f"{name}_bak"
@@ -191,6 +199,7 @@ def _write_ws(name: str, df: pd.DataFrame) -> None:
             except Exception:
                 conn.create(worksheet=bak, data=cur)
         except Exception as e:
+            _log.error("write_snapshot_failed table=%s bak=%s err=%s", name, bak, e)
             raise SheetWriteError(f"写前快照 {bak} 失败，已放弃写入 {name}：{e}") from e
         _SHEET_CACHE.pop(bak, None)
     try:
@@ -199,6 +208,7 @@ def _write_ws(name: str, df: pd.DataFrame) -> None:
         try:
             conn.create(worksheet=name, data=df.fillna(""))
         except Exception as e:
+            _log.error("sheet_write_failed table=%s err=%s", name, e)
             raise SheetWriteError(f"写入工作表 {name} 失败：{e}") from e
 
 

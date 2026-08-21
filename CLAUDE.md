@@ -48,8 +48,14 @@
 - **Streamlit Community Cloud**：推 `main` 自动重新部署；**容器时区 UTC**——业务"今天"一律走 `biz_today()`（Asia/Shanghai 固定 UTC+8，`src/dates.py` 与引擎 `dca_calculator.py` 双实现同规则、必须同改），禁止裸 `date.today()`
 - **ngrok 固定域名**：本机临时外发；`deploy/start-dca-tunnel.bat` 只能写 ASCII
 
+**运行日志**
+- **标准库 `logging`，零第三方**：配置集中 `src/obs.py`（`setup_logging()` 幂等，`app.py:31` 启动调一次，**必须在 `storage.init` 之前**），落点 stderr（Cloud 日志面板唯一可见处）+ `logs/dca.log`（1 MB × 3 轮转）
+- **各模块自己 `logging.getLogger("dca.<频道>")`**，频道名写死不用 `__name__`——`storage.py` 的 `__name__` 是 `"storage"`，不在 `dca` 子树下，用它就只能去配 root logger，把 gspread/urllib3 噪声全引进来；这也让数据层不必反向 `import src`
+- **只记失败与降级，绝不记 PIN/哈希/盐**（`tests/test_obs.py` 用 AST 扫全部调用点做断言，不靠 review）。埋点只加在**已有**异常分支上，不新造控制流；`except` 一律 `as e` 把原始异常带进日志——丢掉 `e` 就分不清凭据过期/配额撞满/网络抖动
+- 详设与边界（含"零告警"这条已知边界）见 `docs/ARCHITECTURE-DETAIL.md` §12
+
 **工程工具**
-- **pytest 9.1.1**：回归套件只收 `tests/`，离线由 `conftest` 里 autouse 的 `_deny_network` 强制（socket/DNS/子进程四口全拦、回环放行），不靠各用例自觉；Streamlit 整页冒烟用 `streamlit.testing.v1.AppTest`
+- **pytest 9.1.1**：回归套件只收 `tests/`，离线由 `conftest` 里 autouse 的 `_deny_network` 强制（socket/DNS/子进程四口全拦、回环放行），不靠各用例自觉；同处 autouse 的 `_quarantine_logging` 预占 `dca` logger 槽位，防 AppTest 把测试假异常写进工作树 `logs/dca.log`；Streamlit 整页冒烟用 `streamlit.testing.v1.AppTest`
 - **GitHub Actions**：push `main` 自动跑两条腿——Windows/Python 3.14 安装精确 lock，Linux/Python 3.12 安装 Cloud 范围文件；不依赖 secrets
 - **依赖两份分工**：`requirements.txt` 是 Cloud 可安装范围（全部有上界），`requirements-dev.lock` 是 Windows/Python 3.14 开发机全量精确锁定
 - **ruff** 仅作格式化、未进 CI 强制；**git** + GitHub **公开**仓库（`Behappybehealth/sp500-nasdaq100-gold-dca`，用户有意设置）——**别假定它是私有的**：仓内文档与策略口径全部对外可见，写文档时按公开处理；判定用不带凭据的 `api.github.com/users/<账号>/repos`（只返回 public 仓）
@@ -59,22 +65,23 @@
 
 ```
 sp500-nasdaq100-gold-dca/
-├── app.py                    # Streamlit 主程序（66 行纯装配层：import/认证一行/侧栏一行/6 个 tab 调用，业务全在 src/）
-├── storage.py                # 存储层：Google Sheets 优先，本地 CSV 回退（612 行；含写前快照、PBKDF2 认证、成交同日同资产同方向去重）
+├── app.py                    # Streamlit 主程序（70 行纯装配层：import/setup_logging/认证一行/侧栏一行/6 个 tab 调用，业务全在 src/）
+├── storage.py                # 存储层：Google Sheets 优先，本地 CSV 回退（622 行；含写前快照、PBKDF2 认证、成交同日同资产同方向去重；4 处读写失败埋点）
 ├── src/                      # 业务层：app.py 只留装配，逻辑全在这里
 │   ├── context.py            # 启动上下文：Paths / Decision / build_paths（73 行；code_dir 按 parent.parent 定位）
 │   ├── dates.py              # 业务"今天"唯一定义 biz_today()（20 行；Asia/Shanghai 固定 UTC+8，与引擎 dca_calculator.py 同规则双实现，两处必须同改）
-│   ├── services/             # 服务层：model.py 模型调用（45）/ quotes.py 行情抓取（87）/ curves.py 曲线数据（102）
-│   ├── ui/                   # 样式/遮罩/侧栏/认证：styles.py 全局 CSS（185）/ overlays.py 三遮罩（59）/ sidebar.py 侧栏（329，返回 Decision）/ auth.py 认证门闸（328，require_user()）
-│   └── tabs/                 # 六个 tab 渲染：today(100)/holdings(78)/records(182，记账写链)/history(26)/backtest(249)/strategy_doc(18)，各暴露 render(tab, ...)
+│   ├── obs.py                # 运行日志配置（62 行；setup_logging() 幂等，stderr + logs/dca.log 轮转双落点；只配 handler 不提供 emitter）
+│   ├── services/             # 服务层：model.py 模型调用（67，含引擎失败/降级 3 处埋点）/ quotes.py 行情抓取（87）/ curves.py 曲线数据（102）
+│   ├── ui/                   # 样式/遮罩/侧栏/认证：styles.py 全局 CSS（185）/ overlays.py 三遮罩（59）/ sidebar.py 侧栏（337，返回 Decision）/ auth.py 认证门闸（355，require_user()，9 处埋点）
+│   └── tabs/                 # 六个 tab 渲染：today(99)/holdings(78)/records(182，记账写链)/history(26)/backtest(249)/strategy_doc(18)，各暴露 render(tab, ...)
 ├── requirements.txt          # Cloud/Linux 可安装范围（每个直接依赖都有上界）
 ├── requirements-dev.lock     # Windows/Python 3.14 开发机完整 pip freeze（精确锁定）
 ├── pytest.ini                # pytest 只收 tests/，不扫描归档回测脚本
-├── tests/                    # 全离线回归：引擎纯函数 / storage 安全路径 / AppTest 整页冒烟 / 拒网守卫自测（conftest 内 autouse 兜底拦网）
+├── tests/                    # 全离线回归 106 条：引擎 46 / storage 25 / AppTest 冒烟 20 / 拒网守卫 8 / 运行日志 7（conftest 内 autouse 兜底拦网 + 日志隔离）
 ├── .github/workflows/ci.yml  # push main 自动跑 Windows 3.14 lock + Linux 3.12 Cloud 范围
 ├── CHANGELOG.md              # 改动日志：每个 commit 一行带时刻（人读版流水，见第 12 条；scripts/changelog.py 维护）
 ├── start-app.bat             # 本机双击启动 Streamlit
-├── logs/                     # 运行日志约定落点（*.log 不入库；Cloud 容器重启即失，运行日志尚未实现）
+├── logs/                     # 运行日志落点 dca.log（*.log 不入库；1 MB × 3 轮转；Cloud 容器重启即失，那边只有 stderr 面板）
 ├── scripts/
 │   ├── dca_calculator.py     # 计算引擎（1391 行，独立可运行，输出 JSON；--user 读 data/users/<user>/；行情抓取并发+退避重试，落库三道护栏+每次回退 5 天重抓，实时价主闸+10 天副闸；行情快照 600s 内复用抓价结果）
 │   ├── dca_action.py         # 业务动作 CLI（203 行）：record tx/obs + override，Skill 经它与 Web 共用 storage 业务层

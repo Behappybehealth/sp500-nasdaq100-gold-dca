@@ -44,6 +44,7 @@
 | 回归测试 | pytest 9.1.1 + Streamlit AppTest | 三层全离线回归：引擎纯函数 / storage 安全路径 / 整页渲染冒烟；离线由 autouse 拒网守卫强制并自测 |
 | 持续集成 | GitHub Actions | push `main` 自动跑 Windows/Python 3.14 精确锁定环境 + Linux/Python 3.12 Cloud 范围环境；不读取 secrets |
 | 代码格式 | ruff | 有格式化痕迹，但**未进 CI 强制** |
+| 运行日志 | 标准库 `logging`（零第三方） | `dca.*` 子树，stderr + `logs/dca.log`（1 MB × 3 轮转）双落点；配置集中 `src/obs.py`，见 §11 |
 
 （版本复核于 2026-08-20；本机实装与精确版本见 `requirements-dev.lock`）
 
@@ -54,7 +55,7 @@
    浏览器（用户）  ←───→ │  Streamlit Community Cloud      │
                         │  一个 Python 进程服务所有用户     │
                         │                                 │
-                        │    app.py（66 行，纯装配层）      │
+                        │    app.py（70 行，纯装配层）      │
                         │    认证/侧栏/6 tab 全部在 src/   │
                         └───┬──────────────────┬──────────┘
                             │                  │
@@ -85,7 +86,7 @@
 
 **三层 + 一个边界**：`app.py`（UI + 业务逻辑，耦合较紧）→ 通过 subprocess 隔离 `dca_calculator.py`（纯计算）、通过 import 使用 `storage.py`（数据层）。子进程边界是本项目最干净的设计：改计算不影响 UI，反之亦然。
 
-**拆分已完成**（方案存档见 `docs/plans/app-split-design.md`）：启动路径逻辑收编 `src/context.py`，服务函数（模型调用 / 行情抓取 / 曲线计算）在 `src/services/`，全局 CSS / 遮罩 / 侧栏 / 认证在 `src/ui/`，六个 tab 在 `src/tabs/`；所有模块数据显式收参，不读 app.py 模块级全局。app.py 1559→**66 行纯装配层**（import → build_paths → storage.init → 认证门闸一行 → 侧栏一行 → 6 个 tab render 调用）。
+**拆分已完成**（方案存档见 `docs/plans/app-split-design.md`）：启动路径逻辑收编 `src/context.py`，服务函数（模型调用 / 行情抓取 / 曲线计算）在 `src/services/`，全局 CSS / 遮罩 / 侧栏 / 认证在 `src/ui/`，六个 tab 在 `src/tabs/`；所有模块数据显式收参，不读 app.py 模块级全局。app.py 1559→**70 行纯装配层**（import → build_paths → setup_logging → storage.init → 认证门闸一行 → 侧栏一行 → 6 个 tab render 调用）。
 
 ## 4. 数据流：一次"打开页面看今日建议"
 
@@ -153,17 +154,17 @@ tab4（26 行）是这条链的读侧，业务上和 tab3 是一件事。
 `app.py` **不是模块，是一个从头跑到尾的脚本**（Streamlit 重跑模型所致，详解见详设 §1）：
 
 ```
-① 13–31  import → build_paths()（启动逻辑在 src/context.py）→ storage.init() → set_page_config
-② 34–35  注入全局 CSS（inject_css()，样式本体在 src/ui/styles.py）
-③ 37–38  认证门闸：CURRENT_USER = auth.require_user()（本体在 src/ui/auth.py；未登录 st.stop()，下面的代码根本不执行）
-④ 40–42  侧边栏：sidebar.render(_paths, CURRENT_USER)（本体在 src/ui/sidebar.py），返回 Decision 解包出 result/dec/ms/pf
-⑤ 44–54  声明 6 个 tab（st.tabs 在 :45）
-⑥ 56–66  渲染 6 个 tab（全部 src/tabs/ 的 render() 调用）
+① 13–35  import → build_paths()（启动逻辑在 src/context.py）→ setup_logging()（:31，运行日志，必须在 storage.init 之前）→ storage.init() → set_page_config
+② 38–39  注入全局 CSS（inject_css()，样式本体在 src/ui/styles.py）
+③ 41–42  认证门闸：CURRENT_USER = auth.require_user()（本体在 src/ui/auth.py；未登录 st.stop()，下面的代码根本不执行）
+④ 44–46  侧边栏：sidebar.render(_paths, CURRENT_USER)（本体在 src/ui/sidebar.py），返回 Decision 解包出 result/dec/ms/pf
+⑤ 48–58  声明 6 个 tab（st.tabs 在 :49）
+⑥ 60–70  渲染 6 个 tab（全部 src/tabs/ 的 render() 调用）
 ```
 
 **关键点：app.py 已是纯装配层**——每段只剩一行调用 + 指针注释，业务全在 `src/` 对应模块。模型执行点在 `src/ui/sidebar.py` render() 内（首跑 :124、表单提交后金额重跑 :235）；决策结果收口为 `Decision` 返回值，由 app.py 解包显式传给各 tab。
 
-（行号复核于 2026-08-19）
+（行号复核于 2026-08-21）
 
 ## 7. 六个 Tab 的职责
 
@@ -204,13 +205,13 @@ tab4（26 行）是这条链的读侧，业务上和 tab3 是一件事。
 
 | 路径 | 行数 | 是什么 | 谁读它 | 入库 |
 |---|---:|---|---|:---:|
-| `app.py` | 66 | Streamlit 主程序，**纯装配层**：import → build_paths → storage.init → 认证一行 → 侧栏一行 → 6 个 tab render 调用 | Streamlit 直接执行 | ✅ |
-| `src/` | 1893 | **业务层**（app.py 只留装配）：`context.py`（73，启动上下文 `Paths`/`Decision`/`build_paths`）+ `dates.py`（20，业务"今天"唯一定义 `biz_today()`，Asia/Shanghai 固定 UTC+8，与引擎同规则双实现）+ `services/`（`model.py` 45 模型调用 / `quotes.py` 87 行情抓取 / `curves.py` 102 曲线数据）+ `ui/`（`styles.py` 185 全局 CSS / `overlays.py` 59 三遮罩 / `sidebar.py` 329 侧栏，返回 `Decision` / `auth.py` 328 认证门闸，`require_user()`）+ `tabs/`（`today.py` 100 / `holdings.py` 78 / `records.py` 182 / `history.py` 26 / `backtest.py` 249 / `strategy_doc.py` 18，各暴露 `render(tab, ...)` 显式收参）；不读 app.py 模块级全局 | `app.py` import | ✅ |
-| `storage.py` | 612 | 存储层。所有 Google Sheets 读写都走它（含写前快照、PBKDF2 认证、成交同日同资产同方向去重，`force=True` 显式放行）；19 个公开接口明细见详设 §9 | `app.py` import | ✅ |
+| `app.py` | 70 | Streamlit 主程序，**纯装配层**：import → build_paths → setup_logging → storage.init → 认证一行 → 侧栏一行 → 6 个 tab render 调用 | Streamlit 直接执行 | ✅ |
+| `src/` | 2011 | **业务层**（app.py 只留装配）：`context.py`（73，启动上下文 `Paths`/`Decision`/`build_paths`）+ `dates.py`（20，业务"今天"唯一定义 `biz_today()`，Asia/Shanghai 固定 UTC+8，与引擎同规则双实现）+ `obs.py`（62，运行日志配置：幂等 `setup_logging()`、stderr + 轮转文件双落点；**只配 handler 不提供 emitter**，各模块自己 `getLogger("dca.<频道>")`，数据层因此不必反向 import `src/`）+ `services/`（`model.py` 67 模型调用 / `quotes.py` 87 行情抓取 / `curves.py` 102 曲线数据）+ `ui/`（`styles.py` 185 全局 CSS / `overlays.py` 59 三遮罩 / `sidebar.py` 337 侧栏，返回 `Decision` / `auth.py` 355 认证门闸，`require_user()`）+ `tabs/`（`today.py` 99 / `holdings.py` 78 / `records.py` 182 / `history.py` 26 / `backtest.py` 249 / `strategy_doc.py` 18，各暴露 `render(tab, ...)` 显式收参）；不读 app.py 模块级全局 | `app.py` import | ✅ |
+| `storage.py` | 622 | 存储层。所有 Google Sheets 读写都走它（含写前快照、PBKDF2 认证、成交同日同资产同方向去重，`force=True` 显式放行）；19 个公开接口明细见详设 §9 | `app.py` import | ✅ |
 | `requirements.txt` | 16 | **Cloud/Linux 可安装范围**：6 个直接依赖都有下界与大版本上界，不强钉本机 Windows wheel | Streamlit Cloud + CI Linux/Python 3.12 腿 | ✅ |
 | `requirements-dev.lock` | 83 | **Windows/Python 3.14 开发机精确锁定**：完整 `pip freeze`，含 pytest 与全部间接依赖 | 本机复现 + CI Windows/Python 3.14 腿 | ✅ |
 | `pytest.ini` | 7 | pytest 只收 `tests/`，不把归档回测脚本当测试收集 | pytest | ✅ |
-| `tests/` | — | 全离线回归：引擎纯函数、storage 本地/Sheets 安全路径、Streamlit AppTest 整页冒烟、拒网守卫自测；离线由 `conftest` autouse 守卫强制，fixture 全虚构 | pytest / CI | ✅ |
+| `tests/` | — | 全离线回归 **106 条**：引擎纯函数 46 / storage 本地与 Sheets 安全路径 25 / AppTest 整页冒烟 20 / 拒网守卫自测 8 / 运行日志 7；离线由 `conftest` autouse 守卫强制，日志由同处 autouse 的 `_quarantine_logging` 隔离（否则 AppTest 会把假异常写进工作树 `logs/dca.log`），fixture 全虚构 | pytest / CI | ✅ |
 | `.github/workflows/ci.yml` | — | push `main` 自动跑两条 pytest 腿；无 secrets、无行情网络依赖 | GitHub Actions | ✅ |
 | `CHANGELOG.md` | — | **全量改动的人读版流水**：每 commit 一行带 `HH:MM:SS` 时刻（取自 git），由 `scripts/changelog.py` 生成/校验 | 人 | ✅ |
 | `start-app.bat` | — | 本机双击启动 | 你 | ✅ |
@@ -315,9 +316,15 @@ tab4（26 行）是这条链的读侧，业务上和 tab3 是一件事。
 |---|---|---|:---:|
 | 机器流水 | 每个 commit 的精确时刻（epoch 存于 `.git/logs/`，人读格式用 `git log --date=format-local`） | git 自身 | — |
 | 改动日志 | 人读版流水：每 commit 一行、**带 HH:MM:SS 时刻**（取自 git，非手写） | 根目录 `CHANGELOG.md`，由 `scripts/changelog.py` 生成/校验 | ✅ |
-| 运行日志 | 应用运行时事件（登录、同步、抓取）——**尚未实现** | `logs/`（约定落点；`*.log` 不入库，`.gitkeep` 占位） | ❌ |
+| 运行日志 | 应用运行时的**失败与降级**事件：认证异常/结果码、`sync_local` 失败、Sheets 读写与快照失败、引擎非零退出与输出解析失败、行情降级 | 双落点：**stderr**（Cloud 日志面板唯一可见处）+ `logs/dca.log`（1 MB × 3 轮转；`*.log` 不入库）。配置在 `src/obs.py`，`app.py:31` 启动时调一次 | ❌ |
 
-⚠️ `logs/` 落点只对**本机 / 长期部署**有意义：Streamlit Cloud 容器重启即丢文件系统，届时运行日志需另配持久化（那是运行日志实现时要解的题）。
+运行日志的三条设计约束（都是防止修出新问题，实测依据见 BUG-017 验证结果）：
+
+- **频道名写死 `dca.*`，不用 `__name__`**——`storage.py` 是顶层模块，`__name__` 就是 `"storage"`，不在 `dca` 子树下；用 `__name__` 就只能去配 root logger，那会把 gspread / urllib3 / streamlit 的噪声全引进来
+- **`setup_logging()` 幂等**——Streamlit 每次交互整脚本重跑，不去重则日志行数随交互次数翻倍
+- **文件 handler 必带轮转**——BUG-017 原文的另一半就是"日志无上限写满磁盘"，不轮转等于把它请回来
+
+⚠️ **两条边界，不假装解决**：① `logs/` 落点只对**本机 / 长期部署**有意义，Streamlit Cloud 容器重启即丢文件系统，那边只有 stderr 面板且只留近期；② **零告警**——出事仍然要有人去开页面才知道（外部探针见 [BUGLIST](BUGLIST.md) 的 BUG-034，已判定不修并附重开条件）。所以现有能力是"出事当场能查真因"，不是"长期留存 + 主动告警"。
 
 ---
 
@@ -345,3 +352,4 @@ tab4（26 行）是这条链的读侧，业务上和 tab3 是一件事。
 | 2026-08-20 | **BUG-006/007/010/011 修复：抓价链重做**。`dca_calculator.py`（1074→1229 行）抓取层由**串行改并发**（`fetch_history` 用 `ThreadPoolExecutor`，main 把 6 标的 + 2 汇率同波提交，单标的异常收成 `error` 条目不带走整批）+ `fetch_json` 3 次尝试 0.8s/1.6s 退避；落库改由 `save_cached_closes` 三道护栏把关（剔 `date >= utc_today()` 的盘中价 / 行数不减拒写 / temp+`os.replace` 原子写，±20% 跳变只 warning，无变化不碰文件），新增 `utc_today()` 与业务 `biz_today()` 分工；yfinance 兜底统一 `auto_adjust=False` 且明确不落库（落库口径单一由 Chart 路径负责）；新增 `market_freshness` 7 天陈旧闸——超限则 `decision.suggested_amount_rmb=0` + `decision.degraded/freshness`，只展示持仓不出金额（**挂在 decision 内，顶层键仍 18 个**）。UI 侧 sidebar 改按语义判行情正常（不再匹配 `data_source` 前缀）、tab1 加降级横幅 | 8 个行情请求串行、各 20s 超时零重试，最坏 160s 紧贴 subprocess 180s 上限（实测改后 1.5s）；落库是 `open("w")` 整文件截断重写、唯一校验只有 `close > 0`，盘中价直接入库且脏值永久冻结；两条抓取路径复权口径不一致（Chart raw vs yfinance adjusted）；Yahoo 挂三周仍照常出金额，增量抓取 `allow_empty=True` 让空响应静默算成功 |
 | 2026-08-20 | **BUG-015 工程安全网落地**：依赖拆成 Cloud/Linux 可安装范围 `requirements.txt` 与 Windows/Python 3.14 精确锁 `requirements-dev.lock`；新增只收 `tests/` 的 pytest 三层离线回归（引擎纯函数 / storage 安全路径 / AppTest 整页冒烟），离线改由 `conftest` 内 autouse 的 `_deny_network` 强制（socket/DNS/子进程四口全拦、回环放行）并由 `test_offline_guard.py` 反向罩住；GitHub Actions 在 push `main` 时分别验证 Windows 3.14 锁定环境与 Linux 3.12 Cloud 范围环境；三个一次性回测脚本去掉失效绝对路径并明确归档、不作回归载体 | 原项目零测试零 CI、依赖既不可复现又可能无界漂移，归档脚本还因旧路径无法运行；现在既验证开发机精确组合，也验证 Cloud 范围仍可安装，且 CI 全离线不受 Yahoo/Sheets 波动干扰。离线单靠各用例自觉 patch 是不可靠的——漏一处或新增抓取路径就静默出网，守卫把这条硬约束变成可执行的 |
 | 2026-08-20 | **BUG-028~031 修复：价格存储改「两个落点一条界线」+ 陈旧闸改判实时价**。`dca_calculator.py`（1229→1378 行）：① 新增 `data/market_live.json` 承接当日未收盘 bar（`load/save_market_live` + `split_live_bars` 只收 `date >= utc_today()` + `merge_live_bars` 加载时合并且 **csv 优先**），与 `save_cached_closes` 的剔除闸构成同一条界线的互补两侧——盘中看到的价有持久落点，收盘定稿值落库即自动顶掉临时值，无需清理逻辑；② 新鲜度闸判据从「bar 日期」改为「本次有没有拿到实时价」（新增 `latest_source: "quote" \| "last_close"`，主闸 `!= "quote"` 即降级；`_MAX_STALE_DAYS` 7→10 降级为兜底死标的的副闸）；③ 增量抓取 `period1` 回退 5 天（`_REFETCH_LOOKBACK_DAYS`），请求数不增而数据源的 null 空洞回填与错值修正自动追平。UI 侧 sidebar 新增 `_not_live()`（把 `latest_source` 标记显示出来，缺键保守视为非实时）、tab1 降级文案改取引擎 `freshness.reason` 不写死天数。**顶层键仍 18 个**；`freshness.per_symbol` 形状由 `{sym: int}` 扩为 `{sym: {stale_days, latest_source, quote_time}}` | 旧闸判的是"库里最后一根 K 线多老"，而决策实际用的是 `latest_price`——实测 GC=F 库内 08-18、实时价 08-20，闸放行却没人保证那个价是新的；拿不到实时价时 `latest = closes[-1]` **静默**用旧收盘价冒充，输出无任何标记。落库只收已收盘 K 线后，当日值在项目里**没有任何落点**（盘中记账拿不到自己看到的价）；`close=null` 的空洞与数据源事后修正因"只从库内最后一天往后抓"永久冻结。首跑即验证到真实案例：GC=F `08-13` 被修正 4447.60→4363.60、`08-19` 空洞补上，XAUT `08-13` 修正 + `08-16` 空洞补上 |
+| 2026-08-21 | **BUG-017 修复（范围收敛为日志半）：可观测性从"全空"到"出事能查真因"**。新增 `src/obs.py`（62 行）——**只配 handler、不提供 emitter**：`setup_logging()` 幂等、`propagate=False` 不碰 root、stderr + `logs/dca.log`（`RotatingFileHandler` 1 MB × 3）双落点、落盘不可写时降级只留 stderr；`app.py`（66→70 行）在 `storage.init` **之前**调一次。16 个埋点全部落在**已有的**异常/降级分支上，控制流一行没改：`src/ui/auth.py`（328→355）9 处、`storage.py`（612→622）4 处、`src/services/model.py`（45→67）3 处；3 处 `contextlib.suppress(Exception)` 改回 `except Exception as e:` + warning。§11 从"尚未实现"改写为实装 + 三条设计约束 + 两条边界，设计动机与踩坑见详设 §12 | 真正的痛点不是"没打日志"，而是**异常对象被就地销毁**——auth 里 4 处 `except Exception:` 加 3 处 `suppress` 都不留 `e`，事后无法区分"凭据过期""配额撞满""网络抖动"，而三者处置完全不同。同时确认埋点必须在 UI 侧而非引擎：`model.py` 的 `capture_output=True` 会在**成功路径上吞掉引擎 stderr**，埋在引擎里的日志在 Cloud 上根本看不见，而行情降级信息本来就在返回 JSON 的 `degraded` + `freshness` 里。`106 passed`（99→106），五条新断言逐一红检 5/5 全红；外部探针那半拆为 `BUG-034` 判定不修——**零告警是已知边界，不是遗漏** |

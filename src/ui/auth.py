@@ -8,13 +8,16 @@ require_user() 无需参数：全部输入走 storage / session_state / 环境�
 """
 from __future__ import annotations
 
-import contextlib
+import logging
 import os
 
 import storage
 import streamlit as st
 
 from .overlays import show_auth_mask, show_sync_mask
+
+# 日志频道（配置在 src/obs.py）。认证只记账号名与结果码，**绝不记 PIN**。
+_log = logging.getLogger("dca.auth")
 
 
 def _render_login_page(names, ph):
@@ -207,7 +210,9 @@ def require_user() -> str:
                         _status, _canon, _fresh = storage.authenticate(
                             _auth["name"], _auth["pin"]
                         )
-                    except Exception:
+                    except Exception as e:
+                        # 这里一律塌缩成"网络异常"，异常对象不留痕就永远分不清凭据过期/配额撞满/网络抖动
+                        _log.error("login_error name=%s err=%s", _auth.get("name"), e)
                         _status, _canon, _fresh = "error", None, None
                     if _fresh is not None:
                         st.session_state["_names"] = _fresh  # 顺手刷新会话名单缓存
@@ -219,10 +224,12 @@ def require_user() -> str:
                             [("验证账号", "done"), ("同步云端数据", "on")],
                             ph=_m,
                         )
-                        with contextlib.suppress(
-                            Exception
-                        ):  # 同步失败不阻塞进入，侧栏🔄可重同步
+                        try:
                             storage.sync_local(_canon)
+                        except Exception as e:  # 同步失败不阻塞进入，侧栏🔄可重同步
+                            _log.warning(
+                                "post_login_sync_failed user=%s err=%s", _canon, e
+                            )
                         st.session_state["synced"] = True
                     elif _status == "pending":
                         st.session_state["activating"] = _canon
@@ -236,6 +243,10 @@ def require_user() -> str:
                         )
                     else:
                         st.session_state["_login_err"] = "网络异常，请稍后重试"
+                    if _status in ("no_user", "bad_pin", "locked"):
+                        _log.warning(
+                            "auth_denied name=%s status=%s", _auth.get("name"), _status
+                        )
                     st.rerun()
                 elif _stage == "activate":
                     _m = show_auth_mask(
@@ -245,7 +256,8 @@ def require_user() -> str:
                         _ok, _msg = storage.set_pin(
                             _auth["who"], _auth["pin"], _auth["pin2"]
                         )
-                    except Exception:
+                    except Exception as e:
+                        _log.error("set_pin_error user=%s err=%s", _auth.get("who"), e)
                         _ok, _msg = False, "网络异常，请稍后重试"
                     st.session_state.pop("_auth", None)
                     if _ok:
@@ -256,8 +268,14 @@ def require_user() -> str:
                             [("写入云端", "done"), ("同步云端数据", "on")],
                             ph=_m,
                         )
-                        with contextlib.suppress(Exception):  # 同步失败不阻塞进入
+                        try:
                             storage.sync_local(_auth["who"])
+                        except Exception as e:  # 同步失败不阻塞进入
+                            _log.warning(
+                                "post_setpin_sync_failed user=%s err=%s",
+                                _auth.get("who"),
+                                e,
+                            )
                         st.session_state["synced"] = True
                     else:
                         st.session_state["_act_err"] = (
@@ -277,7 +295,8 @@ def require_user() -> str:
                             _ok, _msg = storage.create_user(
                                 _auth["name"], _auth["pin"], _auth["pin2"], role="admin"
                             )
-                    except Exception:
+                    except Exception as e:
+                        _log.error("bootstrap_error name=%s err=%s", _auth.get("name"), e)
                         _ok, _msg = False, "网络异常，请稍后重试"
                     st.session_state.pop("_auth", None)
                     if _ok:
@@ -288,8 +307,14 @@ def require_user() -> str:
                             [("创建管理员账号", "done"), ("同步云端数据", "on")],
                             ph=_m,
                         )
-                        with contextlib.suppress(Exception):  # 同步失败不阻塞进入
+                        try:
                             storage.sync_local(_auth["name"])
+                        except Exception as e:  # 同步失败不阻塞进入
+                            _log.warning(
+                                "post_bootstrap_sync_failed user=%s err=%s",
+                                _auth.get("name"),
+                                e,
+                            )
                         st.session_state["synced"] = True
                     elif _msg == "系统已有账号，请直接登录":
                         st.session_state["_login_err"] = (
@@ -306,8 +331,9 @@ def require_user() -> str:
             if names is None:
                 try:
                     names = storage.list_users()  # 仅每会话首次加载触网一次
-                except Exception:
+                except Exception as e:
                     # 读不出名单绝不能渲染登录/自举表单——否则访客看到的就是"创建管理员"（fail-closed）
+                    _log.error("user_list_unavailable_login_blocked err=%s", e)
                     st.error("☁️ 云端存储暂时不可用，请稍后刷新重试。")
                     st.stop()
                 st.session_state["_names"] = names
@@ -320,8 +346,9 @@ def require_user() -> str:
             _ld = show_sync_mask("正在同步云端数据…", "首次进入稍等几秒")
             try:
                 storage.sync_local(user)  # 每会话首次进入同步一次云端数据到本地缓存
-            except Exception:
+            except Exception as e:
                 # 同步失败不阻塞进入（侧栏🔄可重同步），但必须可见——否则建议会基于陈旧缓存静默出错
+                _log.warning("session_sync_failed user=%s err=%s", user, e)
                 st.warning("⚠️ 云端同步失败，本次建议基于本地缓存，可能不是最新。请稍后点侧栏 🔄 重试。")
             st.session_state["synced"] = True
             _ld.empty()

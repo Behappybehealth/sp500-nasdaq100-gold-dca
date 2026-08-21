@@ -52,7 +52,7 @@ app.py  ──启动一个全新的 Python 程序──→  scripts/dca_calculat
         （app.py 读这段文字，转成数据用）
 ```
 
-用代码看就是 `run_model()` 内（src/services/model.py:19 定义，subprocess 调用在 :31）：
+用代码看就是 `run_model()` 内（src/services/model.py:24 定义，subprocess 调用在 :36）：
 
 ```python
 cmd = [sys.executable, "scripts/dca_calculator.py", "--base-dir", str(BASE)]
@@ -206,13 +206,15 @@ Cloud 不装 lock：里面含 Windows 平台包，而且本机钉定版本未必
 
 上面三层各自 patch 掉自己那几个调用点，但「离线」若只靠每个用例自觉，漏一处或将来新增一条抓取路径就会静默出网。因此 `conftest.py` 另设 autouse 的 `_deny_network` 作为兜底：`socket.connect` / `connect_ex` / `getaddrinfo` / `subprocess.Popen` 四个口一并拦，命中抛 `NetworkUseInTests`。堵四个而不是一个，是因为本项目出网路径互不相干——引擎 `urllib` 直连 Chart、yfinance 兜底、`curl` 子进程抓东财、gspread 连 Sheets，只拦 `urllib` 剩三条照样出去。回环必须放行：Windows 上 asyncio 用 `socketpair()` 做自管道，连它一起拦会把 `AppTest` 打死，那是自伤不是防护。守卫自身由 `test_offline_guard.py` 反向罩住（四个口各一条 + 回环放行 + 异常类型），否则它退化成空壳时套件仍会全绿。
 
-（复核于 2026-08-20）
+同一个 `conftest` 里另有一条 autouse 的 `_quarantine_logging`，管的是另一种越界——**测试往运行时日志文件里写东西**。`AppTest` 会真的执行 `app.py`，其中 `setup_logging(CODE_DIR / "logs")` 指的是**工作树里的** `logs/`，于是 `test_storage.py` 造的假异常（`err=network down`、`err=create transactions_bak boom`）和线上真故障进了同一个文件，日后排查分不清哪行是真的。手法是**预占 `dca` logger 的 handler 槽位**（塞一个 `NullHandler`），让 `setup_logging` 撞上它自己的幂等守卫直接返回——复用被测代码已有的行为，而不是 patch 掉它，被测路径因此保持原样。需要真配置的 `test_obs.py` 自己有 `clean_dca_logger` 把槽位清空取回真实行为。
+
+（复核于 2026-08-21）
 
 ---
 
-## 6. 认证链深挖（src/ui/auth.py，328 行）
+## 6. 认证链深挖（src/ui/auth.py，355 行）
 
-> app.py 侧仅剩 :38 一行 `CURRENT_USER = auth.require_user()`，本节锚点全部在 auth.py。
+> app.py 侧仅剩 :42 一行 `CURRENT_USER = auth.require_user()`，本节锚点全部在 auth.py。
 
 三阶段状态机，全部走 `st.session_state`：
 
@@ -222,7 +224,9 @@ Cloud 不装 lock：里面含 Windows 平台包，而且本机钉定版本未必
 | `activate` | 账号存在但未激活 | 首次设 PIN → `storage.set_pin()` |
 | `bootstrap` | users 表为空 | 首个注册者自动成为 admin → `storage.create_user()` |
 
-区间构成：登录/激活/自举页渲染函数 `_render_login_page()` 定义于 auth.py:20；门闸入口 `require_user()` 在 :168（零参数，全部输入走 storage / session_state / 环境变量）；fail-closed 认证模式判断在 :174 一带（`DCA_AUTH_MODE=local` 才进单机模式，secrets 缺失/损坏 :191 `st.stop()`）；登录页渲染前的名单读取同样 fail-closed（:305–313，读不出名单直接报错停住，绝不渲染"创建管理员"表单）；登录门闸执行在 :315–317（`with _login_ph.container(): _render_login_page(...)` + `st.stop()`）；:318–327 是登录成功后的**会话首同步**（`storage.sync_local(user)`，同步失败不阻塞但给可见警告）；:328 返回用户名。
+区间构成：登录/激活/自举页渲染函数 `_render_login_page()` 定义于 auth.py:23；门闸入口 `require_user()` 在 :171（零参数，全部输入走 storage / session_state / 环境变量）；fail-closed 认证模式判断在 :177–179 一带（`DCA_AUTH_MODE=local` 才进单机模式，secrets 缺失/损坏 :194 `st.stop()`）；登录页渲染前的名单读取同样 fail-closed（:330–339，读不出名单直接报错停住，绝不渲染"创建管理员"表单）；登录门闸执行在 :341–343（`with _login_ph.container(): _render_login_page(...)` + `st.stop()`）；:344–354 是登录成功后的**会话首同步**（`storage.sync_local(user)`，同步失败不阻塞但给可见警告）；:355 返回用户名。
+
+**认证链是全项目日志埋点最密的一段（9 处）**，因为它原本是失败最不透明的一段：4 处 `except Exception:` 把一切塌缩成"网络异常，请稍后重试"，3 处 `contextlib.suppress(Exception)` 把 `sync_local` 失败整个吞掉，全都不保留 `e`。现已改成 `except Exception as e:` + `_log.*`，**控制流一行没改**（该吞的仍然吞、该 `st.stop()` 的仍然停），只是异常不再就地销毁。安全边界见 §12：这条链离 PIN 只有一行之隔，日志只记账号名与结果码。
 
 **两段式设计（踩过 3 轮坑，不要动）：** 点击那一趟**零网络 I/O**（用户名单取 session 缓存），把意图写进 `session_state["_auth"]` → `ph.empty()` 把登录页从 DOM 里**真删除**（不是遮住）→ 挂 `show_auth_mask` → `st.rerun()`。下一趟才在遮罩后面做全部网络工作。
 
@@ -231,7 +235,7 @@ Cloud 不装 lock：里面含 Windows 平台包，而且本机钉定版本未必
 1. 以 `st.rerun()` 结束的运行不会清除该趟未重新渲染的旧元素 → 登录表单残留并漂在主应用上
 2. 遮罩必须写 `background` —— 曾因遮罩透明导致残留登录页透出，**DOM 检查全过但用户看到冻屏**。验证遮罩不能只看元素在不在 DOM，要查 computedStyle 背景不透明度或截图
 
-（行号复核于 2026-08-19）
+（行号复核于 2026-08-21）
 
 ---
 
@@ -247,7 +251,7 @@ Cloud 不装 lock：里面含 Windows 平台包，而且本机钉定版本未必
          (result×9 dec×6 ms×4)  (pf×8)        (result×3 dec×3)
 ```
 
-服务函数在 `src/services/`（`run_model` model.py:19、`parse_wide_table` model.py:42、`fetch_xau_spot` quotes.py:18、`fetch_btc` quotes.py:64、`_load_json` curves.py:19、`load_price_series` curves.py:28、`tx_csv_for` curves.py:44（按用户裁决成交账本路径，与引擎 `--user` 同一规则）、`portfolio_curve` curves.py:57；全部显式收 `paths: Paths` 参数，`Paths` 定义于 `src/context.py`）；执行点在 `src/ui/sidebar.py` render() 内（首跑 :124、表单提交后金额重跑 :235），app.py 侧仅剩 :41 一行调用，结果收口为 `Decision` 返回值（`src/context.py`）后解包。下游 tab1/tab2/tab3 分别在 `src/tabs/today.py` / `holdings.py` / `records.py`（result/dec/ms/pf 等数据全部由 app.py 以显式参数传入 render()）。
+服务函数在 `src/services/`（`run_model` model.py:24、`parse_wide_table` model.py:64、`fetch_xau_spot` quotes.py:18、`fetch_btc` quotes.py:64、`_load_json` curves.py:19、`load_price_series` curves.py:28、`tx_csv_for` curves.py:44（按用户裁决成交账本路径，与引擎 `--user` 同一规则）、`portfolio_curve` curves.py:57；全部显式收 `paths: Paths` 参数，`Paths` 定义于 `src/context.py`）；执行点在 `src/ui/sidebar.py` render() 内（首跑 :124、表单提交后金额重跑 :235），app.py 侧仅剩 :45 一行调用，结果收口为 `Decision` 返回值（`src/context.py`）后解包。下游 tab1/tab2/tab3 分别在 `src/tabs/today.py` / `holdings.py` / `records.py`（result/dec/ms/pf 等数据全部由 app.py 以显式参数传入 render()）。
 
 **模型会跑两次，但第二遍不再白跑**：侧栏先 `run_model(None)` 自动定额；用户在 `amount_form` 表单里提交金额后再 `run_model(amount_in)` 整体重跑一遍子进程——重跑趟命中引擎的行情快照（`data/quote_snapshot.json`，TTL 600 秒，`--snapshot-ttl` 可调，0 禁用；任一标的抓价失败当趟不落盘），跳过 8 个串行行情请求与缓存增量写（下次冷跑自动追平），实测第二趟耗时约为首趟的 11%。引擎输出顶层键 `quote_snapshot`（used/age_s/ttl_s）自报快照命中情况。
 
@@ -257,7 +261,7 @@ Cloud 不装 lock：里面含 Windows 平台包，而且本机钉定版本未必
 
 ## 8. 全局耦合实测清单
 
-> ⚠️ **拆分前基线**（1559 行版 app.py，2026-08-18 上午实测）。app.py 现已收口为 66 行纯装配层——本表保留为历史基线不再重测。收口后 app.py 模块级全局仅剩 6 个（`_paths` / `CODE_DIR` / `DATA_DIR` / `ASSETS` / `BACKTEST_DIR` / `CURRENT_USER`），全部是装配参数，业务代码零引用模块级全局。
+> ⚠️ **拆分前基线**（1559 行版 app.py，2026-08-18 上午实测）。app.py 现已收口为 70 行纯装配层——本表保留为历史基线不再重测。收口后 app.py 模块级全局仅剩 6 个（`_paths` / `CODE_DIR` / `DATA_DIR` / `ASSETS` / `BACKTEST_DIR` / `CURRENT_USER`），全部是装配参数，业务代码零引用模块级全局。
 >
 > 口径：`\b名字\b` 在 app.py 的出现次数（含注释提及），按结构区分桶。分区边界见概要版 §6（渲染时序）。2026-08-18 重测（上一版数字在死代码清理与 Tab5 数据导出两次改动后已漂移，该次全部重算）。
 
@@ -344,7 +348,7 @@ Cloud 不装 lock：里面含 Windows 平台包，而且本机钉定版本未必
 
 **决策新鲜度闸**：`market_freshness()`（:969）在 `build_decision` 之后过闸（:1307）——主闸判 `latest_source != "quote"`（本次没拿到实时价）、副闸判 K 线落后 > `_MAX_STALE_DAYS`（:966，10 天），三个信号标的任一被拦或带 `error` → 金额归零 + `level_label="行情不可用·暂停出金额"`，原评分保留在 reason 里供参考。结果挂 `decision.degraded` 与 `decision.freshness.{stale_days,max_stale_days,per_symbol,reason}`，**不新增顶层键**（UI 与 Skill 的既有解包不受影响）。判据与两闸分工见 §4。
 
-**输出**：print 一大段 JSON（:1387），**18 个顶层键**——字面量构造 17 个（:1367–1385：`as_of` / `input_amount_rmb` / `effective_amount_rmb` / `usdcny` / `usdtcny` / `fx` / `monthly_budget_status` / `config` / `has_local_transactions` / `invalid_transactions` / `last_records` / `since_last_record` / `markets` / `quote_snapshot` / `portfolio` / `decision` / `suggested_weights`），随后 :1373 追加 `wide_table_markdown`（由 `render_wide_table()` :1097 生成，app.py 侧 `parse_wide_table()` 解析回 DataFrame，src/services/model.py:42）。
+**输出**：print 一大段 JSON（:1387），**18 个顶层键**——字面量构造 17 个（:1367–1385：`as_of` / `input_amount_rmb` / `effective_amount_rmb` / `usdcny` / `usdtcny` / `fx` / `monthly_budget_status` / `config` / `has_local_transactions` / `invalid_transactions` / `last_records` / `since_last_record` / `markets` / `quote_snapshot` / `portfolio` / `decision` / `suggested_weights`），随后 :1373 追加 `wide_table_markdown`（由 `render_wide_table()` :1097 生成，app.py 侧 `parse_wide_table()` 解析回 DataFrame，src/services/model.py:64）。
 
 单独跑它：
 
@@ -354,3 +358,33 @@ Cloud 不装 lock：里面含 Windows 平台包，而且本机钉定版本未必
 ```
 
 （行号复核于 2026-08-20）
+
+---
+
+## 12. 运行日志：为什么长这样（src/obs.py，62 行）
+
+配置集中在 `src/obs.py`，`app.py:31` 启动时调一次 `setup_logging(CODE_DIR / "logs")`——**摆在 `storage.init` 之前**，否则首次读写就失败时那条日志无处落。
+
+**只配 handler，不提供 emitter。** 各模块自己 `logging.getLogger("dca.<频道>")`（现有三个：`dca.storage` / `dca.auth` / `dca.model`）。这个选择是为了避开一次层次倒挂：`storage.py` 是数据层，如果要用 `src/obs.py` 提供的 emitter，它就得 `import src`，反向依赖业务层。改成"配置在一处、取用在各处"之后，数据层只 `import logging`。
+
+**频道名写死 `dca.*`，不用 `__name__`。** `storage.py` 是顶层模块，`__name__` 就是 `"storage"`，不在 `dca` 子树下——用 `__name__` 就没法"配一次 handler 全覆盖"，只能去配 root logger，而那会把 gspread / urllib3 / streamlit 的噪声全引进来，还会被 Streamlit 自己的 handler 打成重复行。代价是频道名不能靠 IDE 重命名跟着走，需要人记住这条约定，写在本节与模块头注里。
+
+**三条硬约束，少一条日志就废掉一半：**
+
+| 约束 | 不做的后果 |
+|---|---|
+| `setup_logging()` 幂等（`dca` logger 已有 handler 即返回） | Streamlit 每次交互整脚本重跑，handler 不去重则**同一行打 N 遍**，N 随会话交互次数增长——看起来像"系统疯了" |
+| 文件 handler 带轮转（`RotatingFileHandler`，1 MB × 3） | 这正是 BUG-017 原文的另一半"日志无上限写满磁盘"，不轮转等于把刚删掉的毛病请回来 |
+| `propagate = False` | 向 root 冒泡会被 Streamlit 的 handler 再打一遍 |
+
+`propagate = False` 有一个连带影响必须知道：**pytest 的 `caplog` 收不到这些日志**（它挂在 root 上）。`tests/test_obs.py` 因此自带一个直接挂在 `dca` 上的 `_Capture` handler，别照着别处的写法用 `caplog`，那会得到一个永远为空的断言。
+
+**两个落点各有不可替代的理由**：stderr 是 Streamlit Community Cloud 唯一会收进日志面板的东西；`logs/dca.log` 是本机长期部署要的持久化。落盘目录不可写时只记一条 warning 继续跑——stderr 那路仍在，日志能力降级但不消失。
+
+**行格式是约定而非框架**：`事件名 key=value`，例 `sheet_read_failed table=transactions err=quota exceeded for this minute`。十来个调用点用约定足够，包一层结构化 emitter 换来的一致性抵不上多一层耦合。
+
+**安全边界**：认证链的日志离 PIN 只有一行之隔（`_auth["pin"]` 就在同一个 dict 里），一次手滑就会把明文 PIN 写进 `logs/dca.log` 和 Cloud 日志面板，且**不会有任何报错**。所以这条不靠 review 靠断言：`test_obs.py` 用 AST 抓出全部 `_log.*(...)` 调用点，逐个查引用的变量名与字符串常量，撞到 `{pin, pin2, pin_hash, salt}` 即红，并带 `len(calls) >= 10` 下限防止扫描逻辑失效后变成空过。
+
+**能力边界**（写在这里免得下次误判）：Cloud 日志面板只留近期、容器重启即失，`logs/dca.log` 在 Cloud 上同样是临时的；且**没有任何告警**——出事仍然要有人去开页面才知道。现有能力是"出事当场能查真因"，不是"长期留存 + 主动告警"。
+
+（复核于 2026-08-21）

@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import logging
 import socket
 import subprocess
 import sys
@@ -88,6 +89,30 @@ def _deny_network(monkeypatch):
     monkeypatch.setattr(socket, "create_connection", create_connection)
     # 子进程一并堵死：引擎 subprocess 与 curl 抓价在测试里都该是 patch 掉的。
     monkeypatch.setattr(subprocess.Popen, "__init__", popen)
+
+
+# ============================================================
+# 日志隔离：测试不得写进运行时日志文件
+# ============================================================
+
+@pytest.fixture(autouse=True)
+def _quarantine_logging():
+    """预占 `dca` logger 的 handler 槽位，让 app.py 的 setup_logging 变成空操作。
+
+    不隔离的后果是真实的：AppTest 会执行 `app.py`，其中
+    `setup_logging(CODE_DIR / "logs")` 指向**工作树里的** `logs/dca.log`，
+    于是 `test_storage.py` 造的假异常（"network down"、"boom"）会和线上真故障
+    混在同一个文件里——排查时分不清哪行是真的，日志的价值就废了。
+
+    手法是复用 `setup_logging` 自己的幂等守卫（handler 非空即返回），
+    而不是去 patch 它——被测行为因此保持原样。`test_obs.py` 需要真配置时，
+    用它自己的 `clean_dca_logger` 清空槽位即可拿回真实行为。
+    """
+    lg = logging.getLogger("dca")
+    saved, saved_prop = lg.handlers[:], lg.propagate
+    lg.handlers = [logging.NullHandler()]
+    yield
+    lg.handlers, lg.propagate = saved, saved_prop
 
 
 @pytest.fixture
