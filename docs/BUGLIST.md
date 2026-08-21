@@ -2071,7 +2071,13 @@ exceptions: none
 
 #### ✅ 确认记录
 
-> 待 1 对 1 确认。施工方推荐 **A**（25 处机械替换 + 抬下界），理由见 ③。
+**确认日期**：2026-08-21（用户拍板：**A 档**）
+
+- 25 处实测**全部是 `use_container_width=True`**（无 False），两类 widget：`st.dataframe` 14 处、`st.button` / `st.form_submit_button` 11 处——替换规则单一：`True` → `width="stretch"`。
+- 两端兼容性已实测：本机 lock 的 streamlit **1.61.1** 中 `st.dataframe`（`arrow.py`）、`st.button`（`button.py:150`）、`st.form_submit_button`（`form.py`）签名均带 `width: Width` 参数；Cloud 1.62.0 的警告文案本身就是官方迁移指引（`True`→`"stretch"`、`False`→`"content"`）。
+- 顺带发现留档：1.61.1 里 `st.dataframe` 的 `width` 默认值**已是** `"stretch"`——14 处 dataframe 替换后与默认行为一致，等价性双保险。
+- `requirements.txt` 下界 `>=1.32.0` → `>=1.61.1`（实测支持 `width=` 的版本），上界 `<2` 不动。
+- **施工边界**：只换这一个参数，不动任何布局、文案与其他参数（`hide_index` 等原样保留）；不借机升 dev lock 的 streamlit（1.61.1 已支持新写法，无升级必要）。
 
 #### 🔧 实际修复
 
