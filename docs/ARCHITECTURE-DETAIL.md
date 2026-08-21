@@ -282,13 +282,13 @@ Cloud 不装 lock：里面含 Windows 平台包，而且本机钉定版本未必
 
 **session_state key 10 个**（口径：[`key`] 读写 + `.pop()` / `.get()` 调用合计）：`_auth`(8) `synced`(7) `_login_err`(6) `_names`(5) `activating`(5) `pending_tx`(5) `user`(4) `pending_obs`(4) `_boot_err`(2) `_act_err`(2)，另有 1 处 `.clear()`。其中 8 个属认证/会话链、2 个属记账链（`pending_tx` / `pending_obs`），**没有跨链共享**。
 
-**session_state 当前实测（2026-08-20，拆分后）**：**11 个键、60 处引用**，`app.py` 侧已归零 —— `src/ui/auth.py` 39 处（`_auth` 8 / `synced` 7 / `_login_err` 6 / `_names` 5 / `activating` 5 / `user` 4 / `_boot_err` 2 / `_act_err` 2）、`src/tabs/records.py` 18 处（`pending_tx` 9 / `tx_dup` 4 / `pending_obs` 3；`tx_dup` 由 `BUG-008` 的写入去重确认引入，键数因此由基线的 10 变 11）、`src/ui/sidebar.py` 3 处。
+**session_state 键已登记入册（2026-08-21，`BUG-032` 修复后）**：11 个键名常量集中在 `src/state.py`，每键标注所属链、生命周期与注意事项（如 `K_AUTH` 含明文 PIN、绝不可落日志）；`ALL_KEYS` 供测试断言登记表与实际用键**互相覆盖**（既无未登记的键、也无死常量）。业务代码 57 处带键引用全部走常量（auth 38 / records 17 / sidebar 2），裸字面量由 `tests/test_state.py` 断言清零 —— 拼错从「静默建键」提前成 import 期 `ImportError`。历史数字口径（登记时的 60 vs 带键引用 57 vs `st.session_state` 表达式 58）的逐条对账见 `BUG-032` 确认记录；`tx_dup` 由 `BUG-008` 的写入去重确认引入，键数因此由拆分前基线的 10 变 11。
 
-拆分后**出现了基线时不存在的跨模块共享**：`synced`（语义="本会话是否已从云端同步过"）由两个模块共管生命周期 —— `auth.py` 在登录/激活/自举成功处与会话首同步后置 True（:226 / :261 / :293 / :319 读 / :326 设），`sidebar.py` 的 🔄 刷新 `pop` 掉它触发重同步（:254）、本地历史上传后又置 True（:332）。登出走 `sidebar.py:97` 的 `st.session_state.clear()` **全清**，所以切用户不会残留 `pending_tx` 之类的待确认数据（已实测，不是数据安全问题）；代价是"哪个键属于哪条链、谁负责清"完全隐式，无单一记录处 —— 缺口已登记 `BUG-032`。
+跨模块共享键 `synced`（语义 = 本会话是否已从云端同步过）的生命周期现写明在 `src/state.py`：置位归认证链（`auth.py` 登录/激活/自举成功处与会话首同步后），判读也在认证链，**失效化收敛为唯一的 `invalidate_sync()`**（`sidebar.py` 的 🔄 刷新调它）——原先「想触发重同步就 pop 掉 synced」是条没写在任何地方的隐式协议。登出走 `sidebar.py:97` 的 `st.session_state.clear()` **全清**，切用户不会残留待确认数据（已实测，不是数据安全问题）；代价是「全清」本身也是隐式契约：将来若引入应跨登出保留的键，必须改那一处（已写进 `state.py` 头注）。widget key 与业务键共享同一命名空间（当前 7 个，清单在 `state.py` 头注），撞名由测试断言拦截。
 
 **storage 接口 19 个公开函数**（app.py 侧调用次数）：`sync_local`×4、`read_rows`×2、`list_users`×2、`is_admin`×2、`append_row`×2、`sheets_status`×2，其余 12 个各 ×1，`sheets_enabled` 仅 storage 内部使用 —— 已是干净边界。
 
-（复核于 2026-08-18；`session_state` 当前实测于 2026-08-20，模块级全局表仍为拆分前基线不重测）
+（复核于 2026-08-18；`session_state` 段复核于 2026-08-21（`BUG-032` 修复后），模块级全局表仍为拆分前基线不重测）
 
 ---
 

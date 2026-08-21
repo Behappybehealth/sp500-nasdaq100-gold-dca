@@ -71,13 +71,14 @@ sp500-nasdaq100-gold-dca/
 │   ├── context.py            # 启动上下文：Paths / Decision / build_paths（73 行；code_dir 按 parent.parent 定位）
 │   ├── dates.py              # 业务"今天"唯一定义 biz_today()（20 行；Asia/Shanghai 固定 UTC+8，与引擎 dca_calculator.py 同规则双实现，两处必须同改）
 │   ├── obs.py                # 运行日志配置（62 行；setup_logging() 幂等，stderr + logs/dca.log 轮转双落点；只配 handler 不提供 emitter）
+│   ├── state.py              # session_state 键登记表（113 行；11 个键名常量+归属链/生命周期标注，invalidate_sync()；裸字面量有测试拦）
 │   ├── services/             # 服务层：model.py 模型调用（67，含引擎失败/降级 3 处埋点）/ quotes.py 行情抓取（87）/ curves.py 曲线数据（102）
-│   ├── ui/                   # 样式/遮罩/侧栏/认证：styles.py 全局 CSS（185）/ overlays.py 三遮罩（59）/ sidebar.py 侧栏（337，返回 Decision）/ auth.py 认证门闸（355，require_user()，9 处埋点）
-│   └── tabs/                 # 六个 tab 渲染：today(99)/holdings(78)/records(182，记账写链)/history(26)/backtest(249)/strategy_doc(18)，各暴露 render(tab, ...)
+│   ├── ui/                   # 样式/遮罩/侧栏/认证：styles.py 全局 CSS（185）/ overlays.py 三遮罩（59）/ sidebar.py 侧栏（339，返回 Decision）/ auth.py 认证门闸（365，require_user()，9 处埋点）
+│   └── tabs/                 # 六个 tab 渲染：today(99)/holdings(78)/records(183，记账写链)/history(26)/backtest(249)/strategy_doc(18)，各暴露 render(tab, ...)
 ├── requirements.txt          # Cloud/Linux 可安装范围（每个直接依赖都有上界）
 ├── requirements-dev.lock     # Windows/Python 3.14 开发机完整 pip freeze（精确锁定）
 ├── pytest.ini                # pytest 只收 tests/，不扫描归档回测脚本
-├── tests/                    # 全离线回归 106 条：引擎 46 / storage 25 / AppTest 冒烟 20 / 拒网守卫 8 / 运行日志 7（conftest 内 autouse 兜底拦网 + 日志隔离）
+├── tests/                    # 全离线回归 123 条：引擎 46 / storage 25 / AppTest 冒烟 20 / 拒网守卫 8 / 运行日志 7 / 状态键登记表 17（conftest 内 autouse 兜底拦网 + 日志隔离）
 ├── .github/workflows/ci.yml  # push main 自动跑 Windows 3.14 lock + Linux 3.12 Cloud 范围
 ├── CHANGELOG.md              # 改动日志：每个 commit 一行带时刻（人读版流水，见第 12 条；scripts/changelog.py 维护）
 ├── start-app.bat             # 本机双击启动 Streamlit
@@ -180,6 +181,7 @@ cd X:/coding/projects/sp500-nasdaq100-gold-dca
 11. **行为变更的 commit 必须同期核对相关活文档** —— 活/冻清单见 `docs/README.md`（文档门户）。活文档头部标 `【活·更新时机：…】`；`docs/plans/` 与 `backtest/` 的结果/报告是冻结产物，只增不回改。归档 `.py` 脚本允许做不改变历史结果含义的可移植性维护。
 12. **每个 commit 同期在 `CHANGELOG.md` 追加一行**（`HH:MM:SS [类型] 一句话（hash；关联编号）`，按日期分组新在上、组内按时刻新在上）——这是全量改动的人读版流水；架构级变更另记 ARCHITECTURE 变更记录、问题生命周期另记 BUGLIST，三处粒度不同不重复。**时刻取自 git commit 时间，不手写**：`.venv/Scripts/python.exe scripts/changelog.py add <hash>` 生成行草稿，收尾跑 `--check` 校验每个 commit 都有行且时刻正确（手滑漏行/错时刻会被它拦下）。尾随约定：commit 自身那行由下一个 commit 携带入库。
 13. **测试必须离线且用虚构数据。** 测试不得访问 Yahoo / 东财 / Google Sheets，不得把真实持仓或成本写进 fixture；storage 与 AppTest 每条路径都要显式 patch `sheets_enabled` 或强制 local，防本机真实 `secrets.toml` 被 pytest 读到后误写生产表。`conftest` 的 `_deny_network` 是兜底不是替代——它抓的是漏 patch，命中即 `NetworkUseInTests`；改守卫必须同步跑 `tests/test_offline_guard.py`。
+14. **session_state 键一律走 `src/state.py` 登记表**：新增/删除键先改登记表（常量 + 归属链 + 生命周期注释），业务代码写裸字面量会被 `tests/test_state.py` 拦下；触发云端重同步调 `invalidate_sync()`，别直接 `pop`。
 
 ---
 
