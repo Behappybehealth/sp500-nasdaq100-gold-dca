@@ -30,6 +30,59 @@ scripts/dca_action.py     ──→ dca_calculator, storage  (CLI入口)
 
 ---
 
+## Architecture at a Glance / 架构一览
+
+```
+                    ┌──────────────────────────────────────────┐
+   Browser (user)   │  Streamlit Community Cloud               │
+        ←─────────→ │  one Python process serves all users     │
+                    │                                          │
+                    │    app.py (70L, pure assembly)           │
+                    │    auth / sidebar / 6 tabs all in src/   │
+                    └───┬────────────────────────┬─────────────┘
+                        │ subprocess             │ import
+                        │ (isolated)             │
+                        ▼                        ▼
+          ┌─────────────────────────┐   ┌──────────────────┐
+          │ scripts/dca_calculator  │   │   storage.py     │
+          │ Entry (240L) + 5 mods   │   │  Storage (654L)  │
+          │                         │   │                  │
+          │ reads data/config.json  │◄──┤  Google Sheets    │
+          │ reads data/users/<u>/   │   │  or local CSV     │
+          │ reads market_history/   │   └────────┬─────────┘
+          │ fetches Yahoo / FX      │            │
+          │ outputs JSON to stdout   │            ▼
+          └───────────┬─────────────┘   ┌──────────────────┐
+                      │                 │  Google Sheets    │
+                      ▼                 │  4 tables + _bak  │
+          ┌────────────────────┐        └──────────────────┘
+          │ Yahoo Chart v8     │
+          │ yfinance fallback  │
+          │ (no API key)        │
+          └────────────────────┘
+```
+
+**Three layers + one boundary**: `app.py` (UI + business logic) → subprocess-isolated `dca_calculator.py` (pure computation, split into 6 modules) → `storage.py` (data layer, imported directly).
+
+**Engine module dependency DAG** (linear, no cycles):
+
+```
+dca_types ──→ dca_market ──→ dca_portfolio ──→ dca_scoring ──→ dca_table ──→ dca_calculator (entry + re-exports)
+```
+
+| Metric | Value |
+|---|---|
+| Total source lines (excl. .venv/data/logs) | ~6,900 |
+| Engine modules | 6 files, 1,506 lines |
+| Web app modules (src/) | 22 files, 2,164 lines |
+| Tests | 9 files, 2,087 lines, 130 tests |
+| Bug ledger | 35 bugs: 32 ✅ fixed + 3 ⚪ won't-fix |
+| Dependencies | 6 direct (streamlit, pandas, numpy, gspread, yfinance, google-auth) |
+| External APIs | Yahoo Finance (no key), Google Sheets (GCP service account) |
+| CI | GitHub Actions, 2 legs (Win/3.14 lock + Linux/3.12 range), fully offline |
+
+---
+
 ## English — File Tree
 
 ```
@@ -122,7 +175,7 @@ sp500-nasdaq100-gold-dca/
 │   ├── backtest_compare3.py        # 241L Archived: 3-strategy comparison
 │   ├── results_rolling.json        #      Frozen — Tab5 §3+4
 │   ├── results_compare3.json       #      Frozen — Tab5 §1
-│   └── results_single_compare.json  #      Frozen — Tab5 §3
+│   └── results_single_compare.json #      Frozen — Tab5 §3
 │
 ├── strategy/core-strategy.md       # 184L Strategy doc — single source of truth, Tab6 renders
 │
@@ -253,56 +306,3 @@ sp500-nasdaq100-gold-dca/
 ├── README.md                       # 项目自述
 └── STRUCTURE.md                    # 本文件
 ```
-
----
-
-## Architecture at a Glance / 架构一览
-
-```
-                    ┌──────────────────────────────────────────┐
-   Browser (user)   │  Streamlit Community Cloud               │
-        ←─────────→ │  one Python process serves all users     │
-                    │                                          │
-                    │    app.py (70L, pure assembly)           │
-                    │    auth / sidebar / 6 tabs all in src/   │
-                    └───┬────────────────────────┬─────────────┘
-                        │ subprocess             │ import
-                        │ (isolated)             │
-                        ▼                        ▼
-          ┌─────────────────────────┐   ┌──────────────────┐
-          │ scripts/dca_calculator  │   │   storage.py     │
-          │ Entry (240L) + 5 mods   │   │  Storage (654L)  │
-          │                         │   │                  │
-          │ reads data/config.json  │◄──┤  Google Sheets    │
-          │ reads data/users/<u>/   │   │  or local CSV     │
-          │ reads market_history/   │   └────────┬─────────┘
-          │ fetches Yahoo / FX      │            │
-          │ outputs JSON to stdout   │            ▼
-          └───────────┬─────────────┘   ┌──────────────────┐
-                      │                 │  Google Sheets    │
-                      ▼                 │  4 tables + _bak  │
-          ┌────────────────────┐        └──────────────────┘
-          │ Yahoo Chart v8     │
-          │ yfinance fallback  │
-          │ (no API key)        │
-          └────────────────────┘
-```
-
-**Three layers + one boundary**: `app.py` (UI + business logic) → subprocess-isolated `dca_calculator.py` (pure computation, split into 6 modules) → `storage.py` (data layer, imported directly).
-
-**Engine module dependency DAG** (linear, no cycles):
-
-```
-dca_types ──→ dca_market ──→ dca_portfolio ──→ dca_scoring ──→ dca_table ──→ dca_calculator (entry + re-exports)
-```
-
-| Metric | Value |
-|---|---|
-| Total source lines (excl. .venv/data/logs) | ~6,900 |
-| Engine modules | 6 files, 1,506 lines |
-| Web app modules (src/) | 22 files, 2,164 lines |
-| Tests | 9 files, 2,087 lines, 130 tests |
-| Bug ledger | 35 bugs: 32 ✅ fixed + 3 ⚪ won't-fix |
-| Dependencies | 6 direct (streamlit, pandas, numpy, gspread, yfinance, google-auth) |
-| External APIs | Yahoo Finance (no key), Google Sheets (GCP service account) |
-| CI | GitHub Actions, 2 legs (Win/3.14 lock + Linux/3.12 range), fully offline |
