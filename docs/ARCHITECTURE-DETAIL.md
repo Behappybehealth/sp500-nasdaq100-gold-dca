@@ -77,7 +77,7 @@ return json.loads(out.stdout)          # 把对方打印的 JSON 转成 Python �
 - 读：把**整张表**拉下来
 - 写：把**整张表**推上去（覆盖）
 
-所以"加一笔成交记录"的实际动作是（`append_row()` 的 Sheets 分支，storage.py:461–465）：
+所以"加一笔成交记录"的实际动作是（`append_row()` 的 Sheets 分支，storage.py:503–507）：
 
 ```
 把整张 transactions 表读下来（比如 200 行）
@@ -87,7 +87,7 @@ return json.loads(out.stdout)          # 把对方打印的 JSON 转成 Python �
 
 **打个比方**：改一个字，要把整本书重新抄一遍再交上去。**所以"读下来"这一步是命门**——如果它失败了，你手里就是一本空书，抄完交上去，原来那本就没了。storage 因此定下两条规矩：读失败抛错拒写（空表不覆写）、写前先把现内容快照到 `_bak` 表。
 
-另有**进程内全局 8 秒短缓存** `_SHEET_CACHE`（storage.py:138–139，TTL 定义在 :139），`_read_ws(..., fresh=True)`（:149 起）可绕过它强制新鲜读。
+另有**进程内全局 8 秒短缓存** `_SHEET_CACHE`（storage.py:176–177，TTL 定义在 :177），`_read_ws(..., fresh=True)`（:187 起）可绕过它强制新鲜读。
 
 四张主表的字段结构见概要版 §8（数据在哪），不重复。
 
@@ -294,27 +294,44 @@ Cloud 不装 lock：里面含 Windows 平台包，而且本机钉定版本未必
 
 ---
 
-## 9. storage.py 接口表（19 个公开函数）
+## 9. storage.py 结构与接口（654 行）
+
+**文件结构**：
+
+| 行区间 | 段落 | 说明 |
+|---|---|---|
+| 1–18 | 模块文档 | 工作表结构、设计要点 |
+| 20–41 | 导入 + 日志 | `getLogger("dca.storage")`，不反向 import `src/` |
+| 44–90 | 异常 + 字段常量 | `SheetReadError`/`SheetWriteError`、`TX_FIELDS`/`OBS_FIELDS`/`OVR_FIELDS`/`USER_FIELDS`/`TABLES` |
+| 93–128 | schema 构造 + PIN 常数 | `build_tx_row`/`build_obs_row`（P1-2 DRY）、PBKDF2 迭代/锁定阈值 |
+| 131–168 | 后端探测 + 连接 | `sheets_status`/`sheets_enabled`、`_conn()`（含 spinner 静默补丁） |
+| 171–244 | Sheets 底层读写 | 8 秒进程缓存 `_SHEET_CACHE`、`_read_ws`/`_write_ws`（写前快照 fail-closed） |
+| 247–461 | 用户/PIN 认证 | PBKDF2+盐+rehash-on-login、5 次锁定 15 分钟、用户 CRUD 7 函数 |
+| 464–562 | 数据读写 | `read_rows`/`append_row`（同日重复检测）/`get_overrides`/`set_override` |
+| 565–635 | 云端→本地缓存同步 | `sync_local`（覆盖前轮转留底 10 份）、`import_local_to_sheets` |
+| 638–654 | 本地路径 | `_LOCAL_BASE` 全局、`init()`/`_local_csv`/`_local_json` |
+
+**公开接口（19 个函数）**：
 
 | 函数 | 行号 | 职责 |
 |---|---:|---|
-| `sheets_status` | 96 | 云端可用性状态（fail-closed 判定用） |
-| `sheets_enabled` | 108 | 是否已配凭据（内部用） |
-| `list_users` / `list_users_fresh` | 250 / 256 | 用户名单（后者绕过 8 秒缓存） |
-| `authenticate` | 263 | 一次新鲜读完成「锁定/存在性/激活态/PIN」四重判断；连续失败 5 次锁 15 分钟；旧 sha256 账号验证通过即自动迁移 PBKDF2 |
-| `create_user` | 314 | 注册（首个用户自动 admin） |
-| `is_admin` / `admin_add_user` | 342 / 348 | 管理员工具 |
-| `is_activated` / `set_pin` | 370 / 377 | 激活态 / 设 PIN（新 PIN 强制 6–8 位） |
-| `delete_user` / `reset_pin` | 398 / 407 | 删号 / 重置 PIN |
-| `read_rows` / `append_row` | 425 / 439 | 按用户读行 / 追加行（Sheets 分支是整表读改写，见 §3） |
-| `get_overrides` / `set_override` | 459 / 479 | 月度预算覆盖 |
-| `sync_local` | 519 | 云端数据落盘到 `data/users/<user>/`（覆盖前带时间戳轮转留底 10 份） |
-| `import_local_to_sheets` | 543 | 本地历史一次性上传云端 |
-| `init` | 583 | 启动初始化（数据目录定位） |
+| `sheets_status` | 134 | 云端可用性状态（fail-closed 判定用） |
+| `sheets_enabled` | 146 | 是否已配凭据（内部用） |
+| `list_users` / `list_users_fresh` | 292 / 298 | 用户名单（后者绕过 8 秒缓存） |
+| `authenticate` | 305 | 一次新鲜读完成「锁定/存在性/激活态/PIN」四重判断；连续失败 5 次锁 15 分钟；旧 sha256 账号验证通过即自动迁移 PBKDF2 |
+| `create_user` | 356 | 注册（首个用户自动 admin） |
+| `is_admin` / `admin_add_user` | 384 / 390 | 管理员工具 |
+| `is_activated` / `set_pin` | 412 / 419 | 激活态 / 设 PIN（新 PIN 强制 6–8 位） |
+| `delete_user` / `reset_pin` | 440 / 449 | 删号 / 重置 PIN |
+| `read_rows` / `append_row` | 467 / 481 | 按用户读行 / 追加行（Sheets 分支是整表读改写，见 §3） |
+| `get_overrides` / `set_override` | 519 / 539 | 月度预算覆盖 |
+| `sync_local` | 579 | 云端数据落盘到 `data/users/<user>/`（覆盖前带时间戳轮转留底 10 份） |
+| `import_local_to_sheets` | 603 | 本地历史一次性上传云端 |
+| `init` | 643 | 启动初始化（数据目录定位） |
 
-认证相关常数：`_PBKDF2_ITER = 200_000`（:87，2026-08-17 本机实测约 0.073s/次；换部署机应按 0.05–0.3s 目标重新标定）。
+认证相关常数：`_PBKDF2_ITER = 200_000`（:125，2026-08-17 本机实测约 0.073s/次；换部署机应按 0.05–0.3s 目标重新标定）。
 
-（行号复核于 2026-08-18）
+（行号复核于 2026-08-24）
 
 ---
 
