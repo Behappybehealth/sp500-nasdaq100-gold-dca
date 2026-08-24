@@ -97,7 +97,6 @@ sp500-nasdaq100-gold-dca/
 ├── pytest.ini                      # 7L   pytest config — collects tests/ only
 ├── .gitignore                      # 50L  Ignores .venv, logs/*.log, data/users/, secrets
 ├── .gitattributes                  # 6L   CRLF normalization
-├── .dockerignore                   # 16L  Docker safety default (unused; Docker files deleted)
 │
 ├── .github/workflows/ci.yml         # 47L  GitHub Actions — Win/3.14 + Linux/3.12, fully offline
 │
@@ -210,7 +209,6 @@ sp500-nasdaq100-gold-dca/
 ├── pytest.ini                      # 7行   pytest配置——只收tests/
 ├── .gitignore                      # 50行  忽略.venv、logs/*.log、data/users/、secrets
 ├── .gitattributes                  # 6行   CRLF规范化
-├── .dockerignore                   # 16行  Docker安全默认（未用）
 │
 ├── .github/workflows/ci.yml         # 47行  GitHub Actions——Win/3.14 + Linux/3.12，全离线
 │

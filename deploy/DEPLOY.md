@@ -136,10 +136,10 @@ git checkout 574c7a7 -- deploy/Dockerfile   # 取回
 **但建议重写而不是取回**，因为那份有上面三道墙。重写时的必守清单：
 
 1. **COPY 清单必须含 `storage.py`**（当年就漏了这个）
-2. **`.streamlit/secrets.toml` 绝不进镜像层**。`.dockerignore` 已经保留并把它列在第一条了 —— 凭据走运行时挂载或环境变量注入
+2. **`.streamlit/secrets.toml` 绝不进镜像层**。新建 `.dockerignore` 并把 `.streamlit/secrets.toml` 列在第一条 —— 凭据走运行时挂载或环境变量注入
 3. **设 `TZ=Asia/Shanghai`**（当年 Dockerfile 和 compose 都没设时区，容器内 `date.today()` 会落在 UTC）
 4. **`FROM` 钉住 digest**，不要用 `python:3.12-slim` 这种浮动 tag。且注意本机已经是 **Python 3.14.4**，pandas 3.0.5 —— 镜像里装 3.12 会得到完全不同的依赖解析
-5. **COPY 要带上 `strategy/`、`backtest/`、`data/market_history/`**，否则 Tab5 是空的、每个用户从冷缓存起步（`.dockerignore` 现在还排除着 `backtest*/` 和 `*.md`，重启 Docker 时要一并复核）
+5. **COPY 要带上 `strategy/`、`backtest/`、`data/market_history/`**，否则 Tab5 是空的、每个用户从冷缓存起步（重启 Docker 时 `.dockerignore` 要一并复核，别排除 `backtest*/` 和 `*.md`）
 6. **每用户独立 `--base-dir`**。这个机制在代码里已经就绪（`app.py` 和 `dca_calculator.py` 都支持 `--base-dir`），与 Docker 无关，不需要容器也能用
 7. **`nginx -t` 必须在 reload 之前跑**，且改配置前先备份
 
