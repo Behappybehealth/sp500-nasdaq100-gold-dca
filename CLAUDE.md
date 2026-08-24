@@ -104,7 +104,7 @@ cd X:/coding/projects/sp500-nasdaq100-gold-dca
 8. **全项目零绝对路径**，保持这个性质，搬目录才不会断。归档回测脚本也必须用 `Path(__file__)` 相对定位。
 9. **提交信息用 Conventional Commits**（`feat:` / `fix:` / `refactor:` / `chore:`）。
 10. **动手前先读 `docs/ARCHITECTURE.md` 与 `docs/BUGLIST.md`** —— 前者是顶层架构唯一事实源（改实现细节另读 `docs/ARCHITECTURE-DETAIL.md`），后者是问题唯一事实源。`BUGLIST.md` 中每条问题必须先完成“1 对 1 确认修复路径”并回填确认记录，才允许修改真实逻辑；修复后必须回填实际改动、修复日期和真实验证结果。
-11. **行为变更的 commit 必须同期核对相关活文档** —— 活/冻清单见 `docs/README.md`（文档门户）。活文档头部标 `【活·更新时机：…】`；`docs/plans/` 与 `backtest/` 的结果/报告是冻结产物，只增不回改。归档 `.py` 脚本允许做不改变历史结果含义的可移植性维护。
+11. **行为变更的 commit 必须同期核对相关活文档** —— 活/冻清单见 `docs/ARCHITECTURE.md` §9。活文档头部标 `【活·更新时机：…】`；`docs/plans/` 与 `backtest/` 的结果/报告是冻结产物，只增不回改。归档 `.py` 脚本允许做不改变历史结果含义的可移植性维护。
 12. **每个 commit 同期在 `CHANGELOG.md` 追加一行**（`HH:MM:SS [类型] 一句话（hash；关联编号）`，按日期分组新在上、组内按时刻新在上）——这是全量改动的人读版流水；架构级变更另记 ARCHITECTURE 变更记录、问题生命周期另记 BUGLIST，三处粒度不同不重复。**时刻取自 git commit 时间，不手写**：`.venv/Scripts/python.exe scripts/changelog.py add <hash>` 生成行草稿，收尾跑 `--check` 校验每个 commit 都有行且时刻正确（手滑漏行/错时刻会被它拦下）。尾随约定：commit 自身那行由下一个 commit 携带入库。
 13. **测试必须离线且用虚构数据。** 测试不得访问 Yahoo / 东财 / Google Sheets，不得把真实持仓或成本写进 fixture；storage 与 AppTest 每条路径都要显式 patch `sheets_enabled` 或强制 local，防本机真实 `secrets.toml` 被 pytest 读到后误写生产表。`conftest` 的 `_deny_network` 是兜底不是替代——它抓的是漏 patch，命中即 `NetworkUseInTests`；改守卫必须同步跑 `tests/test_offline_guard.py`。
 14. **session_state 键一律走 `src/state.py` 登记表**：新增/删除键先改登记表（常量 + 归属链 + 生命周期注释），业务代码写裸字面量会被 `tests/test_state.py` 拦下；触发云端重同步调 `invalidate_sync()`，别直接 `pop`。

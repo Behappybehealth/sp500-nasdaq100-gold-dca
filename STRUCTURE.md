@@ -179,7 +179,6 @@ sp500-nasdaq100-gold-dca/
 ├── strategy/core-strategy.md       # 184L Strategy doc — single source of truth, Tab6 renders
 │
 ├── docs/                           # ── Documentation ──
-│   ├── README.md                   # 46L  Doc portal — index of all docs
 │   ├── ARCHITECTURE.md             # 365L Top-level architecture (structure SOT)
 │   ├── ARCHITECTURE-DETAIL.md      # 412L Architecture detail (implementation, pitfalls)
 │   ├── BUGLIST.md                  # 2107L Bug ledger — 35 bugs (32✅ + 3⚪)
@@ -291,7 +290,6 @@ sp500-nasdaq100-gold-dca/
 ├── strategy/core-strategy.md       # 184行 策略说明——唯一事实源，Tab6渲染
 │
 ├── docs/                           # ── 文档 ──
-│   ├── README.md                   # 46行  文档门户——全部说明文件索引
 │   ├── ARCHITECTURE.md             # 365行 顶层架构（结构唯一事实源）
 │   ├── ARCHITECTURE-DETAIL.md      # 412行 架构详设（实现、踩坑）
 │   ├── BUGLIST.md                  # 2107行 问题台账——35条（32✅ + 3⚪）

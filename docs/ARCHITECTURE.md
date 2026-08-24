@@ -1,6 +1,6 @@
 # 工程架构说明书（概要版）
 
-> 【活文档 · 更新时机：**仅顶层架构变更**（换技术栈/存储/部署、改数据流、调目录、动链路）时更新；实现细节变动只更新详设，不动本文】索引见 [docs/README.md](README.md)。
+> 【活文档 · 更新时机：**仅顶层架构变更**（换技术栈/存储/部署、改数据流、调目录、动链路）时更新；实现细节变动只更新详设，不动本文】
 > **本文件是本项目顶层架构的唯一事实源。** 首版 2026-08-17，2026-08-18 拆分为「概要 + 详设」两份。
 > 面向所有读者（含非技术）：第一次出现的概念都解释。实现细节、设计动机、踩坑记录 → [ARCHITECTURE-DETAIL.md](ARCHITECTURE-DETAIL.md)（同一事实只写一处，本文不重复）。
 > 问题与缺陷不写在这里，走 [BUGLIST.md](BUGLIST.md)。
@@ -279,16 +279,29 @@ tab4（26 行）是这条链的读侧，业务上和 tab3 是一件事。
 
 ### 9.7 `docs/` 与 `.streamlit/`
 
+> **活文档**随代码同步更新、可以信赖；**冻文档**是历史快照，只增不改。各文档头部标 `【活·更新时机：…】`；行为变更的 commit 须同期核对相关活文档（与 CLAUDE.md 第 11 条互为表里）。
+
+**活文档**：
+
 | 路径 | 说明 | 入库 |
 |---|---|:---:|
-| `docs/README.md` | **文档门户**：全部说明文件的索引（活/冻标注、读者、更新时机） | ✅ |
 | `docs/ARCHITECTURE.md` | **本文件**。顶层架构唯一事实源 | ✅ |
 | `docs/ARCHITECTURE-DETAIL.md` | **架构详设**：实现细节、设计动机、踩坑记录 | ✅ |
 | `docs/BUGLIST.md` | **问题台账**。每条走「梳理 → 1对1确认 → 修复 → 验证」四段 | ✅ |
-| `docs/plans/` | 计划与历史审计存档（`app-split-design.md` = app.py 拆分 6 刀方案；`project-audit-2026-08-17.md` = 原始审计快照） | ✅ |
 | `.streamlit/config.toml` | 主题配色 | ✅ |
 | `.streamlit/secrets.toml` | **GCP 服务账号凭据**，2600 字节 | ❌ |
 | `.streamlit/secrets.toml.example` | 模板 | ✅ |
+
+**冻文档**（历史快照，只增不改）：
+
+| 路径 | 说明 |
+|---|---|
+| `docs/plans/app-split-design.md` | app.py 拆分方案（施工图纸，已执行完毕） |
+| `docs/plans/project-audit-2026-08-17.md` | 2026-08-17 全量审计原始快照（26 条问题的出处） |
+| `docs/plans/architecture-and-p0-explained.md` | ARCHITECTURE / BUGLIST 的前身，已被拆分取代 |
+| `docs/plans/distributed-pondering-puppy.md` | 回测模型实施计划（已执行完） |
+| `docs/plans/proud-discovering-kitten.md` | 完整升级计划（历史） |
+| `docs/plans/toasty-yawning-dewdrop.md` | Skill 改版计划（历史） |
 
 （行数复核于 2026-08-18）
 

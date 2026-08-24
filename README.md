@@ -6,7 +6,7 @@
 
 ---
 
-📖 **完整文档见 [docs/README.md](docs/README.md)**（文档门户：活/冻标注、读者、更新时机）。
+📖 **完整文档见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**（顶层架构唯一事实源，§9 含全部文件说明）。
 
 快速入口：
 
