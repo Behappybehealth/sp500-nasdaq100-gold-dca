@@ -17,17 +17,17 @@
 - 注意：Sheets 连接基于整表 read/update，并发写存在理论上的竞态；本工具面向极小团队，可接受。
 """
 
-# File structure: 654 lines, well-organized with clear section headers:
+# File structure: 666 lines, well-organized with clear section headers:
 #     - L1-18: Module docstring
-#     - L20-41: Imports + logger
-#     - L44-88: Exceptions + field constants
-#     - L93-128: Schema helpers + PIN constants
-#     - L131-168: Backend detection + connection
-#     - L171-244: Sheet low-level read/write (with cache, backup)
-#     - L247-461: User/PIN auth logic (~210 lines)
-#     - L464-562: Data CRUD
-#     - L565-635: Cloud→local sync
-#     - L638-654: Local path helpers
+#     - L32-53: Imports + logger
+#     - L56-102: Exceptions + field constants
+#     - L105-140: Schema helpers + PIN constants
+#     - L143-180: Backend detection + connection
+#     - L183-256: Sheet low-level read/write (with cache, backup)
+#     - L259-473: User/PIN auth logic (~210 lines)
+#     - L476-574: Data CRUD
+#     - L577-647: Cloud→local sync
+#     - L650-666: Local path helpers
 
 import csv
 import hashlib
