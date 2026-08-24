@@ -6,31 +6,31 @@
 
 ---
 
-## English
-
-### Dependency Graph (simple)
+## 依赖关系图 / Dependency Graph
 
 ```
-app.py (assembly, 70L)
- ├→ storage.py          ──→ streamlit/pandas/gspread   ⚠ data layer reverse-depends UI
- ├→ src/context.py       ──→ (pure dataclass)           ✅
- ├→ src/obs.py           ──→ (pure logging)             ✅
+app.py (装配, 70行)
+ ├→ storage.py          ──→ streamlit/pandas/gspread   ⚠ 数据层反向依赖UI框架
+ ├→ src/context.py       ──→ (纯dataclass, 无依赖)       ✅
+ ├→ src/obs.py           ──→ (纯logging, 无依赖)         ✅
  ├→ src/ui/auth.py       ──→ storage, state, overlays
- ├→ src/ui/sidebar.py    ──→ storage, services.model, services.quotes   (coordinator)
- ├→ src/ui/styles.py     ──→ (pure CSS)                 ✅
+ ├→ src/ui/sidebar.py    ──→ storage, services.model, services.quotes   (协调器)
+ ├→ src/ui/styles.py     ──→ (纯CSS)                     ✅
  ├→ src/tabs/today.py    ──→ services.model
  ├→ src/tabs/records.py  ──→ storage, state
  ├→ src/tabs/holdings.py ──→ services.curves
  ├→ src/tabs/backtest.py ──→ services.curves
- ├→ src/services/model.py──→ subprocess → dca_calculator  ✅ isolated
- ├→ src/services/quotes.py──→ context (⚠ @st.cache_data binds Streamlit)
- └→ src/services/curves.py──→ src/market_cache (no sys.path hack)  ✅
+ ├→ src/services/model.py──→ subprocess → dca_calculator  ✅ 子进程隔离
+ ├→ src/services/quotes.py──→ context (⚠ @st.cache_data 绑定Streamlit)
+ └→ src/services/curves.py──→ src/market_cache (无sys.path hack)  ✅
 
-scripts/dca_calculator.py (entry 240L + 5 sibling mods) ──→ stdlib only  ✅ zero reverse-dep
-scripts/dca_action.py     ──→ dca_calculator, storage  (CLI entry)
+scripts/dca_calculator.py (入口240行 + 5兄弟模块) ──→ stdlib only  ✅ 零反向依赖
+scripts/dca_action.py     ──→ dca_calculator, storage  (CLI入口)
 ```
 
-### File Tree (concise)
+---
+
+## English — File Tree
 
 ```
 sp500-nasdaq100-gold-dca/
@@ -143,7 +143,7 @@ sp500-nasdaq100-gold-dca/
 
 ---
 
-## 中文注释版
+## 中文 — File Tree
 
 ```
 sp500-nasdaq100-gold-dca/
