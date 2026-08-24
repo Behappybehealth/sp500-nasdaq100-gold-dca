@@ -7,13 +7,13 @@ from __future__ import annotations
 
 import csv
 import json
-import sys
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
 from ..context import Paths
+from ..market_cache import cache_file_for, load_cached_closes, close_at_or_before
 
 
 def _load_json(path: Path):
@@ -27,15 +27,10 @@ def _load_json(path: Path):
 @st.cache_data(ttl=900, show_spinner=False)
 def load_price_series(paths: Paths):
     """读取缓存行情，用于组合曲线与图表。"""
-    scripts_dir = str(paths.code_dir / "scripts")
-    if scripts_dir not in sys.path:
-        sys.path.insert(0, scripts_dir)
-    import dca_calculator as dca  # type: ignore[import-not-found]  # scripts/ 运行时才加入 sys.path，静态分析解析不到
-
     cache_dir = paths.data_dir / "market_history"
     series = {}
     for sym in ["SPY", "QQQ", "XAUT-USD"]:
-        closes = dca.load_cached_closes(dca.cache_file_for(cache_dir, sym))
+        closes = load_cached_closes(cache_file_for(cache_dir, sym))
         if closes:
             series[sym] = closes
     return series
@@ -93,9 +88,9 @@ def portfolio_curve(result: dict, paths: Paths, user: str):
         value = 0.0
         for a, sym in asset_sym.items():
             s = series.get(sym, {})
-            eligible = [x for x in s if x <= d]
-            if eligible and shares.get(a):
-                value += shares[a] * s[max(eligible)] * fx_map[a]
+            px = close_at_or_before(s, d)
+            if px and shares.get(a):
+                value += shares[a] * px * fx_map[a]
         out.append(
             {"日期": d, "累计投入": round(invested, 0), "组合市值": round(value, 0)}
         )

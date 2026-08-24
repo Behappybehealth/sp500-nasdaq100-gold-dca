@@ -163,6 +163,7 @@ def build_result(config: dict, today: date, *, txs: list, live: bool = True,
         "decision": decision,
         "suggested_weights": decision["weights"],
     }
+    result["wide_table_rows"] = eng.build_wide_rows(result, txs, assets)
     result["wide_table_markdown"] = eng.render_wide_table(result, txs, assets)
     return result
 
@@ -246,7 +247,7 @@ def run_app(monkeypatch, tmp_path):
         monkeypatch.setattr(sidebar, "run_model", lambda amount, user, paths: result)
         monkeypatch.setattr(sidebar, "fetch_xau_spot", lambda paths: (
             {"price": 3401.2, "chg_pct": 0.003, "ts": FAKE_TS, "stale": False} if quotes else None))
-        monkeypatch.setattr(sidebar, "fetch_btc", lambda: (
+        monkeypatch.setattr(sidebar, "fetch_btc", lambda paths: (
             {"price": 96000.0, "chg_pct": -0.012, "ts": FAKE_TS} if quotes else None))
         at = AppTest.from_file(str(APP), default_timeout=120)
         at.run()

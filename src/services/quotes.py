@@ -61,8 +61,8 @@ def fetch_xau_spot(paths: Paths):
 
 
 @st.cache_data(ttl=900, show_spinner=False)
-def fetch_btc():
-    """比特币实时行情（Yahoo BTC-USD）。失败返回 None。"""
+def fetch_btc(paths: Paths):
+    """比特币实时行情（Yahoo BTC-USD）。失败时落盘兜底 + 标注"更新失败，使用历史数据"。"""
     import urllib.request
 
     try:
@@ -78,10 +78,24 @@ def fetch_btc():
         if not price:
             return None
         prev = meta.get("chartPreviousClose") or price
-        return {
+        rec = {
             "price": float(price),
             "chg_pct": float(price) / float(prev) - 1,
             "ts": meta.get("regularMarketTime"),
         }
+        with contextlib.suppress(Exception):
+            (paths.data_dir / "btc_last.json").write_text(
+                json.dumps(rec), encoding="utf-8"
+            )
+        return rec
+    except Exception:
+        pass
+    try:  # 用最后一次成功值兜底，标记缓存 + 标注更新失败
+        last = json.loads(
+            (paths.data_dir / "btc_last.json").read_text(encoding="utf-8")
+        )
+        last["stale"] = True
+        last["stale_label"] = "⚠️更新失败，使用历史数据"
+        return last
     except Exception:
         return None

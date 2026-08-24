@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
 """Tab1 今日模拟：建议金额/部署系数/可用池/每日基准 + 复盘 + 宽表 + 行情评分。
 
-数据全部显式收参，不读 app.py 模块级全局；parse_wide_table 来自 src.services.model。
+数据全部显式收参，不读 app.py 模块级全局；宽表直接用引擎输出的结构化行 result["wide_table_rows"]。
 """
 from __future__ import annotations
 
 import pandas as pd
 import streamlit as st
 
-from ..services.model import parse_wide_table
+
 
 
 def render(tab, result: dict, dec: dict, ms: dict, assets: dict):
@@ -58,7 +58,7 @@ def render(tab, result: dict, dec: dict, ms: dict, assets: dict):
 
         st.subheader("累计持仓结果完整表格")
         st.dataframe(
-            parse_wide_table(result["wide_table_markdown"]),
+            pd.DataFrame(result["wide_table_rows"]),
             width="stretch",
             hide_index=True,
         )

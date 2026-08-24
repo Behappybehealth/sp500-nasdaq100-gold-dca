@@ -39,7 +39,7 @@ def _not_live(mk: dict) -> bool:
     return bool(mk.get("cache_warning")) or mk.get("latest_source") != "quote"
 
 
-def _quote_html(name, price, chg, stale=False):
+def _quote_html(name, price, chg, stale=False, stale_label="⚠️缓存"):
     """涨绿跌红（国际惯例）。"""
     if chg is None:
         color, arrow, txt = "#888888", "", "—"
@@ -47,7 +47,7 @@ def _quote_html(name, price, chg, stale=False):
         color, arrow, txt = "#16a34a", "▲", f"+{chg * 100:.2f}%"
     else:
         color, arrow, txt = "#dc2626", "▼", f"{chg * 100:.2f}%"
-    warn = ' <span style="color:#d97706">⚠️缓存</span>' if stale else ""
+    warn = f' <span style="color:#d97706">{stale_label}</span>' if stale else ""
     return (
         f'<div style="margin:3px 0"><span style="color:#888888">{name}</span><br>'
         f'<b style="font-size:1.05em">{price:,.2f}</b> '
@@ -165,12 +165,12 @@ def render(paths: Paths, user: str) -> Decision:
     )
     quote_times = []
     xau = fetch_xau_spot(paths)
-    btc = fetch_btc()
+    btc = fetch_btc(paths)
     for name, sym in QUOTE_ROWS:
         if sym == "BTC":
             if btc:
                 st.sidebar.markdown(
-                    _quote_html(name, btc["price"], btc["chg_pct"]), unsafe_allow_html=True
+                    _quote_html(name, btc["price"], btc["chg_pct"], btc.get("stale", False), btc.get("stale_label", "⚠️缓存")),
                 )
                 if btc.get("ts"):
                     quote_times.append(btc["ts"])

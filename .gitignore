@@ -11,6 +11,10 @@ data/quote_snapshot.json
 data/fx_last.json
 # 当日未收盘 K 线的落点（盘中记账时"我看到的那个价"要有落点；收盘定稿值仍归 market_history/csv）
 data/market_live.json
+# BTC 实时价的落盘兜底（fetch_btc 抓成功时刷新，失败时读它兜底）
+data/btc_last.json
+# 嵌套 data/data/ 是误用 --base-dir data 从项目根跑引擎产生的，不应入库
+data/data/
 # 多用户模式下 sync_local 的每用户落盘缓存（BUG-001 修复后产生）
 data/users/
 

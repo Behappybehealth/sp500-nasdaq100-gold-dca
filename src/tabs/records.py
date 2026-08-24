@@ -89,19 +89,12 @@ def render(tab, result: dict, dec: dict, assets: dict, user: str):
                     st.error(f"日期「{tx_date}」不是合法的 YYYY-MM-DD，未写入。")
                 else:
                     shares = tx_shares if tx_shares else round(tx_amount / tx_fx / tx_price, 6)
-                    st.session_state[K_PENDING_TX] = {
-                        "date": tx_date,
-                        "action": tx_action,
-                        "asset": tx_asset,
-                        "symbol": tx_symbol,
-                        "currency": "USDT",
-                        "amount_rmb": tx_amount,
-                        "price": tx_price,
-                        "shares": shares,
-                        "fee_rmb": tx_fee,
-                        "fx_rate": tx_fx,
-                        "notes": tx_notes,
-                    }
+                    st.session_state[K_PENDING_TX] = storage.build_tx_row(
+                        date=tx_date, action=tx_action, asset=tx_asset,
+                        symbol=tx_symbol, amount_rmb=tx_amount, price=tx_price,
+                        shares=shares, fee_rmb=tx_fee, fx_rate=tx_fx,
+                        notes=tx_notes,
+                    )
         if st.session_state.get(K_PENDING_TX):
             p = st.session_state[K_PENDING_TX]
             st.warning(
@@ -154,18 +147,11 @@ def render(tab, result: dict, dec: dict, assets: dict, user: str):
             obs_submit = st.form_submit_button("生成复述")
         if obs_submit:
             w = result["suggested_weights"]
-            st.session_state[K_PENDING_OBS] = {
-                "date": str(biz_today()),
-                "action": "observe",
-                "total_suggested_rmb": dec["suggested_amount_rmb"],
-                "user_amount_rmb": 0,
-                "decision_level": dec["level_label"],
-                "sp500_weight": round(w.get("sp500", 0), 4),
-                "ndx100_weight": round(w.get("nasdaq100", 0), 4),
-                "gold_weight": round(w.get("gold", 0), 4),
-                "reason": obs_reason,
-                "notes": obs_notes,
-            }
+            st.session_state[K_PENDING_OBS] = storage.build_obs_row(
+                date=str(biz_today()), decision_level=dec["level_label"],
+                total_suggested_rmb=dec["suggested_amount_rmb"],
+                weights=w, reason=obs_reason, notes=obs_notes,
+            )
         if st.session_state.get(K_PENDING_OBS):
             st.warning(
                 f"请确认写入观察记录：{json.dumps(st.session_state[K_PENDING_OBS], ensure_ascii=False)}"

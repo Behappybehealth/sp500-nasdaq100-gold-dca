@@ -89,6 +89,38 @@ USER_FIELDS = [
 
 TABLES = {"transactions": TX_FIELDS, "observations": OBS_FIELDS}
 
+
+def build_tx_row(*, date, action, asset, symbol, amount_rmb, price,
+             shares, fee_rmb, fx_rate, notes="", currency="USDT") -> dict:
+    """构造 transactions 行（字段与 TX_FIELDS 对齐，单一事实源）。
+
+    Web 记账 Tab 与 CLI（dca_action.py）共用此函数，避免三处各写一遍字段字典。
+    """
+    return {
+        "date": date, "action": action, "asset": asset, "symbol": symbol,
+        "currency": currency, "amount_rmb": amount_rmb, "price": price,
+        "shares": shares, "fee_rmb": fee_rmb, "fx_rate": fx_rate, "notes": notes,
+    }
+
+
+def build_obs_row(*, date, decision_level, total_suggested_rmb,
+                  weights: dict, reason, notes="", user_amount_rmb=0) -> dict:
+    """构造 observations 行（字段与 OBS_FIELDS 对齐，单一事实源）。
+
+    weights 接收 {sp500/nasdaq100/gold: w} 形式，内部按 OBS_FIELDS 的键名
+    （ndx100_weight）对齐并四舍五入到 4 位。
+    """
+    return {
+        "date": date, "action": "observe",
+        "total_suggested_rmb": total_suggested_rmb,
+        "user_amount_rmb": user_amount_rmb,
+        "decision_level": decision_level,
+        "sp500_weight": round(weights.get("sp500", 0), 4),
+        "ndx100_weight": round(weights.get("nasdaq100", 0), 4),
+        "gold_weight": round(weights.get("gold", 0), 4),
+        "reason": reason, "notes": notes,
+    }
+
 # PIN 策略：新 PIN 强制 6-8 位；存量 4-5 位旧账号不受影响，登录成功时自动迁移哈希。
 _PBKDF2_ITER = 200_000  # 2026-08-17 本机实测约 0.073s/次；换部署机应按 0.05-0.3s 目标重新标定
 _PIN_MIN, _PIN_MAX = 6, 8

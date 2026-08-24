@@ -126,33 +126,20 @@ def main() -> int:
                 if not args.fx:
                     return _fail("未给 --shares 时必须给 --fx（按 金额÷汇率÷价格 自动算份额）")
                 shares = round(args.amount / args.fx / args.price, 6)
-            row = {
-                "date": args.date,
-                "action": args.action,
-                "asset": args.asset,
-                "symbol": symbol,
-                "currency": "USDT",
-                "amount_rmb": args.amount,
-                "price": args.price,
-                "shares": shares,
-                "fee_rmb": args.fee,
-                "fx_rate": args.fx,
-                "notes": args.notes,
-            }
+            row = storage.build_tx_row(
+                date=args.date, action=args.action, asset=args.asset,
+                symbol=symbol, amount_rmb=args.amount, price=args.price,
+                shares=shares, fee_rmb=args.fee, fx_rate=args.fx,
+                notes=args.notes,
+            )
             table = "transactions"
         elif args.cmd == "record" and args.kind == "obs":
-            row = {
-                "date": args.date,
-                "action": "observe",
-                "total_suggested_rmb": args.total_suggested,
-                "user_amount_rmb": 0,
-                "decision_level": args.decision_level,
-                "sp500_weight": args.w_sp500,
-                "ndx100_weight": args.w_ndx,
-                "gold_weight": args.w_gold,
-                "reason": args.reason,
-                "notes": args.notes,
-            }
+            row = storage.build_obs_row(
+                date=args.date, decision_level=args.decision_level,
+                total_suggested_rmb=args.total_suggested,
+                weights={"sp500": args.w_sp500, "nasdaq100": args.w_ndx, "gold": args.w_gold},
+                reason=args.reason, notes=args.notes,
+            )
             table = "observations"
         elif args.cmd == "override":
             if args.amount <= 0:

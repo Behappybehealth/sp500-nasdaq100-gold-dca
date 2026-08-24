@@ -10,7 +10,6 @@ import logging
 import subprocess
 import sys
 
-import pandas as pd
 import streamlit as st
 
 from ..context import Paths
@@ -60,8 +59,3 @@ def run_model(amount: float | None, user: str, paths: Paths) -> dict:
         )
     return result
 
-
-def parse_wide_table(md: str) -> pd.DataFrame:
-    lines = [ln for ln in md.splitlines() if ln.startswith("|")]
-    rows = [[c.strip() for c in ln.strip("|").split("|")] for ln in lines]
-    return pd.DataFrame(rows[2:], columns=rows[0])
