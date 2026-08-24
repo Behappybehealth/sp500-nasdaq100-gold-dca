@@ -7,6 +7,8 @@
 
 ## 2026-08-24
 
+- 17:29:56 [文档] ARCHITECTURE-DETAIL §9 加 storage.py 文件结构表 + 修正全部过时行号（`cf2ee5c`）
+- 17:15:57 [杂务] CHANGELOG: 尾随 1b66426 + 35594ca（`6a2aa86`）
 - 17:14:00 [文档] 删 docs/README.md，门户职责合入 ARCHITECTURE.md §9（`1b66426`）
 - 17:06:12 [杂务] CHANGELOG: 尾随 2a26913 + a9831b9（`35594ca`）
 - 17:05:12 [文档] 精简 README.md(56→19行)——极简门面，详细内容指向 docs/README.md（`2a26913`）
