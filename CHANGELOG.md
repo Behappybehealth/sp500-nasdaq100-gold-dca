@@ -7,6 +7,8 @@
 
 ## 2026-08-24
 
+- 17:14:00 [文档] 删 docs/README.md，门户职责合入 ARCHITECTURE.md §9（`1b66426`）
+- 17:06:12 [杂务] CHANGELOG: 尾随 2a26913 + a9831b9（`35594ca`）
 - 17:05:12 [文档] 精简 README.md(56→19行)——极简门面，详细内容指向 docs/README.md（`2a26913`）
 - 16:56:14 [杂务] CHANGELOG: 尾随 d87bb4a + 补 5 条 STRUCTURE.md 行（`a9831b9`）
 - 16:55:29 [杂务] 精简 CLAUDE.md(206→126行) + 删 .dockerignore + 文档同步去引用（`d87bb4a`）
