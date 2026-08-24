@@ -7,6 +7,8 @@
 
 ## 2026-08-24
 
+- 17:39:10 [修复] storage.py 结构注释行号校准（加注释后 +12 偏移）（`1cadebe`）
+- 17:33:27 [杂务] CHANGELOG: 尾随 36ae88c + 8cfd0d6（`a157072`）
 - 17:32:52 [文档] storage.py 加文件结构注释块（英文，12行）（`36ae88c`）
 - 17:30:35 [杂务] CHANGELOG: 尾随 cf2ee5c + 6a2aa86（`8cfd0d6`）
 - 17:29:56 [文档] ARCHITECTURE-DETAIL §9 加 storage.py 文件结构表 + 修正全部过时行号（`cf2ee5c`）
