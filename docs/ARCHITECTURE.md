@@ -64,7 +64,8 @@
                             ▼                  ▼
         ┌───────────────────────────┐   ┌──────────────────┐
         │ scripts/dca_calculator.py │   │   storage.py     │
-        │ 计算引擎（1391 行）        │   │  存储层（612 行） │
+        │ 计算引擎入口（240 行）     │   │  存储层（622 行） │
+        │ + 5 个兄弟模块（1266 行）  │   │                  │
         │                           │   │                  │
         │ 读 data/config.json       │   │ 优先 Google Sheets│
         │ 读记账数据（--user 时      │◄──┤ 无凭据→本地 CSV   │
@@ -84,9 +85,9 @@
                                       └──────────────────────┘
 ```
 
-**三层 + 一个边界**：`app.py`（UI + 业务逻辑，耦合较紧）→ 通过 subprocess 隔离 `dca_calculator.py`（纯计算）、通过 import 使用 `storage.py`（数据层）。子进程边界是本项目最干净的设计：改计算不影响 UI，反之亦然。
+**三层 + 一个边界**：`app.py`（UI + 业务逻辑，耦合较紧）→ 通过 subprocess 隔离 `dca_calculator.py`（纯计算，拆为 5 个兄弟模块 + 薄入口）、通过 import 使用 `storage.py`（数据层）。子进程边界是本项目最干净的设计：改计算不影响 UI，反之亦然。
 
-**拆分已完成**（方案存档见 `docs/plans/app-split-design.md`）：启动路径逻辑收编 `src/context.py`，服务函数（模型调用 / 行情抓取 / 曲线计算）在 `src/services/`，全局 CSS / 遮罩 / 侧栏 / 认证在 `src/ui/`，六个 tab 在 `src/tabs/`；所有模块数据显式收参，不读 app.py 模块级全局。app.py 1559→**70 行纯装配层**（import → build_paths → setup_logging → storage.init → 认证门闸一行 → 侧栏一行 → 6 个 tab render 调用）。
+**拆分已完成**（方案存档见 `docs/plans/app-split-design.md`）：启动路径逻辑收编 `src/context.py`，服务函数（模型调用 / 行情抓取 / 曲线计算）在 `src/services/`，全局 CSS / 遮罩 / 侧栏 / 认证在 `src/ui/`，六个 tab 在 `src/tabs/`；所有模块数据显式收参，不读 app.py 模块级全局。app.py 1559→**70 行纯装配层**（import → build_paths → setup_logging → storage.init → 认证门闸一行 → 侧栏一行 → 6 个 tab render 调用）。**引擎也已拆分**：`scripts/dca_calculator.py`（原 1424 行单文件）拆为 5 个兄弟模块 + 薄入口（线性依赖 DAG，无循环引用），所有公共符号通过 re-export 保持 `import dca_calculator as eng` 全部调用方零改动。
 
 ## 4. 数据流：一次"打开页面看今日建议"
 
@@ -223,7 +224,12 @@ tab4（26 行）是这条链的读侧，业务上和 tab3 是一件事。
 
 | 路径 | 行数 | 说明 |
 |---|---:|---|
-| `scripts/dca_calculator.py` | 1391 | **策略大脑**。完全独立可单跑，不依赖 Streamlit。输入 = CSV + config，输出 = JSON（18 个顶层键）；业务"今天"走 `biz_today()`（与 `src/dates.py` 同规则双实现），坏日期行剔除并输出 `invalid_transactions`；汇率唯一实时源、失败回落 `fx_last.json` 上次成功值（`fx` 三件套标 live/as_of，全无可估值置空）；行情抓取**并发**（8 请求同波，总耗时取最大值）且带 3 次退避重试，落库三道护栏（盘中价不入库 / 行数不减 / 原子写，落库日界走 `utc_today()`）且每次回退 5 天重抓让数据源的回填与修正自动追平，当日未收盘值另落 `market_live.json`（加载时 merge、csv 优先）；**拿不到实时价即降级**（`latest_source != "quote"`，副闸 K 线落后 > 10 天）只展示持仓（`decision.degraded`）；行情快照 `data/quote_snapshot.json`（TTL 600 秒）复用抓价结果；参数与键明细见详设 §11 |
+| `scripts/dca_calculator.py` | 240 | **策略大脑入口**。薄入口：`main()` + stdout/stderr 编码修正 + re-export 全部公共符号（保 `import dca_calculator as eng` 零改动）；完全独立可单跑，不依赖 Streamlit。输入 = CSV + config，输出 = JSON（18 个顶层键）；参数与键明细见详设 §11 |
+| `scripts/dca_types.py` | 211 | 数据结构、工具函数与记账数据加载：`DEFAULT_CONFIG`/`_BIZ_TZ`/`biz_today()`/`is_iso_date()`/`utc_today()`/`Transaction`/`read_json`/`resolve_monthly_budget`/`as_float`/`read_transactions`/`read_observations`/`trading_days_in_month`/`monthly_budget_status` |
+| `scripts/dca_market.py` | 524 | 行情抓取、缓存 I/O 与汇率获取：`fetch_json`/`fetch_chart`/`metrics_from_closes`/`pairs_from_chart_result`/`sanitize_symbol`/`cache_file_for`/`load_cached_closes`/`close_at_or_before`/`save_cached_closes`（三道护栏）/`load_market_live`/`save_market_live`/`split_live_bars`/`merge_live_bars`/`_yfinance_closes`/`get_symbol_history`/`fetch_history`（并发）/`fetch_usdcny`/`fetch_usdtusd`/`load_fx_last`/`save_fx_last`/`_fx_entry`/`load_quote_snapshot`/`save_quote_snapshot`/`market_symbol_for_asset` |
+| `scripts/dca_portfolio.py` | 131 | 组合持仓计算：`xnpv`/`xirr`/`portfolio_summary`（含价格代理查找、汇率选择、XIRR 年化） |
+| `scripts/dca_scoring.py` | 247 | 评分模型与决策引擎：`clip`/`DEFAULT_MODEL`/`asset_score`/`level_label`/`neutral_weights`/`score_based_weights`/`market_freshness`（新鲜度闸）/`build_decision`（评分→部署系数→金额→权重倾斜→比例） |
+| `scripts/dca_table.py` | 153 | 宽表结构化行与 markdown 渲染：`asset_note`/`WIDE_TABLE_HEADER`/`_money`/`_pct`/`_num`/`_xirr_cell`/`build_wide_rows`（list[dict] 结构化中间体）/`render_wide_table`（markdown） |
 | `scripts/dca_action.py` | 203 | 业务动作 CLI（`record tx` / `record obs` / `override`）：Skill 入口经它与 Web 共用 storage 业务层；shares 可按金额自动换算，sheets 模式写后自动 `sync_local` 刷新落盘缓存；同日同向撞重报错、`--force` 显式放行 |
 | `scripts/changelog.py` | 115 | CHANGELOG 维护工具：`add <hash>` 从 git 取提交时刻生成行草稿；`--check` 校验每个 commit 都有行且时刻与 git 一致（CLAUDE.md 第 12 条的配套） |
 
@@ -356,3 +362,4 @@ tab4（26 行）是这条链的读侧，业务上和 tab3 是一件事。
 | 2026-08-21 | **BUG-032 修复（A 档）：`session_state` 键收进登记表**。新增 `src/state.py`（113 行）——11 个键名常量各标注所属链/生命周期/注意事项 + `ALL_KEYS`（测试断言登记表与实际用键互相覆盖）+ 唯一的 `invalidate_sync()`（收敛"触发重同步"这条跨模块协议）；57 处裸字面量常量化（auth 38 / records 17 / sidebar 2），**键名一字未改、行为零变更**。§9.1 `src/` 行 2011→2137（auth 355→365 / records 182→183 / sidebar 337→339），tests 106→**123**（新增状态键登记表 17 条） | 真实痛点不是"读写次数多"而是**全局可变状态池没有单一记录处**：`session_state` 是 dict-like，写任意键都合法，`synced` 拼成 `synched` 没有任何提示，只会让同步判断永久出错、建议基于陈旧缓存静默出错。不取 B（11 键包 20+ 个一行薄函数、还得复刻 pop/get/in 语义，噪音大于收益）、不取 C（7 个 widget key 与业务键共享同一 dict，dataclass 只能管一半，反造成"看起来管全了"的错觉）。数字两次自查更正：台账原记"60 处"复测为 57 处带键引用（差额=两处文档串散文+一处无键 `clear()`）；确认期写"5 个 widget key"漏数（只扫了 `st.*(key=)`，列对象上的两个没算），实测 7 个，新测试改扫任意 `Call` 的 `key=`。`123 passed`（106→123），六条新断言逐一红检 6/6 全红 |
 | 2026-08-21 | **BUG-035 修复（A 档）：弃用参数清零、下界钉死**。7 文件 25 处 `use_container_width=True` 全部换成 `width="stretch"`（官方明示等价物，行为零变更；14 处 dataframe 的新写法恰等于该版本默认值，双保险）；`requirements.txt` streamlit 下界 `1.32.0`→`1.61.1`——`width=` 参数 1.46+ 才有，下界不抬等于把引信接回去；新增 `tests/test_deprecated_api.py` 两断言（AST 零残留带 `stretch>=20` 防呆 + 下界托底正则），tests 123→**125**，红检 2/2 | 弃用截止日 2025-12-31 已过 8 个月，Cloud **每次唤醒都按上界 `<2` 重新解析依赖**（部署日志实证 uv 全量解析 65 包）——上游哪天删掉该参数，下次唤醒即 25 处全 `TypeError`、登录页先崩，引信不在自己手里。发现契机正是 BUG-017 落地当天核对 BUG-032 部署日志：单次渲染 12 条同文弃用警告，观测面第一次抓到真负债 |
 | 2026-08-21 | **BUG-018 备份制度落地（Apps Script 每日快照）**。新增 `deploy/backup/Code.gs`（仓内唯一事实源；绑定源表格的容器脚本，每日时间驱动触发 `dailyBackup()`）：四表 CSV + `manifest.json`（行数 + SHA-256）落 Drive `dca-backups/YYYY-MM-DD_HHMMSS/`，超 30 天自动进回收站，失败 `MailApp` 邮件告警（§12 的"零告警"边界在这条每日任务上被补掉）；恢复唯一入口 `restoreSnapshot(dateStr, targetId)` 带"拒绝源表自身"守卫，演练与灾备共用。DEPLOY.md §6 从"缺口"改写为部署 + 演练指引；新增 `tests/test_backup_script.py` 五断言（守源码不变量：表名与 storage 同步含 `TABLES` 字典键间接路径 / 保留 30 天 / 零硬编码 ID / 守卫与告警在场），tests 125→**130**，红检 3/3。**台账状态 🟠**：首次部署与恢复演练只能用户本人在其 Google 账号执行，演练通过前不转 ✅ | 备份三要素（自动调度 / 多时间点 / 演练恢复）原来一条都不满足。弃本机任务计划：本机是公司电脑，可靠性不被信赖，快照含财务记录与 users 表哈希盐不该再堆上去；弃 Actions：仓库公开、artifacts 人人可下，需加密或私有仓，且 GCP 服务账号 key 要再存一份进 Secrets。Apps Script 零新增凭据、零新增信任方，执行与落点都离开公司电脑；代价是备份与源同一 Google 账号，账号级灾难不在防线内（要账号级副本可叠加 Actions→私有仓层，叠加非返工） |
+| 2026-08-24 | **引擎拆分：`dca_calculator.py` 1424 行单文件 → 5 个兄弟模块 + 薄入口（240 行）**。按线性依赖 DAG 拆为 `dca_types.py`（211，数据结构/工具/数据加载）→ `dca_market.py`（524，行情抓取/缓存 I/O/汇率）→ `dca_portfolio.py`（131，XIRR/组合计算）→ `dca_scoring.py`（247，评分/决策）→ `dca_table.py`（153，宽表渲染）+ `dca_calculator.py`（240，`main()` + re-export）。无循环引用；所有公共符号通过 re-export 保持 `import dca_calculator as eng` 全部调用方零改动（52 个符号验证全可访问）。同期完成 4 项重构：P1-1 消除数据往返（`build_wide_rows` 结构化中间体替代 markdown→parse 往返）、P1-2 schema DRY（`build_tx_row`/`build_obs_row` 构造函数收口行字典）、P2-1 curves.py 去 sys.path（新建 `src/market_cache.py` 纯函数模块）、P2-3 BTC fallback 带标注（`btc_last.json` + `stale_label`）。`130 passed`，引擎子进程输出验证 5 行×19 列 wide_table_rows | 1424 行单文件导航困难，改一处要全文搜索定位；拆分后按职责分文件，每个模块可独立理解。re-export 策略保证向后兼容：tests 和 dca_action.py 零改动 |

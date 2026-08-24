@@ -84,7 +84,12 @@ sp500-nasdaq100-gold-dca/
 ├── start-app.bat             # 本机双击启动 Streamlit
 ├── logs/                     # 运行日志落点 dca.log（*.log 不入库；1 MB × 3 轮转；Cloud 容器重启即失，那边只有 stderr 面板）
 ├── scripts/
-│   ├── dca_calculator.py     # 计算引擎（1391 行，独立可运行，输出 JSON；--user 读 data/users/<user>/；行情抓取并发+退避重试，落库三道护栏+每次回退 5 天重抓，实时价主闸+10 天副闸；行情快照 600s 内复用抓价结果）
+│   ├── dca_calculator.py     # 计算引擎入口（240 行，main()+re-export；独立可运行，输出 JSON；--user 读 data/users/<user>/；行情快照 600s 内复用抓价结果）
+│   ├── dca_types.py          # 数据结构/工具/数据加载（211 行）
+│   ├── dca_market.py         # 行情抓取/缓存 I/O/汇率（524 行；并发+退避重试，落库三道护栏+回退 5 天重抓，实时价主闸+10 天副闸）
+│   ├── dca_portfolio.py      # XIRR/组合持仓计算（131 行）
+│   ├── dca_scoring.py        # 评分模型/决策引擎（247 行）
+│   ├── dca_table.py          # 宽表结构化行/markdown 渲染（153 行）
 │   ├── dca_action.py         # 业务动作 CLI（203 行）：record tx/obs + override，Skill 经它与 Web 共用 storage 业务层
 │   └── changelog.py          # CHANGELOG 维护：add <hash> 生成带时刻的行，--check 校验全覆盖
 ├── data/

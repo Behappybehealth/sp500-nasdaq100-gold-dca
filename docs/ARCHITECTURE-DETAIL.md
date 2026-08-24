@@ -100,9 +100,9 @@ return json.loads(out.stdout)          # 把对方打印的 JSON 转成 Python �
 十年历史行情不可能每次都重抓。所以缓存是这样的（`data/market_history/*.csv`，两列 `date,close`）：
 
 ```python
-dca_calculator.py:503-509   if cached: last_cached = ...; fetch_chart(period1=last_cached - 5 天, ...)  # 从缓存最后一天回退 5 天开始抓
-dca_calculator.py:344-386   save_cached_closes() 三道护栏 + temp/os.replace 原子替换
-dca_calculator.py:389-462   market_live.json 读写 + split/merge（当日未收盘 bar 的另一个落点）
+dca_market.py   fetch_history()  if cached: last_cached = ...; fetch_chart(period1=last_cached - 5 天, ...)  # 从缓存最后一天回退 5 天开始抓
+dca_market.py   save_cached_closes() 三道护栏 + temp/os.replace 原子替换
+dca_market.py   market_live.json 读写 + split/merge（当日未收盘 bar 的另一个落点）
 ```
 
 `period1 = last_cached - _REFETCH_LOOKBACK_DAYS`（5 天）意味着**最近 5 天每次运行都会被重抓并按日期键覆盖**。
@@ -336,21 +336,23 @@ Cloud 不装 lock：里面含 Windows 平台包，而且本机钉定版本未必
 
 ---
 
-## 11. 计算引擎接口（scripts/dca_calculator.py，1391 行）
+## 11. 计算引擎接口（scripts/dca_calculator.py 入口 240 行 + 5 个兄弟模块）
+
+> **2026-08-24 引擎拆分**：原 1424 行单文件拆为 `dca_types.py`（211）→ `dca_market.py`（524）→ `dca_portfolio.py`（131）→ `dca_scoring.py`（247）→ `dca_table.py`（153）+ `dca_calculator.py`（240，`main()` + re-export）。线性依赖 DAG，无循环引用。下文括号内的行号原指单文件旧行号，拆分后改注模块名。
 
 **参数五个**：`--amount`、`--base-dir`、`--history-years`、`--user`（多用户模式：记账数据从 `data/users/<user>/` 读取，config 与行情缓存保持共享；含路径穿越防护）、`--snapshot-ttl`（行情快照 TTL 秒数，默认 600，0=禁用。没有 `--no-refresh`）。
 
 **输入文件**：`data/config.json`、`data/market_history/`（已收盘定稿收盘价）、`data/market_live.json`（当日未收盘 bar，加载时 merge 进序列且 csv 优先，见 §4）、`data/quote_snapshot.json`（存在且未过期时免抓价）、`data/fx_last.json`（汇率上次成功值兜底，分字段带 `fetched_at`）、记账三件套——无 `--user` 时读 `data/{transactions,observations}.csv` + `data/budget_overrides.json`，有 `--user` 时读 `data/users/<user>/` 下同名文件。
 
-**抓取层**：`fetch_json(url, timeout=20, attempts=3)`（:228）—— 0.8s/1.6s 退避，末次失败抛最后一个异常。`fetch_history(symbols, years, cache_dir, live_path)`（:585）**并发**抓全部标的（`ThreadPoolExecutor`，`max_workers=min(8, N)`；单标的抛异常收成 `error` 条目，不带走整批），main 里行情与两个汇率**同波提交**（:1257）。`market_live.json` 的**读在线程内**（只读安全）、**写在 join 之后统一一次**（全标的共用文件，线程内写会互相覆盖）；`get_symbol_history` 用私有键 `_live_bars` 把当日 bar 回传，`fetch_history` 出口 `pop` 掉——不会进 JSON 输出也不会进快照，总耗时从 8 请求求和（最坏 160s，紧贴 subprocess 180s）变成取最大值（实测 1.5s，最坏约 62s）。
+**抓取层**：`fetch_json(url, timeout=20, attempts=3)`（dca_market）—— 0.8s/1.6s 退避，末次失败抛最后一个异常。`fetch_history(symbols, years, cache_dir, live_path)`（dca_market）**并发**抓全部标的（`ThreadPoolExecutor`，`max_workers=min(8, N)`；单标的抛异常收成 `error` 条目，不带走整批），main 里行情与两个汇率**同波提交**（dca_calculator main）。`market_live.json` 的**读在线程内**（只读安全）、**写在 join 之后统一一次**（全标的共用文件，线程内写会互相覆盖）；`get_symbol_history` 用私有键 `_live_bars` 把当日 bar 回传，`fetch_history` 出口 `pop` 掉——不会进 JSON 输出也不会进快照，总耗时从 8 请求求和（最坏 160s，紧贴 subprocess 180s）变成取最大值（实测 1.5s，最坏约 62s）。
 
-**行情快照**：`load_quote_snapshot()`（:702）/ `save_quote_snapshot()`（:720），落盘 `data/quote_snapshot.json`（`fetched_at` / markets 摘要 / `usdcny` / `usdtusd` / `fx` 段，仅几 KB）。TTL 内命中则跳过行情抓取与缓存增量写——下次冷跑自动追平，不丢历史；任一标的抓价失败（带 `error`）当趟不落盘，防止坏快照连环命中。快照存 markets 原文，故 `latest_source` / `quote_time` 两个新键自动随快照复用，闸在 TTL 内照样判得准。快照只是加速缓存：过期自动失效、缺失自动全抓，不入库。
+**行情快照**：`load_quote_snapshot()`（dca_market）/ `save_quote_snapshot()`（dca_market），落盘 `data/quote_snapshot.json`（`fetched_at` / markets 摘要 / `usdcny` / `usdtusd` / `fx` 段，仅几 KB）。TTL 内命中则跳过行情抓取与缓存增量写——下次冷跑自动追平，不丢历史；任一标的抓价失败（带 `error`）当趟不落盘，防止坏快照连环命中。快照存 markets 原文，故 `latest_source` / `quote_time` 两个新键自动随快照复用，闸在 TTL 内照样判得准。快照只是加速缓存：过期自动失效、缺失自动全抓，不入库。
 
-**汇率链**（汇率是变量，全项目无一处写死常量）：`fetch_usdcny()`（:634）/ `fetch_usdtusd()`（:646）抓不到返回 `None`；抓取成功落盘 `data/fx_last.json`（`save_fx_last` :670，分字段只覆写成功的那个），失败时 `_fx_entry()`（:688）回落上次成功值，输出 `fx.{usdcny,usdtusd}.{value,live,as_of}` 三件套——连上次值都没有则 `value=null`，估值层（`portfolio_summary` :782-855）据此把 RMB 估值置空而不是编数（决策金额不依赖汇率，照出）。
+**汇率链**（汇率是变量，全项目无一处写死常量）：`fetch_usdcny()`（dca_market）/ `fetch_usdtusd()`（dca_market）抓不到返回 `None`；抓取成功落盘 `data/fx_last.json`（`save_fx_last` dca_market，分字段只覆写成功的那个），失败时 `_fx_entry()`（dca_market）回落上次成功值，输出 `fx.{usdcny,usdtusd}.{value,live,as_of}` 三件套——连上次值都没有则 `value=null`，估值层（`portfolio_summary` dca_portfolio）据此把 RMB 估值置空而不是编数（决策金额不依赖汇率，照出）。
 
-**决策新鲜度闸**：`market_freshness()`（:969）在 `build_decision` 之后过闸（:1307）——主闸判 `latest_source != "quote"`（本次没拿到实时价）、副闸判 K 线落后 > `_MAX_STALE_DAYS`（:966，10 天），三个信号标的任一被拦或带 `error` → 金额归零 + `level_label="行情不可用·暂停出金额"`，原评分保留在 reason 里供参考。结果挂 `decision.degraded` 与 `decision.freshness.{stale_days,max_stale_days,per_symbol,reason}`，**不新增顶层键**（UI 与 Skill 的既有解包不受影响）。判据与两闸分工见 §4。
+**决策新鲜度闸**：`market_freshness()`（dca_scoring）在 `build_decision` 之后过闸（dca_calculator main）——主闸判 `latest_source != "quote"`（本次没拿到实时价）、副闸判 K 线落后 > `_MAX_STALE_DAYS`（dca_scoring，10 天），三个信号标的任一被拦或带 `error` → 金额归零 + `level_label="行情不可用·暂停出金额"`，原评分保留在 reason 里供参考。结果挂 `decision.degraded` 与 `decision.freshness.{stale_days,max_stale_days,per_symbol,reason}`，**不新增顶层键**（UI 与 Skill 的既有解包不受影响）。判据与两闸分工见 §4。
 
-**输出**：print 一大段 JSON（:1387），**18 个顶层键**——字面量构造 17 个（:1367–1385：`as_of` / `input_amount_rmb` / `effective_amount_rmb` / `usdcny` / `usdtcny` / `fx` / `monthly_budget_status` / `config` / `has_local_transactions` / `invalid_transactions` / `last_records` / `since_last_record` / `markets` / `quote_snapshot` / `portfolio` / `decision` / `suggested_weights`），随后 :1373 追加 `wide_table_markdown`（由 `render_wide_table()` :1097 生成，app.py 侧 `parse_wide_table()` 解析回 DataFrame，src/services/model.py:64）。
+**输出**：print 一大段 JSON（dca_calculator main），**18 个顶层键**——字面量构造 17 个（dca_calculator main：`as_of` / `input_amount_rmb` / `effective_amount_rmb` / `usdcny` / `usdtcny` / `fx` / `monthly_budget_status` / `config` / `has_local_transactions` / `invalid_transactions` / `last_records` / `since_last_record` / `markets` / `quote_snapshot` / `portfolio` / `decision` / `suggested_weights`），随后追加 `wide_table_markdown`（由 `render_wide_table()` dca_table 生成）与 `wide_table_rows`（由 `build_wide_rows()` dca_table 生成，app.py 侧直接用 `pd.DataFrame(result["wide_table_rows"])` 消费，src/tabs/today.py）。
 
 单独跑它：
 
