@@ -36,18 +36,22 @@
 ```
 sp500-nasdaq100-gold-dca/
 ├── app.py                  #  70行  装配入口：import→build_paths→setup_logging→storage.init→认证→侧栏→6 tab
-├── storage.py              # 666行  存储层：Sheets/CSV、PBKDF2 认证、写前快照
+├── storage.py              # 666行  存储层：Sheets/CSV、PBKDF2 认证、写前快照    ⚠ 反向依赖 streaml
 │
 ├── src/                    # 业务层 · 22 文件 / 2164 行 —— 三条链路全在这
-│   ├── context.py · dates.py · obs.py · state.py · market_cache.py
+│   ├── context.py          # 路径装配, 纯dataclass · dates.py
+│   ├── obs.py              # 日志配置, 纯logging
+│   ├── state.py            # session_state键登记表
+│   ├── market_cache.py     # 行情缓存读, 纯函数
 │   ├── services/           # 决策链：model(子进程调引擎) · quotes(行情) · curves(曲线)
-│   ├── ui/                 # 认证链+决策链UI：auth(门闸) · sidebar(模型执行点) · styles · overlays
+│   ├── ui/                 # 认证链+决策链UI：auth(门闸) · sidebar(模型执行点) · styles=CSS, overlays=遮罩
 │   └── tabs/              # 记账链+展示：today · holdings · records(写) · history(读) · backtest · strategy_doc
 │
 ├── scripts/                # 计算引擎 · 8 文件 / 1811 行 —— 线性 DAG，零反向依赖
 │   ├── dca_calculator.py   # 240行 入口薄壳：main() + re-export（subprocess 边界另一侧）
 │   ├── dca_types → dca_market → dca_portfolio → dca_scoring → dca_table   # 5 兄弟模块 · 1506 行
-│   └── dca_action.py · changelog.py   # Skill CLI · CHANGELOG 工具
+│   └── dca_action.py       # Skill CLI  (CLI薄壳)
+│   └── changelog.py        # CHANGELOG 工具
 │
 └── data/                   # 引擎唯一数据源
     ├── config.json         # 策略参数（权重/区间/评分系数）
