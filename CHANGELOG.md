@@ -7,6 +7,8 @@
 
 ## 2026-08-24
 
+- 11:02:51 [杂务] ci: 升级 CI 对齐 API-quot 模式——ruff + mypy + junit 报告 + PR 触发（`cd1d2dc`）
+- 10:49:59 [杂务] CHANGELOG: 尾随 9761fdf + 45720c9（`4a52a51`）
 - 10:48:59 [文档] README 开头加域名链接（`9761fdf`）
 - 17:40:40 [杂务] CHANGELOG: 尾随 1cadebe + a157072（`45720c9`）
 - 17:39:10 [修复] storage.py 结构注释行号校准（加注释后 +12 偏移）（`1cadebe`）
