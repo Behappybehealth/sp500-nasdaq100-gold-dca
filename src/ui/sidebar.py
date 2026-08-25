@@ -3,6 +3,9 @@
 render(paths, user) 显式收参、不读 app.py 模块级全局；result/dec/ms/pf 收口为
 返回值 Decision（src/context.py），由 app.py 解包传给各 tab。QUOTE_ROWS /
 _quote_html / _fail_html / current_budget_display 为模块级纯辅助（不闭包局部变量）。
+
+P2-NEW-1 拆分后 render() 只保留编排（跑模型 + 金额表单 + 汇率 + 免责），
+四段渲染各归私有函数：_render_admin / _render_quotes / _render_budget / _render_migration。
 """
 from __future__ import annotations
 
@@ -87,74 +90,64 @@ def current_budget_display(user, config):
         return 30000.0
 
 
-def render(paths: Paths, user: str) -> Decision:
-    """渲染侧边栏并跑模型，返回 Decision（result/dec/ms/pf）。"""
-    st.sidebar.title("📈 模拟定投决策台")
-    if user != "local":
-        _is_admin = storage.is_admin(user)
-        _uc1, _uc2 = st.sidebar.columns([3, 1])
-        _uc1.caption(f"👤 {user}" + (" 👑" if _is_admin else ""))
-        if _uc2.button("退出", key="btn_logout"):
-            st.session_state.clear()
-            st.rerun()
-        if _is_admin:
-            with st.sidebar.expander("👑 用户管理（管理员）", expanded=False):
-                for _u in storage.list_users():
-                    _r1, _r2, _r3 = st.columns([3, 1, 1])
-                    _status = "已激活" if storage.is_activated(_u) else "待激活"
-                    _r1.caption(
-                        ("👑 " if storage.is_admin(_u) else "👤 ") + f"{_u}（{_status}）"
-                    )
-                    if _u != user:
-                        if _r2.button(
-                            "重置",
-                            key=f"btn_rst_{_u}",
-                            help="清空 PIN，对方下次登录重新自己设置",
-                        ):
-                            try:
-                                storage.reset_pin(_u)
-                            except Exception as _e:
-                                st.error(f"重置失败：云端存储暂时不可用（{_e}），未做任何改动。")
-                            else:
-                                st.rerun()
-                        if _r3.button("删除", key=f"btn_del_{_u}"):
-                            try:
-                                storage.delete_user(_u)
-                            except Exception as _e:
-                                st.error(f"删除失败：云端存储暂时不可用（{_e}），未做任何改动。")
-                            else:
-                                st.rerun()
-                st.markdown("---")
-                with st.form("admin_add_user"):
-                    _nn = st.text_input("新用户名字")
-                    if st.form_submit_button("添加账号", width="stretch"):
+# ---------- render() 拆分为四段（P2-NEW-1）----------
+
+
+def _render_admin(user: str) -> None:
+    """用户信息 + 登出 + 管理员用户管理（重置/删除/添加）。"""
+    if user == "local":
+        return
+    _is_admin = storage.is_admin(user)
+    _uc1, _uc2 = st.sidebar.columns([3, 1])
+    _uc1.caption(f"👤 {user}" + (" 👑" if _is_admin else ""))
+    if _uc2.button("退出", key="btn_logout"):
+        st.session_state.clear()
+        st.rerun()
+    if _is_admin:
+        with st.sidebar.expander("👑 用户管理（管理员）", expanded=False):
+            for _u in storage.list_users():
+                _r1, _r2, _r3 = st.columns([3, 1, 1])
+                _status = "已激活" if storage.is_activated(_u) else "待激活"
+                _r1.caption(
+                    ("👑 " if storage.is_admin(_u) else "👤 ") + f"{_u}（{_status}）"
+                )
+                if _u != user:
+                    if _r2.button(
+                        "重置",
+                        key=f"btn_rst_{_u}",
+                        help="清空 PIN，对方下次登录重新自己设置",
+                    ):
                         try:
-                            _ok, _msg = storage.admin_add_user(_nn)
+                            storage.reset_pin(_u)
                         except Exception as _e:
-                            st.error(f"添加失败：云端存储暂时不可用（{_e}），未做任何改动。")
+                            st.error(f"重置失败：云端存储暂时不可用（{_e}），未做任何改动。")
                         else:
-                            if _ok:
-                                st.success(f"已添加：{_nn}（待激活，对方首次登录自己设 PIN）")
-                                st.rerun()
-                            else:
-                                st.error(_msg)
+                            st.rerun()
+                    if _r3.button("删除", key=f"btn_del_{_u}"):
+                        try:
+                            storage.delete_user(_u)
+                        except Exception as _e:
+                            st.error(f"删除失败：云端存储暂时不可用（{_e}），未做任何改动。")
+                        else:
+                            st.rerun()
+            st.markdown("---")
+            with st.form("admin_add_user"):
+                _nn = st.text_input("新用户名字")
+                if st.form_submit_button("添加账号", width="stretch"):
+                    try:
+                        _ok, _msg = storage.admin_add_user(_nn)
+                    except Exception as _e:
+                        st.error(f"添加失败：云端存储暂时不可用（{_e}），未做任何改动。")
+                    else:
+                        if _ok:
+                            st.success(f"已添加：{_nn}（待激活，对方首次登录自己设 PIN）")
+                            st.rerun()
+                        else:
+                            st.error(_msg)
 
-    # ---- 先运行模型（后续展示用）----
-    # amount_in 在下方②区定义；首次运行时取 None（自动）
-    amount_in = 0.0
-    _ld = show_loading("正在更新行情并计算今日决策…", "标普500 · 纳指100 · 黄金 · 比特币")
-    try:
-        result = run_model(None, user, paths)
-    except Exception as e:
-        _ld.empty()
-        st.error(f"模型运行失败：{e}")
-        st.stop()
-    _ld.empty()
 
-    dec = result["decision"]
-    ms = result["monthly_budget_status"]
-    pf = result["portfolio"]
-
+def _render_quotes(result: dict, paths: Paths) -> None:
+    """实时行情展示（标普/纳指/黄金/比特币）+ 截至时间。"""
     # 按语义判正常，不按 data_source 前缀：前缀匹配一加新降级路径就会静默漏判
     all_ok = all(
         not mk.get("error") and not mk.get("cache_warning")
@@ -233,6 +226,88 @@ def render(paths: Paths, user: str) -> Decision:
         }
         st.sidebar.caption(f"截至 {max(latest_dates) if latest_dates else '?'}")
 
+
+def _render_budget(user: str, paths: Paths, ms: dict) -> None:
+    """每月预算输入 + 保存 + 生效来源显示。"""
+    st.sidebar.markdown("---")
+
+    _col_b, _col_s = st.sidebar.columns([3, 1])
+    with _col_b:
+        budget_in = st.number_input(
+            "💰 每月预算",
+            min_value=0.0,
+            value=current_budget_display(user, paths.config),
+            step=1000.0,
+            key="budget_in",
+            label_visibility="collapsed",
+        )
+    with _col_s:
+        if st.button("💾 保存", width="stretch", key="btn_save_budget"):
+            try:
+                _bval = float(budget_in)
+            except (TypeError, ValueError):
+                st.error("预算金额无效，未保存")
+            else:
+                try:
+                    storage.set_override(user, biz_today().strftime("%Y-%m"), _bval)
+                except Exception as _e:
+                    st.error(f"预算保存失败：云端存储暂时不可用（{_e}）。数据未被覆盖，请稍后重试。")
+                else:
+                    st.cache_data.clear()
+                    st.rerun()
+    src = ms.get("budget_source", "default")
+    src_txt = (
+        "自定义，自 " + src.split(":")[-1] + " 起生效"
+        if src.startswith("override:")
+        else "默认值"
+    )
+    try:
+        _ms_budget = f"¥{float(ms['monthly_budget_rmb']):,.0f}"
+    except (TypeError, ValueError, KeyError):
+        _ms_budget = "¥—"
+    st.sidebar.caption(f"生效：{_ms_budget}（{src_txt}）")
+
+
+def _render_migration(user: str) -> None:
+    """本地历史 → 云端一次性迁移（仅 Sheets 模式可见）。"""
+    if user == "local":
+        return
+    with st.sidebar.expander("📥 本地历史数据迁移"):
+        st.caption(
+            "把这台电脑 data/ 里的历史记录上传到云端你的名下，只需做一次（上传后本地文件会备份为 .localbak）。"
+        )
+        if st.button("开始上传", key="btn_import"):
+            counts = storage.import_local_to_sheets(user)
+            # 防御性置位：走到侧栏必然已经过 auth.py 的会话首同步，这里其实已是 True
+            st.session_state[K_SYNCED] = True
+            st.success(
+                f"已上传：成交 {counts['transactions']} 条｜观察 {counts['observations']} 条｜预算 {counts['budget_overrides']} 项"
+            )
+
+
+def render(paths: Paths, user: str) -> Decision:
+    """渲染侧边栏并跑模型，返回 Decision（result/dec/ms/pf）。"""
+    st.sidebar.title("📈 模拟定投决策台")
+    _render_admin(user)
+
+    # ---- 先运行模型（后续展示用）----
+    # amount_in 在下方②区定义；首次运行时取 None（自动）
+    amount_in = 0.0
+    _ld = show_loading("正在更新行情并计算今日决策…", "标普500 · 纳指100 · 黄金 · 比特币")
+    try:
+        result = run_model(None, user, paths)
+    except Exception as e:
+        _ld.empty()
+        st.error(f"模型运行失败：{e}")
+        st.stop()
+    _ld.empty()
+
+    dec = result["decision"]
+    ms = result["monthly_budget_status"]
+    pf = result["portfolio"]
+
+    _render_quotes(result, paths)
+
     # ---- ② 基准金额 + 刷新按钮（同一行）----
     # 金额输入放在表单内：键入/步进只在控件本地暂存，按 Enter 或 🔄 提交后才触发整页重跑，
     # 避免每个中间值都引发一次模型重算。
@@ -277,44 +352,7 @@ def render(paths: Paths, user: str) -> Decision:
     st.sidebar.caption(" ｜ ".join(_fx_parts))
 
     # ---- ④ 每月预算（底部，同一行）----
-    st.sidebar.markdown("---")
-
-    _col_b, _col_s = st.sidebar.columns([3, 1])
-    with _col_b:
-        budget_in = st.number_input(
-            "💰 每月预算",
-            min_value=0.0,
-            value=current_budget_display(user, paths.config),
-            step=1000.0,
-            key="budget_in",
-            label_visibility="collapsed",
-        )
-    with _col_s:
-        if st.button("💾 保存", width="stretch", key="btn_save_budget"):
-            try:
-                _bval = float(budget_in)
-            except (TypeError, ValueError):
-                st.error("预算金额无效，未保存")
-            else:
-                try:
-                    storage.set_override(user, biz_today().strftime("%Y-%m"), _bval)
-                except Exception as _e:
-                    st.error(f"预算保存失败：云端存储暂时不可用（{_e}）。数据未被覆盖，请稍后重试。")
-                else:
-                    st.cache_data.clear()
-                    st.rerun()
-
-    src = ms.get("budget_source", "default")
-    src_txt = (
-        "自定义，自 " + src.split(":")[-1] + " 起生效"
-        if src.startswith("override:")
-        else "默认值"
-    )
-    try:
-        _ms_budget = f"¥{float(ms['monthly_budget_rmb']):,.0f}"
-    except (TypeError, ValueError, KeyError):
-        _ms_budget = "¥—"
-    st.sidebar.caption(f"生效：{_ms_budget}（{src_txt}）")
+    _render_budget(user, paths, ms)
 
     # ---- 免责声明（始终显示）----
     st.sidebar.markdown("---")
@@ -323,17 +361,6 @@ def render(paths: Paths, user: str) -> Decision:
     )
 
     # ---- 本地历史 → 云端一次性迁移（仅 Sheets 模式可见）----
-    if user != "local":
-        with st.sidebar.expander("📥 本地历史数据迁移"):
-            st.caption(
-                "把这台电脑 data/ 里的历史记录上传到云端你的名下，只需做一次（上传后本地文件会备份为 .localbak）。"
-            )
-            if st.button("开始上传", key="btn_import"):
-                counts = storage.import_local_to_sheets(user)
-                # 防御性置位：走到侧栏必然已经过 auth.py 的会话首同步，这里其实已是 True
-                st.session_state[K_SYNCED] = True
-                st.success(
-                    f"已上传：成交 {counts['transactions']} 条｜观察 {counts['observations']} 条｜预算 {counts['budget_overrides']} 项"
-                )
+    _render_migration(user)
 
     return Decision(result=result, dec=dec, ms=ms, pf=pf)
