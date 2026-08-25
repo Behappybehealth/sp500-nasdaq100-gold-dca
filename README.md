@@ -1,5 +1,7 @@
 # 模拟定投决策台（Streamlit）
 
+[![CI](https://github.com/Behappybehealth/sp500-nasdaq100-gold-dca/actions/workflows/ci.yml/badge.svg)](https://github.com/Behappybehealth/sp500-nasdaq100-gold-dca/actions/workflows/ci.yml)
+
 🌐 **在线访问**：<https://dca365.streamlit.app/>
 
 面向小团队/家庭试用的 DCA 定投回测与决策工具。标普500 / 纳指100 / 黄金三资产动态定投，数据层以 Google Sheets 为事实源。
