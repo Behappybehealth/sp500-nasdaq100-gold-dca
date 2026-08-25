@@ -5,6 +5,15 @@
 > 格式：按日期分组、新在上（组内也按时刻新在上）；每条 `HH:MM:SS [类型] 一句话（commit hash；关联编号）`。
 > 时刻取自 git commit 时间（本地时区），非手写：用 `scripts/changelog.py add <hash>` 生成行、`--check` 校验全覆盖与时刻正确。一行多 hash 时行首时刻对第一个 hash 负责。
 
+## 2026-08-25
+
+- 15:16:37 [杂务] 重构: P2-NEW-3 backtest.py 两段硬编码文案移到 markdown 文件（`094321e`）
+- 15:11:02 [杂务] 重构: P2-NEW-2 拆 auth require_user() 为3阶段函数(_handle_login/activate/bootstrap_stage)（`7d5a9ee`）
+- 15:07:52 [杂务] 重构: P2-NEW-1 拆 sidebar render() 为4段(_render_admin/_quotes/_budget/_migration)（`b6f17af`）
+- 15:04:37 [杂务] 重构: P2-NEW-4 拆 dca_calculator main() 为3段(_fetch_market_data/_compute_decision/_build_result)（`697a09e`）
+- 14:27:25 [修复] P1-NEW-1 biz_today双实现一致性测试 + P1-NEW-2 _conn补丁加断言（`970dc62`）
+- 14:13:16 [杂务] CHANGELOG: 尾随 ef2d3a1 + 5615c6b（`37c88f8`）
+
 ## 2026-08-24
 
 - 14:12:55 [文档] CR 报告原样存档到 docs/score/2026-08-24.md（原版, 8.3/10）（`5615c6b`）
