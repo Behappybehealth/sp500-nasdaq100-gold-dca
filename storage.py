@@ -167,7 +167,17 @@ def _conn():
 
     # 该库内部 @cache_data 没关 show_spinner，会把 Running GSheetsServiceAccountClient...
     # 这类内部函数名闪到前端；给它打个静默补丁（_get_as_dataframe 在调用时才装饰，补丁有效）
+    #
+    # ⚠ 猴子补丁风险（P1-NEW-2）：上游改了内部结构（重命名 cache_data / 改装饰
+    # 时机），补丁会静默失效——show_spinner 又开始闪。下面 hasattr 断言让"属性消失"
+    # 至少炸出声；赋值后立即回读验证补丁确实换上了。streamlit_gsheets 无 __version__，
+    # 无法做版本钉死，只能靠运行时断言兜底。
     if not getattr(_gc, "_quiet_patched", False):
+        if not hasattr(_gc, "cache_data"):
+            raise RuntimeError(
+                "streamlit_gsheets.gsheets_connection.cache_data 不存在——"
+                "上游可能已重命名，静默补丁失效，需检查 _conn() 补丁"
+            )
         _orig_cache_data = _gc.cache_data
 
         def _quiet_cache_data(*args, **kwargs):
@@ -175,6 +185,8 @@ def _conn():
             return _orig_cache_data(*args, **kwargs)
 
         _gc.cache_data = _quiet_cache_data
+        # 验证补丁确实生效（赋值后立即回读）
+        assert _gc.cache_data is _quiet_cache_data, "cache_data 补丁未生效——上游可能改了装饰时机"
         _gc._quiet_patched = True  # type: ignore[attr-defined]  # 猴子补丁标记，pyright 不认模块动态属性
     return st.connection("gsheets", type=GSheetsConnection)
 
