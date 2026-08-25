@@ -94,12 +94,14 @@ sp500-nasdaq100-gold-dca/
 │
 ├── requirements.txt                # 17L  Cloud/Linux deps (6 direct, version-bounded)
 ├── requirements-dev.lock           # 82L  Windows/3.14 exact lock (full pip freeze)
-├── pytest.ini                      # 7L   pytest config — collects tests/ only
-├── .gitignore                      # 50L  Ignores .venv, logs/*.log, data/users/, secrets
+├── ruff.toml                     # 10L  Ruff lint rules — E4/E7/E9/F/I/UP
+├── mypy.ini                      # 2L   Mypy config — ignore-missing-imports
+├── .gitignore                      # 53L  Ignores .venv, logs/*.log, data/users/, secrets, reports/
 ├── .gitattributes                  # 6L   CRLF normalization
 │
-├── .github/workflows/ci.yml         # 47L  GitHub Actions — Win/3.14 + Linux/3.12, fully offline
-│
+├── .github/
+│   ├── workflows/ci.yml         # 80L  CI — ruff + mypy + pytest (Win/3.14 + Linux/3.12), PR+push, junit reports
+│   └── scripts/junit_summary.py # 88L  Summarize pytest junit XML → GitHub Summary
 ├── .streamlit/
 │   ├── config.toml                 # 8L   Theme colors
 │   ├── secrets.toml                #      GCP service account (NOT in git)
@@ -205,12 +207,14 @@ sp500-nasdaq100-gold-dca/
 │
 ├── requirements.txt                # 17行  Cloud/Linux依赖（6个直接，带版本上下界）
 ├── requirements-dev.lock           # 82行  Windows/3.14精确锁定（完整pip freeze）
-├── pytest.ini                      # 7行   pytest配置——只收tests/
-├── .gitignore                      # 50行  忽略.venv、logs/*.log、data/users/、secrets
+├── ruff.toml                     # 10行  Ruff lint规则——E4/E7/E9/F/I/UP
+├── mypy.ini                      # 2行   Mypy配置——ignore-missing-imports
+├── .gitignore                      # 53行  忽略.venv、logs/*.log、data/users/、secrets、reports/
 ├── .gitattributes                  # 6行   CRLF规范化
 │
-├── .github/workflows/ci.yml         # 47行  GitHub Actions——Win/3.14 + Linux/3.12，全离线
-│
+├── .github/
+│   ├── workflows/ci.yml         # 80行  CI——ruff + mypy + pytest（Win/3.14 + Linux/3.12），PR+push，junit报告
+│   └── scripts/junit_summary.py # 88行  汇总pytest junit XML → GitHub Summary
 ├── .streamlit/
 │   ├── config.toml                 # 8行   主题配色
 │   ├── secrets.toml                #       GCP服务账号（不入库）

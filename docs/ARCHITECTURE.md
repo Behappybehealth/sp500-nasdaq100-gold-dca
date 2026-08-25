@@ -42,8 +42,8 @@
 | 临时外发 | ngrok 固定域名 | 本机开着时把 8501 端口发到公网 |
 | 版本控制 | git + GitHub **公开**仓库（用户有意设置） | `Behappybehealth/sp500-nasdaq100-gold-dca` |
 | 回归测试 | pytest 9.1.1 + Streamlit AppTest | 三层全离线回归：引擎纯函数 / storage 安全路径 / 整页渲染冒烟；离线由 autouse 拒网守卫强制并自测 |
-| 持续集成 | GitHub Actions | push `main` 自动跑 Windows/Python 3.14 精确锁定环境 + Linux/Python 3.12 Cloud 范围环境；不读取 secrets |
-| 代码格式 | ruff | 有格式化痕迹，但**未进 CI 强制** |
+| 持续集成 | GitHub Actions | push/PR 全分支触发；三道门禁 ruff → mypy → pytest；Win/3.14 + Linux/3.12 双腿；junit XML 汇总到 Summary + artifact 留档 90 天 |
+| 代码格式 | ruff + mypy | ruff 选 E4/E7/E9/F/I/UP 六类规则（配置 `ruff.toml`）；mypy `ignore-missing-imports`（配置 `mypy.ini`）；均进 CI 强制 |
 | 运行日志 | 标准库 `logging`（零第三方） | `dca.*` 子树，stderr + `logs/dca.log`（1 MB × 3 轮转）双落点；配置集中 `src/obs.py`，见 §11 |
 
 （版本复核于 2026-08-20；本机实装与精确版本见 `requirements-dev.lock`）
@@ -215,7 +215,10 @@ tab4（26 行）是这条链的读侧，业务上和 tab3 是一件事。
 | `requirements-dev.lock` | 83 | **Windows/Python 3.14 开发机精确锁定**：完整 `pip freeze`，含 pytest 与全部间接依赖 | 本机复现 + CI Windows/Python 3.14 腿 | ✅ |
 | `pytest.ini` | 7 | pytest 只收 `tests/`，不把归档回测脚本当测试收集 | pytest | ✅ |
 | `tests/` | — | 全离线回归 **130 条**：引擎纯函数 46 / storage 本地与 Sheets 安全路径 25 / AppTest 整页冒烟 20 / 拒网守卫自测 8 / 运行日志 7 / 状态键登记表 17 / 弃用 API 2 / 备份脚本源码不变量 5；离线由 `conftest` autouse 守卫强制，日志由同处 autouse 的 `_quarantine_logging` 隔离（否则 AppTest 会把假异常写进工作树 `logs/dca.log`），fixture 全虚构 | pytest / CI | ✅ |
-| `.github/workflows/ci.yml` | — | push `main` 自动跑两条 pytest 腿；无 secrets、无行情网络依赖 | GitHub Actions | ✅ |
+| `.github/workflows/ci.yml` | 80 | push/PR 全分支触发；三道门禁 ruff → mypy → pytest；Win/3.14 + Linux/3.12 双腿；junit XML 汇总到 Summary + artifact 留档 90 天；无 secrets、无行情网络依赖 | GitHub Actions | ✅ |
+| `.github/scripts/junit_summary.py` | 88 | 把 pytest junit XML 汇总成 Markdown 表格写进 GitHub 运行页 Summary；自身不参与门禁（故障只告警不拖红） | GitHub Actions | ✅ |
+| `ruff.toml` | 10 | Ruff lint 规则选择：E4/E7/E9/F/I/UP 六类 | ruff / CI | ✅ |
+| `mypy.ini` | 2 | Mypy 配置：`ignore_missing_imports = True` | mypy / CI | ✅ |
 | `CHANGELOG.md` | — | **全量改动的人读版流水**：每 commit 一行带 `HH:MM:SS` 时刻（取自 git），由 `scripts/changelog.py` 生成/校验 | 人 | ✅ |
 | `start-app.bat` | — | 本机双击启动 | 你 | ✅ |
 | `CLAUDE.md` | — | 给 AI 编程助手的项目说明 | AI 助手 | ✅ |
@@ -377,3 +380,4 @@ tab4（26 行）是这条链的读侧，业务上和 tab3 是一件事。
 | 2026-08-21 | **BUG-035 修复（A 档）：弃用参数清零、下界钉死**。7 文件 25 处 `use_container_width=True` 全部换成 `width="stretch"`（官方明示等价物，行为零变更；14 处 dataframe 的新写法恰等于该版本默认值，双保险）；`requirements.txt` streamlit 下界 `1.32.0`→`1.61.1`——`width=` 参数 1.46+ 才有，下界不抬等于把引信接回去；新增 `tests/test_deprecated_api.py` 两断言（AST 零残留带 `stretch>=20` 防呆 + 下界托底正则），tests 123→**125**，红检 2/2 | 弃用截止日 2025-12-31 已过 8 个月，Cloud **每次唤醒都按上界 `<2` 重新解析依赖**（部署日志实证 uv 全量解析 65 包）——上游哪天删掉该参数，下次唤醒即 25 处全 `TypeError`、登录页先崩，引信不在自己手里。发现契机正是 BUG-017 落地当天核对 BUG-032 部署日志：单次渲染 12 条同文弃用警告，观测面第一次抓到真负债 |
 | 2026-08-21 | **BUG-018 备份制度落地（Apps Script 每日快照）**。新增 `deploy/backup/Code.gs`（仓内唯一事实源；绑定源表格的容器脚本，每日时间驱动触发 `dailyBackup()`）：四表 CSV + `manifest.json`（行数 + SHA-256）落 Drive `dca-backups/YYYY-MM-DD_HHMMSS/`，超 30 天自动进回收站，失败 `MailApp` 邮件告警（§12 的"零告警"边界在这条每日任务上被补掉）；恢复唯一入口 `restoreSnapshot(dateStr, targetId)` 带"拒绝源表自身"守卫，演练与灾备共用。DEPLOY.md §6 从"缺口"改写为部署 + 演练指引；新增 `tests/test_backup_script.py` 五断言（守源码不变量：表名与 storage 同步含 `TABLES` 字典键间接路径 / 保留 30 天 / 零硬编码 ID / 守卫与告警在场），tests 125→**130**，红检 3/3。**台账状态 🟠**：首次部署与恢复演练只能用户本人在其 Google 账号执行，演练通过前不转 ✅ | 备份三要素（自动调度 / 多时间点 / 演练恢复）原来一条都不满足。弃本机任务计划：本机是公司电脑，可靠性不被信赖，快照含财务记录与 users 表哈希盐不该再堆上去；弃 Actions：仓库公开、artifacts 人人可下，需加密或私有仓，且 GCP 服务账号 key 要再存一份进 Secrets。Apps Script 零新增凭据、零新增信任方，执行与落点都离开公司电脑；代价是备份与源同一 Google 账号，账号级灾难不在防线内（要账号级副本可叠加 Actions→私有仓层，叠加非返工） |
 | 2026-08-24 | **引擎拆分：`dca_calculator.py` 1424 行单文件 → 5 个兄弟模块 + 薄入口（240 行）**。按线性依赖 DAG 拆为 `dca_types.py`（211，数据结构/工具/数据加载）→ `dca_market.py`（524，行情抓取/缓存 I/O/汇率）→ `dca_portfolio.py`（131，XIRR/组合计算）→ `dca_scoring.py`（247，评分/决策）→ `dca_table.py`（153，宽表渲染）+ `dca_calculator.py`（240，`main()` + re-export）。无循环引用；所有公共符号通过 re-export 保持 `import dca_calculator as eng` 全部调用方零改动（52 个符号验证全可访问）。同期完成 4 项重构：P1-1 消除数据往返（`build_wide_rows` 结构化中间体替代 markdown→parse 往返）、P1-2 schema DRY（`build_tx_row`/`build_obs_row` 构造函数收口行字典）、P2-1 curves.py 去 sys.path（新建 `src/market_cache.py` 纯函数模块）、P2-3 BTC fallback 带标注（`btc_last.json` + `stale_label`）。`130 passed`，引擎子进程输出验证 5 行×19 列 wide_table_rows | 1424 行单文件导航困难，改一处要全文搜索定位；拆分后按职责分文件，每个模块可独立理解。re-export 策略保证向后兼容：tests 和 dca_action.py 零改动 |
+| 2026-08-24 | **CI 升级：对齐 API-quot 模式**。`ci.yml` 从 pytest-only 升级为三道门禁（ruff → mypy → pytest）；触发从 push main 扩到 push+PR 全分支；新增 `ruff.toml`（选 E4/E7/E9/F/I/UP 六类规则）、`mypy.ini`（`ignore_missing_imports`）、`.github/scripts/junit_summary.py`（junit XML 汇总到 GitHub Summary + artifact 留档 90 天）；`ruff --fix` 全项目语法现代化（List→list、Optional→|、去 coding comment、import 排序）。README 加 CI 徽章；DEPLOY.md §2 加从零搭建步骤指南。`130 passed`，CI 首次运行双腢全绿 | 原有 CI 只跑 pytest、只 push main 触发，lint/类型检查全靠自觉；升级后三道门禁拦在 CI 里，PR 也能拦。ruff 全量现代化消除技术债（弃用 API、旧式类型标注），mypy 首次覆盖 24 文件 0 错误 |
