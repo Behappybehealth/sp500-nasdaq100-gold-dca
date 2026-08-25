@@ -7,6 +7,8 @@
 
 ## 2026-08-24
 
+- 11:14:17 [文档] DEPLOY.md §2 加从零搭建步骤指南（`a8f9cd8`）
+- 11:11:05 [杂务] CHANGELOG: 尾随 db512e7 + 1e0d7bf（`9f985e1`）
 - 11:10:15 [文档] README 加 CI 徽章（`db512e7`）
 - 11:04:01 [杂务] CHANGELOG: 尾随 cd1d2dc + 4a52a51（`1e0d7bf`）
 - 11:02:51 [杂务] ci: 升级 CI 对齐 API-quot 模式——ruff + mypy + junit 报告 + PR 触发（`cd1d2dc`）
