@@ -25,6 +25,17 @@ git push origin main
 # 平台检测到新提交 → 自动拉取 → 装 requirements.txt → 重启应用
 ```
 
+### 从零搭建（首次部署）
+
+1. 登录 [share.streamlit.io](https://share.streamlit.io)（用 GitHub 账号授权）
+2. **New app** → 选仓库 `Behappybehealth/sp500-nasdaq100-gold-dca` → 分支 `main` → 入口文件 `app.py`
+3. **Settings → Secrets** → 贴 GCP 服务账号 JSON（内容同本机 `.streamlit/secrets.toml`，凭据不在 git 里）
+4. **Settings → General → App URL** → 设子域名 `dca365`
+5. **Settings → Sharing** → 切 public（否则访问者要先登录 Streamlit 账号，家人打不开）
+6. **Deploy** → 平台自动拉取仓库 + 装 `requirements.txt` + 启动 → 访问 <https://dca365.streamlit.app/> 验证
+
+> 首次部署后，后续更新只需 `git push origin main`，平台自动重新拉取部署（见上方部署机制）。
+
 ### 需要在平台后台配置的东西
 
 | 配置项 | 位置 | 说明 |
