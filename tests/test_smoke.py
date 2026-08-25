@@ -169,27 +169,28 @@ def build_result(config: dict, today: date, *, txs: list, live: bool = True,
 
 
 def _engine_result_keys() -> set:
-    """从引擎源码里抠出 main() 实际输出的顶层键（AST 解析，不需要跑引擎、不联网）。
+    """从引擎源码里抠出输出顶层键（AST 解析，不需要跑引擎、不联网）。
 
-    只走 `main()` 的函数体：引擎里 `fetch_chart` 那几处也把返回值叫 `result`
-    （:504 / :530 / :637 / :649），全模块 walk 会把它们的赋值一并算进契约，
-    将来那边一旦出现 `result["x"] = ...` 就会污染键集、报一个查不到源头的失败。
+    `result = {}` 字典在 `_build_result()` 里（P2-NEW-4 拆分后从 main() 移出），
+    `result["x"] = ...` 追加也在那里。只走 `_build_result()` 的函数体：引擎里
+    `fetch_chart` 那几处也把返回值叫 `result`（dca_market.py），全模块 walk 会把
+    它们的赋值一并算进契约，将来那边一旦出现 `result["x"] = ...` 就会污染键集。
     """
     tree = ast.parse((REPO / "scripts" / "dca_calculator.py").read_text(encoding="utf-8"))
-    main_fn = next(
-        (n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main"), None
+    target_fn = next(
+        (n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "_build_result"), None
     )
-    assert main_fn is not None, "引擎里找不到 main()——契约断言失去依据"
+    assert target_fn is not None, "引擎里找不到 _build_result()——契约断言失去依据"
 
     keys: set = set()
-    for node in ast.walk(main_fn):
+    for node in ast.walk(target_fn):
         if isinstance(node, ast.Call):
             # result.update(...) 会绕过下面两种字面量形态，键集就不再是全集。
             fn = node.func
             assert not (
                 isinstance(fn, ast.Attribute) and fn.attr == "update"
                 and isinstance(fn.value, ast.Name) and fn.value.id == "result"
-            ), "main() 用了 result.update()，AST 取键法已失效，需改断言方式"
+            ), "_build_result() 用了 result.update()，AST 取键法已失效，需改断言方式"
         if not isinstance(node, ast.Assign):
             continue
         if isinstance(node.value, ast.Dict) and any(

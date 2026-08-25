@@ -88,37 +88,18 @@ from dca_types import (  # noqa: F401
     utc_today,
 )
 
+# ---------- main() 拆分为三段（P2-NEW-4）----------
+# _fetch_market_data — 行情抓取与汇率获取
+# _compute_decision   — 月度预算与决策计算（含新鲜度闸）
+# _build_result       — 组装输出结果（最新记录、上期复盘后验、宽表）
 
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--amount", type=float, default=None, help="本次基准金额RMB；不指定时按行情档位阶梯 0/1500/3000/5000/7000 决定")
-    parser.add_argument("--base-dir", type=Path, default=Path(__file__).resolve().parents[1])
-    parser.add_argument("--history-years", type=int, default=10)
-    parser.add_argument("--user", default=None, help="多用户模式：记账数据从 data/users/<user>/ 读取（config 与行情缓存保持共享）")
-    parser.add_argument("--snapshot-ttl", type=int, default=600, help="行情快照复用窗口（秒）：TTL 内的连续运行直接复用上一次的抓取结果；0 = 每次全抓")
-    args = parser.parse_args()
 
-    if args.user and ("/" in args.user or "\\" in args.user or ".." in args.user):
-        parser.error("非法用户名：不允许包含路径分隔符或 '..'")
+def _fetch_market_data(args, base_dir, config, assets):
+    """行情抓取与汇率获取（快照命中则跳过抓取）。
 
-    base_dir = args.base_dir
-    config = read_json(base_dir / "data" / "config.json")
-    # 多用户模式：记账数据按用户分目录，行情缓存/策略配置保持共享
-    record_dir = base_dir / "data" / "users" / args.user if args.user else base_dir / "data"
-    transactions = read_transactions(record_dir / "transactions.csv")
-    # 坏日期防御（如 2026/08/17）：静默吞掉会让这笔钱逃出月度预算核算——
-    # 剔出计算并在输出的 invalid_transactions 里点名，写入侧（records/dca_action）另有拒收
-    invalid_transactions = [
-        {"date": tx.date, "asset": tx.asset, "amount_rmb": tx.amount_rmb}
-        for tx in transactions
-        if not is_iso_date(tx.date)
-    ]
-    if invalid_transactions:
-        transactions = [tx for tx in transactions if is_iso_date(tx.date)]
-    observations = read_observations(record_dir / "observations.csv")
-    last_observation = observations[-1] if observations else None
-    assets = config.get("assets", DEFAULT_CONFIG["assets"])
-    symbols = []
+    返回 (markets, usdcny, usdtusd, usdtcny, fx, snapshot_info, cache_dir, live_path)。
+    """
+    symbols: list[str] = []
     for info in assets.values():
         candidates = [info.get("index_symbol")]
         if info.get("fetch_trade_symbol", True):
@@ -170,6 +151,14 @@ def main() -> None:
         save_quote_snapshot(base_dir, markets, usdcny, usdtusd, fx)
         snapshot_info = {"used": False, "age_s": None, "ttl_s": args.snapshot_ttl}
     usdtcny = round(usdcny * usdtusd, 4) if (usdcny is not None and usdtusd is not None) else None
+    return markets, usdcny, usdtusd, usdtcny, fx, snapshot_info, cache_dir, live_path
+
+
+def _compute_decision(config, base_dir, transactions, observations, assets, markets, args, record_dir):
+    """月度预算与决策计算（含新鲜度闸）。
+
+    返回 (month_status, decision, weights, suggested_amount)。
+    """
     interval_cfg = config.get("preferred_trade_interval_days", [2, 3])
     if isinstance(interval_cfg, list) and interval_cfg:
         interval_days = int(max(interval_cfg))
@@ -213,8 +202,31 @@ def main() -> None:
     decision["freshness"] = freshness
     weights = decision.get("weights", {})
     suggested_amount = decision.get("suggested_amount_rmb", 0.0)
+    return month_status, decision, weights, suggested_amount
 
-    latest_records = []
+
+def _build_result(
+    args,
+    config,
+    transactions,
+    invalid_transactions,
+    last_observation,
+    assets,
+    markets,
+    usdcny,
+    usdtusd,
+    usdtcny,
+    fx,
+    snapshot_info,
+    month_status,
+    decision,
+    weights,
+    suggested_amount,
+    cache_dir,
+    live_path,
+):
+    """组装输出结果：最新记录、上期复盘后验、宽表。"""
+    latest_records: list[dict] = []
     if transactions:
         last_date = max(tx.date for tx in transactions)
         latest_records.extend([tx.__dict__ for tx in transactions if tx.date == last_date])
@@ -269,6 +281,42 @@ def main() -> None:
     }
     result["wide_table_rows"] = build_wide_rows(result, transactions, assets)
     result["wide_table_markdown"] = render_wide_table(result, transactions, assets)
+    return result
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--amount", type=float, default=None, help="本次基准金额RMB；不指定时按行情档位阶梯 0/1500/3000/5000/7000 决定")
+    parser.add_argument("--base-dir", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument("--history-years", type=int, default=10)
+    parser.add_argument("--user", default=None, help="多用户模式：记账数据从 data/users/<user>/ 读取（config 与行情缓存保持共享）")
+    parser.add_argument("--snapshot-ttl", type=int, default=600, help="行情快照复用窗口（秒）：TTL 内的连续运行直接复用上一次的抓取结果；0 = 每次全抓")
+    args = parser.parse_args()
+
+    if args.user and ("/" in args.user or "\\" in args.user or ".." in args.user):
+        parser.error("非法用户名：不允许包含路径分隔符或 '..'")
+
+    base_dir = args.base_dir
+    config = read_json(base_dir / "data" / "config.json")
+    # 多用户模式：记账数据按用户分目录，行情缓存/策略配置保持共享
+    record_dir = base_dir / "data" / "users" / args.user if args.user else base_dir / "data"
+    transactions = read_transactions(record_dir / "transactions.csv")
+    # 坏日期防御（如 2026/08/17）：静默吞掉会让这笔钱逃出月度预算核算——
+    # 剔出计算并在输出的 invalid_transactions 里点名，写入侧（records/dca_action）另有拒收
+    invalid_transactions = [
+        {"date": tx.date, "asset": tx.asset, "amount_rmb": tx.amount_rmb}
+        for tx in transactions
+        if not is_iso_date(tx.date)
+    ]
+    if invalid_transactions:
+        transactions = [tx for tx in transactions if is_iso_date(tx.date)]
+    observations = read_observations(record_dir / "observations.csv")
+    last_observation = observations[-1] if observations else None
+    assets = config.get("assets", DEFAULT_CONFIG["assets"])
+
+    markets, usdcny, usdtusd, usdtcny, fx, snapshot_info, cache_dir, live_path = _fetch_market_data(args, base_dir, config, assets)
+    month_status, decision, weights, suggested_amount = _compute_decision(config, base_dir, transactions, observations, assets, markets, args, record_dir)
+    result = _build_result(args, config, transactions, invalid_transactions, last_observation, assets, markets, usdcny, usdtusd, usdtcny, fx, snapshot_info, month_status, decision, weights, suggested_amount, cache_dir, live_path)
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
