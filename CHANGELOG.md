@@ -7,6 +7,8 @@
 
 ## 2026-08-24
 
+- 11:26:20 [文档] 同步 CI 升级到三份文档——STRUCTURE/ARCHITECTURE/CLAUDE（`de31deb`）
+- 11:15:12 [杂务] CHANGELOG: 尾随 a8f9cd8 + 9f985e1（`4440939`）
 - 11:14:17 [文档] DEPLOY.md §2 加从零搭建步骤指南（`a8f9cd8`）
 - 11:11:05 [杂务] CHANGELOG: 尾随 db512e7 + 1e0d7bf（`9f985e1`）
 - 11:10:15 [文档] README 加 CI 徽章（`db512e7`）
