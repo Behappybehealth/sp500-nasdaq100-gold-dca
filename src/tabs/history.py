@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tab4 历史记录：回读 transactions / observations 两张表原样展示。"""
 from __future__ import annotations
 

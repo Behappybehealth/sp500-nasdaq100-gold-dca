@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """session_state 键的单一登记处：键名常量 + 归属链 + 生命周期。
 
 **为什么需要这个文件**：Streamlit 每次交互把整个脚本从头重跑，`st.session_state`

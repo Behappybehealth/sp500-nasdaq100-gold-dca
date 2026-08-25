@@ -1,47 +1,94 @@
-# 回归测试：push main 时跑 pytest。
+# CI：push / PR 时跑 ruff + mypy + pytest 三道门禁。
 #
 # 全部用例离线（不抓行情、不连 Google Sheets），所以 CI 不需要任何 secrets，
 # 也不会因为 Yahoo 限流而红——那种红是噪音，会让人开始忽略红灯。
-name: tests
+#
+# 三道门禁：
+#   1. Ruff  — lint（语法/未用 import/现代语法升级，配置见 ruff.toml）
+#   2. Mypy  — 类型检查（配置见 mypy.ini，ignore-missing-imports）
+#   3. Pytest — 回归测试（130 用例，离线）
+#
+# 测试报告（junit XML）会汇总到 GitHub 运行页 Summary + 上传 artifact 留档 90 天。
+name: CI
 
 on:
   push:
-    branches: [main]
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
 
 jobs:
-  pytest:
+  lint-and-test:
+    name: ${{ matrix.os }} / py${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
     strategy:
+      # 一个组合红了也要让其他组合跑完：默认的 fail-fast 会把其余 job 直接 cancel，
+      # 结果页上只剩"某个失败、其他取消"，看不出这是平台/版本相关问题还是普遍问题。
       fail-fast: false
       matrix:
+        # 只列有意义的组合，不做 os × python 的全交叉：
+        #   - ubuntu × 3.12 = 贴近 Streamlit Community Cloud，验证范围文件仍装得上
+        #   - windows × 3.14 = 复刻开发机，整套依赖走全钉 lock
         include:
-          # 贴近 Streamlit Community Cloud：Linux + 较低 Python，验证范围文件仍装得上。
           - os: ubuntu-latest
             python-version: "3.12"
             requirements: requirements.txt
             install-pytest: true
-          # 复刻开发机：Windows + Python 3.14，整套依赖走全钉 lock。
           - os: windows-latest
             python-version: "3.14"
             requirements: requirements-dev.lock
             install-pytest: false
-    runs-on: ${{ matrix.os }}
+
+    defaults:
+      run:
+        # Windows runner 的默认 shell 是 pwsh，`$GITHUB_STEP_SUMMARY`、`\` 续行、
+        # `"$VAR"` 引用全是 bash 语法，直接跑会挂。统一成 bash（Windows runner 自带
+        # Git Bash），两个 job 共用一套写法。
+        shell: bash
+
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
           cache-dependency-path: ${{ matrix.requirements }}
 
-      - name: 安装依赖
-        shell: bash
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r "${{ matrix.requirements }}"
+          python -m pip install ruff mypy
           if [ "${{ matrix.install-pytest }}" = "true" ]; then
             python -m pip install pytest==9.1.1
           fi
 
-      - name: 跑测试
-        run: python -m pytest
+      - name: Ruff (lint)
+        run: ruff check src tests scripts storage.py app.py
+
+      - name: Mypy
+        run: mypy src storage.py app.py
+
+      - name: Pytest
+        run: |
+          mkdir -p reports
+          python -m pytest -q --junitxml=reports/pytest-${{ matrix.os }}-${{ matrix.python-version }}.xml
+
+      # 以下两步把结论**留在 GitHub 上**，而不是只存在于日志里。
+      # 它们自身不参与门禁——判定权在上面 Pytest 那一步。
+      - name: 汇总到运行页 Summary
+        if: always()
+        run: |
+          python .github/scripts/junit_summary.py \
+            "reports/pytest-${{ matrix.os }}-${{ matrix.python-version }}.xml" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 上传测试报告（artifact）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-report-${{ matrix.os }}-${{ matrix.python-version }}
+          path: reports/
+          retention-days: 90
+          if-no-files-found: warn

@@ -20,7 +20,6 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Dict, Optional
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -28,27 +27,65 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
 # --- re-exports（保 import dca_calculator as eng 的全部符号可用）---
-from dca_types import (  # noqa: F401
-    DEFAULT_CONFIG, Transaction, as_float, biz_today, clone_default_config,
-    is_iso_date, monthly_budget_status, read_json, read_last_observation,
-    read_observations, read_transactions, resolve_monthly_budget,
-    trading_days_in_month, utc_today,
-)
 from dca_market import (  # noqa: F401
-    _LIVE_NAME, _fx_entry, _yfinance_closes, cache_file_for, close_at_or_before,
-    fetch_chart, fetch_history, fetch_json, fetch_usdcny, fetch_usdtusd,
-    get_symbol_history, load_cached_closes, load_fx_last, load_market_live, load_quote_snapshot,
-    market_symbol_for_asset, merge_live_bars, metrics_from_closes,
-    pairs_from_chart_result, sanitize_symbol, save_cached_closes,
-    save_fx_last, save_market_live, save_quote_snapshot, split_live_bars,
+    _LIVE_NAME,
+    _fx_entry,
+    _yfinance_closes,
+    cache_file_for,
+    close_at_or_before,
+    fetch_chart,
+    fetch_history,
+    fetch_json,
+    fetch_usdcny,
+    fetch_usdtusd,
+    get_symbol_history,
+    load_cached_closes,
+    load_fx_last,
+    load_market_live,
+    load_quote_snapshot,
+    market_symbol_for_asset,
+    merge_live_bars,
+    metrics_from_closes,
+    pairs_from_chart_result,
+    sanitize_symbol,
+    save_cached_closes,
+    save_fx_last,
+    save_market_live,
+    save_quote_snapshot,
+    split_live_bars,
 )
 from dca_portfolio import portfolio_summary, xirr, xnpv  # noqa: F401
 from dca_scoring import (  # noqa: F401
-    DEFAULT_MODEL, asset_score, build_decision, clip, level_label,
-    market_freshness, neutral_weights, score_based_weights,
+    DEFAULT_MODEL,
+    asset_score,
+    build_decision,
+    clip,
+    level_label,
+    market_freshness,
+    neutral_weights,
+    score_based_weights,
 )
 from dca_table import (  # noqa: F401
-    WIDE_TABLE_HEADER, asset_note, build_wide_rows, render_wide_table,
+    WIDE_TABLE_HEADER,
+    asset_note,
+    build_wide_rows,
+    render_wide_table,
+)
+from dca_types import (  # noqa: F401
+    DEFAULT_CONFIG,
+    Transaction,
+    as_float,
+    biz_today,
+    clone_default_config,
+    is_iso_date,
+    monthly_budget_status,
+    read_json,
+    read_last_observation,
+    read_observations,
+    read_transactions,
+    resolve_monthly_budget,
+    trading_days_in_month,
+    utc_today,
 )
 
 
@@ -156,7 +193,6 @@ def main() -> None:
         month_start_date=month_start,
     )
     month_status["budget_source"] = budget_source
-    remaining_budget = month_status["remaining_budget_rmb"]
     # 信号与权重只看指数系列，避免指数+ETF 双系列重复计数
     signal_markets = {market_symbol_for_asset(key, info): markets.get(market_symbol_for_asset(key, info), {}) for key, info in assets.items()}
     model_cfg = dict(DEFAULT_MODEL)
@@ -190,7 +226,7 @@ def main() -> None:
     if last_observation and last_observation.get("date"):
         obs_date = last_observation["date"]
         last_record_date = max(last_record_date, obs_date) if last_record_date else obs_date
-    since_last_record: Dict[str, dict] = {}
+    since_last_record: dict[str, dict] = {}
     if last_record_date and cache_dir:
         # 当日 bar 一并合进来：last_record_date 落在今天时（今天记的账），"当时价"
         # 该是今天那根 bar，不是昨天的收盘——与评分序列同一条 merge 规则

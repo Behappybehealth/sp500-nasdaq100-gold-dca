@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """弃用 API 零残留回归（BUG-035）：`use_container_width` 不许回流 + 下界不许回落。
 
 全离线、零 I/O：只解析源码 AST 与 requirements.txt，不起 Streamlit、不碰网络。

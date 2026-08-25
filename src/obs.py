@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """运行日志配置：结构化单行事件，stderr + logs/dca.log 双落点。
 
 本模块**只负责配置 handler**，不提供 emitter——各模块直接 `logging.getLogger("dca.<频道>")`。

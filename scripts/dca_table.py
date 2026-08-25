@@ -2,10 +2,8 @@
 """宽表结构化行与 markdown 渲染。"""
 from __future__ import annotations
 
-from typing import Dict, List, Optional
-
-from dca_types import Transaction, as_float
 from dca_market import market_symbol_for_asset
+from dca_types import Transaction, as_float
 
 
 def asset_note(metrics: dict) -> str:
@@ -32,19 +30,19 @@ WIDE_TABLE_HEADER = [
 ]
 
 
-def _money(v: Optional[float]) -> str:
+def _money(v: float | None) -> str:
     return "暂无" if v is None else f"{v:,.2f}"
 
 
-def _pct(v: Optional[float]) -> str:
+def _pct(v: float | None) -> str:
     return "暂无" if v is None else f"{v * 100:.2f}%"
 
 
-def _num(v: Optional[float]) -> str:
+def _num(v: float | None) -> str:
     return "暂无" if v is None else f"{v:,.4f}"
 
 
-def _xirr_cell(value: Optional[float], days: Optional[int]) -> str:
+def _xirr_cell(value: float | None, days: int | None) -> str:
     if value is None:
         return "暂无"
     if days is not None and days < 30:
@@ -52,7 +50,7 @@ def _xirr_cell(value: Optional[float], days: Optional[int]) -> str:
     return f"{value * 100:.2f}%"
 
 
-def build_wide_rows(result: dict, transactions: List[Transaction], assets: Dict[str, dict]) -> List[dict]:
+def build_wide_rows(result: dict, transactions: list[Transaction], assets: dict[str, dict]) -> list[dict]:
     """宽表结构化行（list[dict]，列名做 key，值为已格式化字符串）。
 
     供 render_wide_table（Skill markdown）与 Web DataFrame 共用——
@@ -70,8 +68,8 @@ def build_wide_rows(result: dict, transactions: List[Transaction], assets: Dict[
     remaining_budget = month.get("available_pool_rmb", month.get("remaining_budget_rmb", 0.0))
     release_note = "；月末释放中" if month.get("month_end_release_active") else ""
 
-    last_by_asset: Dict[str, dict] = {}
-    last_total: Optional[float] = None
+    last_by_asset: dict[str, dict] = {}
+    last_total: float | None = None
     last_type = "暂无"
     for rec in result.get("last_records", []):
         if "decision_level" in rec or "total_suggested_rmb" in rec:
@@ -84,12 +82,12 @@ def build_wide_rows(result: dict, transactions: List[Transaction], assets: Dict[
             last_type = rec.get("action") or "buy"
 
     periods = len({tx.date for tx in transactions}) if transactions else 0
-    asset_dates: Dict[str, set] = {}
+    asset_dates: dict[str, set] = {}
     for tx in transactions:
         asset_dates.setdefault(tx.asset, set()).add(tx.date)
 
     positions = {p.get("asset"): p for p in portfolio.get("positions", [])}
-    rows: List[dict] = []
+    rows: list[dict] = []
     rows.append({
         "层级": "组合汇总", "日期": today, "期数": str(periods), "资产": "组合",
         "上一条记录类型": last_type, "上一条投入金额RMB": _money(last_total),
@@ -143,7 +141,7 @@ def build_wide_rows(result: dict, transactions: List[Transaction], assets: Dict[
     return rows
 
 
-def render_wide_table(result: dict, transactions: List[Transaction], assets: Dict[str, dict]) -> str:
+def render_wide_table(result: dict, transactions: list[Transaction], assets: dict[str, dict]) -> str:
     """宽表 markdown（供 Claude Skill 文本消费；Web 端直接用 build_wide_rows 的结构化行）。"""
     rows = build_wide_rows(result, transactions, assets)
     header = WIDE_TABLE_HEADER

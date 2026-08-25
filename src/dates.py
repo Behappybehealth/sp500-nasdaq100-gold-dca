@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """业务日期：全链路唯一"今天"（Asia/Shanghai 自然日，固定 UTC+8）。
 
 Cloud 容器时区是 UTC——直接 `date.today()` 会让北京时间 00:00–07:59 的

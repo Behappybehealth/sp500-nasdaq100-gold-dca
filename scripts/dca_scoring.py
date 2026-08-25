@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Dict, List, Optional
 
-from dca_types import is_iso_date
 from dca_market import market_symbol_for_asset
+from dca_types import is_iso_date
 
 
 def clip(x: float, lo: float, hi: float) -> float:
@@ -88,18 +87,18 @@ def level_label(deploy_mult: float) -> str:
     return "今日不买，延后观察"
 
 
-def neutral_weights(assets: Dict[str, dict]) -> Dict[str, float]:
+def neutral_weights(assets: dict[str, dict]) -> dict[str, float]:
     total = sum(float(i.get("neutral_weight", 0.0)) for i in assets.values()) or 1.0
     return {k: float(i.get("neutral_weight", 0.0)) / total for k, i in assets.items()}
 
 
-def score_based_weights(scores: Dict[str, dict], assets: Dict[str, dict], model: dict) -> Dict[str, float]:
+def score_based_weights(scores: dict[str, dict], assets: dict[str, dict], model: dict) -> dict[str, float]:
     """比例由评分连续倾斜：w ∝ 中性权重 × (1 + tilt×评分)，黄金在权益趋势走弱时获防御加成。"""
     tilt = float(model.get("tilt_strength", 0.9))
     defense = float(model.get("defense_boost", 0.6))
     equity_trends = [scores[k]["trend"] for k in assets if k != "gold" and (scores.get(k) or {}).get("trend") is not None]
     eq_trend_avg = sum(equity_trends) / len(equity_trends) if equity_trends else 0.0
-    weights: Dict[str, float] = {}
+    weights: dict[str, float] = {}
     for key, info in assets.items():
         s = scores.get(key) or {}
         sc = s.get("score")
@@ -135,7 +134,7 @@ def score_based_weights(scores: Dict[str, dict], assets: Dict[str, dict], model:
 _MAX_STALE_DAYS = 10
 
 
-def market_freshness(signal_markets: Dict[str, dict], today: date, max_stale_days: int = _MAX_STALE_DAYS) -> dict:
+def market_freshness(signal_markets: dict[str, dict], today: date, max_stale_days: int = _MAX_STALE_DAYS) -> dict:
     """信号标的的新鲜度闸：**判决策实际用的那个价新不新，不判 K 线日期**。
 
     K 线日期只是价格新鲜度的代理，而代理会在三种与"价新不新"无关的情况下失真：
@@ -149,8 +148,8 @@ def market_freshness(signal_markets: Dict[str, dict], today: date, max_stale_day
     副闸：K 线日期落后超 max_stale_days 天照样拦——兜住"实时价正常、序列却因
     数据源长期返回 null 而不再前进"。这道是宽松兜底，不是主判据。
     """
-    per_symbol: Dict[str, dict] = {}
-    reasons: List[str] = []
+    per_symbol: dict[str, dict] = {}
+    reasons: list[str] = []
     for sym, mk in signal_markets.items():
         end = (mk or {}).get("history_end")
         if not mk or mk.get("error") or not end or not is_iso_date(str(end)):
@@ -178,7 +177,7 @@ def market_freshness(signal_markets: Dict[str, dict], today: date, max_stale_day
     }
 
 
-def build_decision(signal_markets: Dict[str, dict], assets: Dict[str, dict], model: dict, month_status: dict, user_amount: Optional[float]) -> dict:
+def build_decision(signal_markets: dict[str, dict], assets: dict[str, dict], model: dict, month_status: dict, user_amount: float | None) -> dict:
     """4/5/6 一体化：评分 → 部署系数 × 节奏系数 → 金额；评分 → 权重倾斜 → 比例。"""
     w = model.get("score_weights", {})
     if not isinstance(w, dict):

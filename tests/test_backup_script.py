@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Apps Script 备份脚本（BUG-018）源码不变量回归。
 
 全离线：只解析仓内 `deploy/backup/Code.gs` 与 `storage.py` 的源码文本/AST——

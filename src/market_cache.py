@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """行情缓存读写：纯函数，无引擎 / Streamlit 依赖。
 
 与 `scripts/dca_calculator.py` 里的同名函数保持一致（双实现，同 `biz_today()`
@@ -9,7 +8,6 @@ from __future__ import annotations
 
 import csv
 from pathlib import Path
-from typing import Dict, Optional
 
 
 def sanitize_symbol(symbol: str) -> str:
@@ -20,8 +18,8 @@ def cache_file_for(cache_dir: Path, symbol: str) -> Path:
     return cache_dir / f"{sanitize_symbol(symbol)}.csv"
 
 
-def load_cached_closes(path: Path) -> Dict[str, float]:
-    closes: Dict[str, float] = {}
+def load_cached_closes(path: Path) -> dict[str, float]:
+    closes: dict[str, float] = {}
     if not path.exists():
         return closes
     with path.open("r", encoding="utf-8-sig", newline="") as f:
@@ -33,6 +31,6 @@ def load_cached_closes(path: Path) -> Dict[str, float]:
     return closes
 
 
-def close_at_or_before(closes: Dict[str, float], day: str) -> Optional[float]:
+def close_at_or_before(closes: dict[str, float], day: str) -> float | None:
     eligible = [d for d in closes if d <= day]
     return closes[max(eligible)] if eligible else None

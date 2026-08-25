@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tab2 持仓与曲线：组合市值 vs 累计投入 / 权重对比 / 近一年价格走势。
 
 数据全部显式收参，不读 app.py 模块级全局；portfolio_curve / load_price_series 来自 src.services.curves。

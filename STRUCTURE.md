@@ -2,7 +2,7 @@
 
 > S&P 500 / Nasdaq 100 / Gold dynamic DCA decision system.
 > Two entry points (Streamlit web app + Claude Skill) share one calculation engine and one storage layer.
-> Last updated: 2026-08-24 · Total source: ~6,900 lines (excluding .venv, data, logs, backtest JSONs)
+> Last updated: 2026-08-24 · Total source: ~7,500 lines (excluding .venv, data, logs, backtest JSONs)
 
 ---
 
@@ -45,7 +45,7 @@ scripts/dca_action.py     ──→ dca_calculator, storage  (CLI入口)
                         ▼                        ▼
           ┌─────────────────────────┐   ┌──────────────────┐
           │ scripts/dca_calculator  │   │   storage.py     │
-          │ Entry (240L) + 5 mods   │   │  Storage (654L)  │
+          │ Entry (240L) + 5 mods   │   │  Storage (666L)  │
           │                         │   │                  │
           │ reads data/config.json  │◄──┤  Google Sheets    │
           │ reads data/users/<u>/   │   │  or local CSV     │
@@ -72,7 +72,7 @@ dca_types ──→ dca_market ──→ dca_portfolio ──→ dca_scoring ─
 
 | Metric | Value |
 |---|---|
-| Total source lines (excl. .venv/data/logs) | ~6,900 |
+| Total source lines (excl. .venv/data/logs) | ~7,500 |
 | Engine modules | 6 files, 1,506 lines |
 | Web app modules (src/) | 22 files, 2,164 lines |
 | Tests | 9 files, 2,087 lines, 130 tests |
@@ -89,7 +89,7 @@ dca_types ──→ dca_market ──→ dca_portfolio ──→ dca_scoring ─
 sp500-nasdaq100-gold-dca/
 │
 ├── app.py                          # 70L  Streamlit entry — pure assembly
-├── storage.py                      # 654L Storage layer — Sheets/CSV, PBKDF2 auth, write-before-snapshot
+├── storage.py                      # 666L Storage layer — Sheets/CSV, PBKDF2 auth, write-before-snapshot
 ├── start-app.bat                   # 5L   Local Windows launcher
 │
 ├── requirements.txt                # 17L  Cloud/Linux deps (6 direct, version-bounded)
@@ -200,7 +200,7 @@ sp500-nasdaq100-gold-dca/
 sp500-nasdaq100-gold-dca/
 │
 ├── app.py                          # 70行  Streamlit主程序——纯装配层
-├── storage.py                      # 654行 存储层——Sheets/CSV、PBKDF2认证、写前快照
+├── storage.py                      # 666行 存储层——Sheets/CSV、PBKDF2认证、写前快照
 ├── start-app.bat                   # 5行   本机Windows双击启动
 │
 ├── requirements.txt                # 17行  Cloud/Linux依赖（6个直接，带版本上下界）

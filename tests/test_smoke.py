@@ -22,10 +22,10 @@ import shutil
 from datetime import date, timedelta
 from pathlib import Path
 
+import dca_calculator as eng
 import pytest
 from streamlit.testing.v1 import AppTest
 
-import dca_calculator as eng
 import storage
 from src.ui import sidebar
 

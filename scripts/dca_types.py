@@ -8,8 +8,6 @@ import math
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import List, Optional
-
 
 DEFAULT_CONFIG = {
     "monthly_budget_rmb": 30000,
@@ -78,7 +76,7 @@ def read_json(path: Path) -> dict:
     return config
 
 
-def resolve_monthly_budget(config: dict, base_dir: Path, today: date, record_dir: Optional[Path] = None) -> tuple:
+def resolve_monthly_budget(config: dict, base_dir: Path, today: date, record_dir: Path | None = None) -> tuple:
     """每月预算：budget_overrides.json 按月起算持久生效
     （{"2026-08": 45000} 表示 2026-08 起每月 45000，直到更新的月份键出现）。
     record_dir 指定记账数据目录（多用户模式为 data/users/<user>/），缺省读 base_dir/data/。
@@ -109,10 +107,10 @@ def as_float(value: str, default: float = 0.0) -> float:
         return default
 
 
-def read_transactions(path: Path) -> List[Transaction]:
+def read_transactions(path: Path) -> list[Transaction]:
     if not path.exists():
         return []
-    rows: List[Transaction] = []
+    rows: list[Transaction] = []
     with path.open("r", encoding="utf-8-sig", newline="") as f:
         for row in csv.DictReader(f):
             rows.append(
@@ -133,19 +131,19 @@ def read_transactions(path: Path) -> List[Transaction]:
     return rows
 
 
-def read_observations(path: Path) -> List[dict]:
+def read_observations(path: Path) -> list[dict]:
     if not path.exists():
         return []
     with path.open("r", encoding="utf-8-sig", newline="") as f:
         return list(csv.DictReader(f))
 
 
-def read_last_observation(path: Path) -> Optional[dict]:
+def read_last_observation(path: Path) -> dict | None:
     rows = read_observations(path)
     return rows[-1] if rows else None
 
 
-def trading_days_in_month(today: date, start: Optional[date] = None) -> tuple:
+def trading_days_in_month(today: date, start: date | None = None) -> tuple:
     """以周一~周五近似交易日（未剔除节假日，误差约 1 天/月）。
 
     返回 (当月总数, 含今天在内的剩余数, start 之前的交易日数)。
@@ -168,7 +166,7 @@ def trading_days_in_month(today: date, start: Optional[date] = None) -> tuple:
     return total, max(1, remaining), before_start
 
 
-def monthly_budget_status(transactions: List[Transaction], monthly_budget: float, today: date, interval_days: int = 1, release_window_days: int = 7, month_start_date: Optional[str] = None) -> dict:
+def monthly_budget_status(transactions: list[Transaction], monthly_budget: float, today: date, interval_days: int = 1, release_window_days: int = 7, month_start_date: str | None = None) -> dict:
     month_prefix = today.strftime("%Y-%m")
     invested_this_month = sum(
         tx.amount_rmb

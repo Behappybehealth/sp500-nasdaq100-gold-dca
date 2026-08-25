@@ -14,7 +14,6 @@ import urllib.error
 import urllib.request
 
 import pytest
-
 from conftest import NetworkUseInTests
 
 

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """session_state 键登记表（BUG-032）回归：常量化守得住 + 登记表不漂移。
 
 全离线、零 I/O：只解析源码 AST，不起 Streamlit、不碰网络。

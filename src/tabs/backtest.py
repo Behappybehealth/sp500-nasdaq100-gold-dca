@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tab5 回测结果：5 段静态报告，全部读 backtest/*.json（单一供数）。
 
 数据显式收 BACKTEST_DIR 参数；_load_json 来自 src.services.curves。

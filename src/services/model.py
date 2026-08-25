@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """决策模型调用：subprocess 起 scripts/dca_calculator.py，收 JSON。
 
 显式收 paths 参数，不读 app.py 模块级全局。
@@ -33,7 +32,7 @@ def run_model(amount: float | None, user: str, paths: Paths) -> dict:
     if amount:
         cmd += ["--amount", str(amount)]
     out = subprocess.run(
-        cmd, capture_output=True, text=True, encoding="utf-8", timeout=180
+        cmd, capture_output=True, text=True, encoding="utf-8", timeout=180, check=False
     )
     if out.returncode != 0:
         # 引擎 stderr 平时被 capture_output 吞掉，只有这条路径能看到它——必须留痕

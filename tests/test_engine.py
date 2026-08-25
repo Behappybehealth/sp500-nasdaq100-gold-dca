@@ -11,9 +11,8 @@ from __future__ import annotations
 import math
 from datetime import date
 
-import pytest
-
 import dca_calculator as eng
+import pytest
 
 W = {"value": 0.50, "trend": 0.25, "momentum": 0.15,
      "heat": 0.45, "heat_quad": 0.20, "volatility": 0.15}

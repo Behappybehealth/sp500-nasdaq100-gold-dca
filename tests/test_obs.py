@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """运行日志（BUG-017）回归：配置的三条不变量 + 失败留痕 + 不泄密。
 
 全离线：只用 tmp_path 和假连接，一次网络都不发（`conftest._deny_network` 兜底）。

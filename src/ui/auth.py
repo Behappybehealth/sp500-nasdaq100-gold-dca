@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """认证门闸：名字+PIN 三阶段状态机（login / activate / bootstrap）+ 会话首同步。
 
 require_user() 无需参数：全部输入走 storage / session_state / 环境变量，通过返回值交出用户名。
@@ -11,12 +10,13 @@ from __future__ import annotations
 import logging
 import os
 
-import storage
 import streamlit as st
 
+import storage
+
 from ..state import (
-    K_ACTIVATING,
     K_ACT_ERR,
+    K_ACTIVATING,
     K_AUTH,
     K_BOOT_ERR,
     K_LOGIN_ERR,

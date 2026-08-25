@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """动态定投模拟决策台（Streamlit 网页版）
 
 数据与策略完全复用 sp500-nasdaq100-gold-dca skill：
@@ -10,14 +9,14 @@
 """
 
 
-import storage  # 存储层：Google Sheets 优先，本地 CSV 回退
 import streamlit as st
 
+import storage  # 存储层：Google Sheets 优先，本地 CSV 回退
 from src.context import build_paths
 from src.obs import setup_logging
+from src.tabs import backtest, history, holdings, records, strategy_doc, today
 from src.ui import auth, sidebar
 from src.ui.styles import inject_css
-from src.tabs import backtest, history, holdings, records, strategy_doc, today
 
 # ---- 路径：代码 vs 数据分离，由 src/context.build_paths 装配 ----
 _paths = build_paths()

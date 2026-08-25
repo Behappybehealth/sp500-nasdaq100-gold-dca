@@ -9,15 +9,16 @@ import os
 import time
 import urllib.parse
 import urllib.request
+from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any
 
 from dca_types import as_float, biz_today, is_iso_date, utc_today
 
 
-def fetch_json(url: str, timeout: int = 20, attempts: int = 3) -> Dict[str, Any]:
+def fetch_json(url: str, timeout: int = 20, attempts: int = 3) -> dict[str, Any]:
     """取一次 Yahoo JSON；失败按 0.8s / 1.6s 退避重试，最后一次的异常原样抛出。
 
     单请求最坏 3×20s + 2.4s 退避 ≈ 62s——抓取已并发（fetch_history），
@@ -36,7 +37,7 @@ def fetch_json(url: str, timeout: int = 20, attempts: int = 3) -> Dict[str, Any]
     raise last_exc
 
 
-def fetch_chart(symbol: str, range_: str = "10y", interval: str = "1d", period1: Optional[date] = None, period2: Optional[date] = None) -> Dict[str, Any]:
+def fetch_chart(symbol: str, range_: str = "10y", interval: str = "1d", period1: date | None = None, period2: date | None = None) -> dict[str, Any]:
     encoded = urllib.parse.quote(symbol, safe="")
     if period1 is not None and period2 is not None:
         p1 = int(datetime(period1.year, period1.month, period1.day, tzinfo=timezone.utc).timestamp())
@@ -54,7 +55,7 @@ def fetch_chart(symbol: str, range_: str = "10y", interval: str = "1d", period1:
     return results[0]
 
 
-def metrics_from_closes(closes: List[float], latest: float, history_start: str, history_end: str) -> dict:
+def metrics_from_closes(closes: list[float], latest: float, history_start: str, history_end: str) -> dict:
     metrics = {"latest_price": latest, "history_start": history_start, "history_end": history_end}
     for n in [1, 5, 20, 60, 120, 252]:
         if len(closes) > n:
@@ -85,7 +86,7 @@ def metrics_from_closes(closes: List[float], latest: float, history_start: str, 
     return metrics
 
 
-def pairs_from_chart_result(result: Dict[str, Any]) -> tuple:
+def pairs_from_chart_result(result: dict[str, Any]) -> tuple:
     meta = result.get("meta", {})
     timestamps = result.get("timestamp") or []
     quote = (result.get("indicators", {}).get("quote") or [{}])[0]
@@ -112,8 +113,8 @@ def cache_file_for(cache_dir: Path, symbol: str) -> Path:
     return cache_dir / f"{sanitize_symbol(symbol)}.csv"
 
 
-def load_cached_closes(path: Path) -> Dict[str, float]:
-    closes: Dict[str, float] = {}
+def load_cached_closes(path: Path) -> dict[str, float]:
+    closes: dict[str, float] = {}
     if not path.exists():
         return closes
     with path.open("r", encoding="utf-8-sig", newline="") as f:
@@ -125,7 +126,7 @@ def load_cached_closes(path: Path) -> Dict[str, float]:
     return closes
 
 
-def close_at_or_before(closes: Dict[str, float], day: str) -> Optional[float]:
+def close_at_or_before(closes: dict[str, float], day: str) -> float | None:
     eligible = [d for d in closes if d <= day]
     return closes[max(eligible)] if eligible else None
 
@@ -133,7 +134,7 @@ def close_at_or_before(closes: Dict[str, float], day: str) -> Optional[float]:
 _JUMP_WARN_PCT = 0.20
 
 
-def save_cached_closes(path: Path, closes: Dict[str, float]) -> List[str]:
+def save_cached_closes(path: Path, closes: dict[str, float]) -> list[str]:
     """把收盘序列落盘，三道护栏；返回 warning 列表（调用方透传到 JSON 输出）。
 
     1. **只写已收盘 K 线**：剔除 `date >= UTC 今天`。盘中价不进库——实时价走
@@ -144,7 +145,7 @@ def save_cached_closes(path: Path, closes: Dict[str, float]) -> List[str]:
 
     ±20% 跳变只报 warning 不拦——1987 式真崩盘必须能落库。
     """
-    warnings: List[str] = []
+    warnings: list[str] = []
     cutoff = utc_today().isoformat()
     persistable = {d: c for d, c in closes.items() if d < cutoff}
     if not persistable:
@@ -182,7 +183,7 @@ _LIVE_NAME = "market_live.json"
 _REFETCH_LOOKBACK_DAYS = 5
 
 
-def load_market_live(path: Optional[Path]) -> Dict[str, dict]:
+def load_market_live(path: Path | None) -> dict[str, dict]:
     """读当日实时价缓存（`data/market_live.json`），只保留仍属"今天"的条目。
 
     存的是**当日尚未收盘的那根 K 线**：盘中记账时"我看到的那个价"需要一个落点，
@@ -202,7 +203,7 @@ def load_market_live(path: Optional[Path]) -> Dict[str, dict]:
     if not isinstance(raw, dict):
         return {}
     cutoff = utc_today().isoformat()
-    out: Dict[str, dict] = {}
+    out: dict[str, dict] = {}
     for sym, entry in raw.items():
         bars = entry.get("bars") if isinstance(entry, dict) else None
         if not isinstance(bars, dict):
@@ -217,7 +218,7 @@ def load_market_live(path: Optional[Path]) -> Dict[str, dict]:
     return out
 
 
-def save_market_live(path: Optional[Path], entries: Dict[str, dict]) -> None:
+def save_market_live(path: Path | None, entries: dict[str, dict]) -> None:
     """整体覆写当日实时价缓存。写失败静默——加速/留痕缓存，不是事实源。"""
     if not path:
         return
@@ -228,7 +229,7 @@ def save_market_live(path: Optional[Path], entries: Dict[str, dict]) -> None:
         pass
 
 
-def split_live_bars(pairs: List[tuple]) -> Dict[str, float]:
+def split_live_bars(pairs: list[tuple]) -> dict[str, float]:
     """从本次抓到的 K 线里挑出"当日尚未收盘"那部分（`date >= UTC 今天`）。
 
     与 save_cached_closes 第一道闸是同一条界线：被它剔出 csv 的正是这些点，
@@ -240,7 +241,7 @@ def split_live_bars(pairs: List[tuple]) -> Dict[str, float]:
     return {day: close for day, close in pairs if day >= cutoff}
 
 
-def merge_live_bars(closes: Dict[str, float], live_bars: Dict[str, float]) -> Dict[str, float]:
+def merge_live_bars(closes: dict[str, float], live_bars: dict[str, float]) -> dict[str, float]:
     """把当日实时价并进收盘序列——**csv 有该日期则以 csv 为准**。
 
     定稿值一落库就自动顶掉临时值，不需要任何清理逻辑；反过来若让 live 覆盖
@@ -252,7 +253,7 @@ def merge_live_bars(closes: Dict[str, float], live_bars: Dict[str, float]) -> Di
     return merged
 
 
-def _yfinance_closes(symbol: str, years: int) -> Dict[str, float]:
+def _yfinance_closes(symbol: str, years: int) -> dict[str, float]:
     """yfinance 兜底序列，**raw 口径**（auto_adjust=False，与 Chart 主路径一致）。
 
     口径必须钉死：一边复权一边不复权，拆股/分红日前后就会在同一份缓存里形成
@@ -264,7 +265,7 @@ def _yfinance_closes(symbol: str, years: int) -> Dict[str, float]:
     hist = yf.Ticker(symbol).history(period=f"{years}y", interval="1d", auto_adjust=False)
     if hist.empty:
         raise RuntimeError("empty history")
-    out: Dict[str, float] = {}
+    out: dict[str, float] = {}
     for idx, close in zip(hist.index, hist["Close"].tolist()):
         if close and close > 0:
             out[str(idx.date())] = float(close)
@@ -273,18 +274,18 @@ def _yfinance_closes(symbol: str, years: int) -> Dict[str, float]:
     return out
 
 
-def get_symbol_history(symbol: str, years: int, cache_dir: Optional[Path], live_entry: Optional[dict] = None) -> dict:
+def get_symbol_history(symbol: str, years: int, cache_dir: Path | None, live_entry: dict | None = None) -> dict:
     today = biz_today()
     cache_path = cache_file_for(cache_dir, symbol) if cache_dir else None
     cached = load_cached_closes(cache_path) if cache_path else {}  # 只含已收盘定稿值
-    live_bars: Dict[str, float] = dict((live_entry or {}).get("bars") or {})
-    fresh_live: Optional[Dict[str, float]] = None  # 本次抓到的当日 bar；None=没抓到，别动存量
-    latest: Optional[float] = None
+    live_bars: dict[str, float] = dict((live_entry or {}).get("bars") or {})
+    fresh_live: dict[str, float] | None = None  # 本次抓到的当日 bar；None=没抓到，别动存量
+    latest: float | None = None
     currency = None
     data_source = ""
     warning = ""
-    persist_warnings: List[str] = []
-    meta: Dict[str, Any] = {}
+    persist_warnings: list[str] = []
+    meta: dict[str, Any] = {}
 
     if cached:
         last_cached = date.fromisoformat(max(cached))
@@ -377,9 +378,9 @@ def get_symbol_history(symbol: str, years: int, cache_dir: Optional[Path], live_
 def fetch_history(
     symbols: Iterable[str],
     years: int = 10,
-    cache_dir: Optional[Path] = None,
-    live_path: Optional[Path] = None,
-) -> Dict[str, dict]:
+    cache_dir: Path | None = None,
+    live_path: Path | None = None,
+) -> dict[str, dict]:
     """并发抓取全部标的（原先串行 → 总耗时是求和，最坏 160s 紧贴 subprocess 的 180s 上限）。
 
     每个标的写自己的缓存文件、互不共享写入，因此并发安全；总耗时从"求和"变"取最大值"。
@@ -423,7 +424,7 @@ def fetch_history(
     return out
 
 
-def fetch_usdcny() -> Optional[float]:
+def fetch_usdcny() -> float | None:
     """USD/CNY 实时报价；抓不到返回 None（汇率是变量不是常量——绝不静默回落到写死的数）。"""
     try:
         result = fetch_chart("CNY=X", range_="5d")
@@ -435,7 +436,7 @@ def fetch_usdcny() -> Optional[float]:
         return None
 
 
-def fetch_usdtusd() -> Optional[float]:
+def fetch_usdtusd() -> float | None:
     """USDT/USD 报价；U 本位资产的人民币估值用 USDCNY × USDTUSD。抓不到返回 None。"""
     try:
         result = fetch_chart("USDT-USD", range_="5d")
@@ -459,7 +460,7 @@ def load_fx_last(base_dir: Path) -> dict:
         return {}
 
 
-def save_fx_last(base_dir: Path, usdcny: Optional[float], usdtusd: Optional[float]) -> None:
+def save_fx_last(base_dir: Path, usdcny: float | None, usdtusd: float | None) -> None:
     """把本次抓到的实时汇率并入 fx_last.json：只覆写抓成功的字段，另一字段保留上次值。"""
     if usdcny is None and usdtusd is None:
         return
@@ -477,7 +478,7 @@ def save_fx_last(base_dir: Path, usdcny: Optional[float], usdtusd: Optional[floa
         pass  # 兜底缓存写失败不影响本次输出
 
 
-def _fx_entry(live_value: Optional[float], last_entry, now: float) -> dict:
+def _fx_entry(live_value: float | None, last_entry, now: float) -> dict:
     """单汇率三件套 {value, live, as_of}：live=True 本次实时抓到（as_of=抓取时刻）；
     否则回落到 fx_last.json 的上次成功值（live=False，as_of=当时抓取时刻）；
     连上次值都没有 → value=None（估值层据此置空，绝不编一个数）。"""
@@ -491,7 +492,7 @@ def _fx_entry(live_value: Optional[float], last_entry, now: float) -> dict:
 _SNAPSHOT_NAME = "quote_snapshot.json"
 
 
-def load_quote_snapshot(base_dir: Path, ttl_s: int) -> Optional[dict]:
+def load_quote_snapshot(base_dir: Path, ttl_s: int) -> dict | None:
     """读取 TTL 内的行情快照（上一次运行抓取的 markets/汇率），供短时间内的连续调用直接复用。
 
     过期、缺失或文件损坏一律返回 None，调用方退化为正常抓取。
@@ -509,7 +510,7 @@ def load_quote_snapshot(base_dir: Path, ttl_s: int) -> Optional[dict]:
     return None
 
 
-def save_quote_snapshot(base_dir: Path, markets: Dict[str, dict], usdcny: Optional[float], usdtusd: Optional[float], fx: dict) -> None:
+def save_quote_snapshot(base_dir: Path, markets: dict[str, dict], usdcny: float | None, usdtusd: float | None, fx: dict) -> None:
     """把本次行情抓取结果落盘为快照。任一标的带 error 时不存——失败结果不该被冻结一整个 TTL。"""
     if any(isinstance(m, dict) and m.get("error") for m in markets.values()):
         return

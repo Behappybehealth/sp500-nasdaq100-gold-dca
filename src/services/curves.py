@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """曲线与文件数据：JSON 加载 / 缓存行情序列 / 组合净值曲线。
 
 显式收 paths 参数，不读 app.py 模块级全局。
@@ -13,7 +12,7 @@ import pandas as pd
 import streamlit as st
 
 from ..context import Paths
-from ..market_cache import cache_file_for, load_cached_closes, close_at_or_before
+from ..market_cache import cache_file_for, close_at_or_before, load_cached_closes
 
 
 def _load_json(path: Path):
@@ -73,7 +72,7 @@ def portfolio_curve(result: dict, paths: Paths, user: str):
     out = []
     shares = {"sp500": 0.0, "nasdaq100": 0.0, "gold": 0.0}
     invested = 0.0
-    tx_by_date = {}
+    tx_by_date: dict[str, list] = {}
     for r in rows:
         tx_by_date.setdefault(r["date"], []).append(r)
     for d in days:
@@ -90,7 +89,7 @@ def portfolio_curve(result: dict, paths: Paths, user: str):
             s = series.get(sym, {})
             px = close_at_or_before(s, d)
             if px and shares.get(a):
-                value += shares[a] * px * fx_map[a]
+                value += shares[a] * (px or 0.0) * (fx_map[a] or 0.0)  # type: ignore[operator]  # fx_map 已在 :67 过 None 守卫
         out.append(
             {"日期": d, "累计投入": round(invested, 0), "组合市值": round(value, 0)}
         )

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """存储层：Google Sheets（云端多用户）优先，未配置 secrets 时回退本地 CSV（单机开发）。
 
 工作表结构（同一个 Google 表格，所有数据表带 user 列做隔离）：
@@ -163,8 +162,8 @@ def sheets_enabled() -> bool:
 @st.cache_resource
 def _conn():
     # 延迟导入：未安装 st-gsheets-connection 时本地 CSV 模式仍可用
-    from streamlit_gsheets import GSheetsConnection
     import streamlit_gsheets.gsheets_connection as _gc
+    from streamlit_gsheets import GSheetsConnection
 
     # 该库内部 @cache_data 没关 show_spinner，会把 Running GSheetsServiceAccountClient...
     # 这类内部函数名闪到前端；给它打个静默补丁（_get_as_dataframe 在调用时才装饰，补丁有效）
@@ -598,12 +597,12 @@ def sync_local(user: str) -> None:
         return
     base = _LOCAL_BASE / "users" / user
     base.mkdir(parents=True, exist_ok=True)
-    for table in TABLES:
+    for table, fields in TABLES.items():
         rows = read_rows(table, user)
         path = base / f"{table}.csv"
         _rotate_backup(path)
         with path.open("w", newline="", encoding="utf-8") as f:
-            w = csv.DictWriter(f, fieldnames=TABLES[table])
+            w = csv.DictWriter(f, fieldnames=fields)
             w.writeheader()
             w.writerows(rows)
     ov = get_overrides(user)
@@ -615,7 +614,7 @@ def sync_local(user: str) -> None:
 def import_local_to_sheets(user: str) -> dict:
     """一次性迁移：把本地 CSV/JSON 的历史数据上传到云端该用户名下。返回各表行数。"""
     counts = {}
-    for table in TABLES:
+    for table, fields in TABLES.items():
         path = _local_csv(table)
         rows = []
         if path.exists() and path.stat().st_size > 0:
@@ -624,7 +623,7 @@ def import_local_to_sheets(user: str) -> dict:
         for r in rows:
             r["user"] = user
         if rows:
-            df = _read_ws(table, TABLES[table])
+            df = _read_ws(table, fields)
             df = pd.concat(
                 [df, pd.DataFrame(rows)[TABLES[table]].fillna("").astype(str)],
                 ignore_index=True,

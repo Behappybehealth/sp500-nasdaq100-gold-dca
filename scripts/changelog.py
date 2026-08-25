@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """CHANGELOG.md 维护工具（CLAUDE.md 第 12 条的配套脚本）。
 
 用法：

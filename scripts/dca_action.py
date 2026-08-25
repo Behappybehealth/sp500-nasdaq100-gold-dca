@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """业务动作 CLI 薄壳：Claude Skill 入口经它与 Web 共用同一业务层（storage.py）。
 
 子命令：
@@ -24,7 +23,9 @@ import sys
 from datetime import date
 from pathlib import Path
 
-from dca_calculator import biz_today  # 同目录直接运行时 scripts/ 在 sys.path[0]；业务"今天"唯一定义
+from dca_calculator import (
+    biz_today,  # 同目录直接运行时 scripts/ 在 sys.path[0]；业务"今天"唯一定义
+)
 
 
 def _build_parser() -> argparse.ArgumentParser:

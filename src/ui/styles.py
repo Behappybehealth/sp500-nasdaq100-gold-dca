@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """全局 CSS：登录页科技风背景、玻璃拟态登录卡、加载/遮罩组件样式。
 
 ⚠️ 遮罩类（.dca-sync-mask / .dca-auth-mask）必须保持不透明 background——

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """应用级上下文：启动期路径与配置（Paths）+ 侧栏产出的决策结果（Decision）。
 
 拆分设计（docs/plans/app-split-design.md 决策 1/2）：

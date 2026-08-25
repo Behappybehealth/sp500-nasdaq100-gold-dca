@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """实时行情报价：东财 XAU 现货 + Yahoo BTC。
 
 显式收 paths 参数，不读 app.py 模块级全局。
@@ -35,6 +34,7 @@ def fetch_xau_spot(paths: Paths):
                 ],
                 capture_output=True,
                 timeout=12,
+                check=False,
             )
             d = json.loads(out.stdout.decode("utf-8")).get("data") or {}
             if d.get("f43"):

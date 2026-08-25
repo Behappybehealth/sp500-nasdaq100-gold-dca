@@ -1,0 +1,9 @@
+# Ruff 配置——只选有价值的规则子集，不选全量默认（0.16 默认开了 BLE/S/DTZ 等几百条）。
+#
+# 选规则：
+#   E4/E7/E9 = 语法/缩进硬错（必须拦）
+#   F       = pyflakes：未用 import、未定义变量（必须拦）
+#   I       = import 排序（自动可修，零成本）
+#   UP      = 现代语法升级（List→list、Optional→| 等，自动可修）
+[lint]
+select = ["E4", "E7", "E9", "F", "I", "UP"]

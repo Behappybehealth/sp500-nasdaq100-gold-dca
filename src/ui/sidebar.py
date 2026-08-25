@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """侧边栏：用户管理 + 实时行情 + 基准金额 + 汇率 + 预算 + 免责声明 + 本地历史迁移，并在这里跑模型。
 
 render(paths, user) 显式收参、不读 app.py 模块级全局；result/dec/ms/pf 收口为
@@ -9,8 +8,9 @@ from __future__ import annotations
 
 from datetime import datetime
 
-import storage
 import streamlit as st
+
+import storage
 
 from ..context import Decision, Paths
 from ..dates import biz_today

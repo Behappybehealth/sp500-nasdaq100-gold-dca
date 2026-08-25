@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tab3 记账：回报成交（buy/sell）+ 主动跳过（observe），复述确认后落库。
 
 写链：session_state["pending_tx"]/["pending_obs"] 暂存 → 复述确认 → storage.append_row。

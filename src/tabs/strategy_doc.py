@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tab6 策略说明：读 strategy/core-strategy.md 渲染（唯一事实源，改文档即改页面）。"""
 from __future__ import annotations
 

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tab 层：六个 tab 的渲染函数。
 
 每个模块暴露 render(tab, ...)，tab 对象为 app.py 里 st.tabs() 的产物；

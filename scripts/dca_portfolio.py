@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import math
 from datetime import date
-from typing import Dict, List, Optional
 
-from dca_types import Transaction, biz_today
 from dca_market import market_symbol_for_asset
+from dca_types import Transaction, biz_today
 
 
 def xnpv(rate: float, cashflows: list) -> float:
@@ -15,7 +14,7 @@ def xnpv(rate: float, cashflows: list) -> float:
     return sum(amount / (1.0 + rate) ** ((day - t0).days / 365.0) for day, amount in cashflows)
 
 
-def xirr(cashflows: list, tol: float = 1e-6, max_iter: int = 50) -> Optional[float]:
+def xirr(cashflows: list, tol: float = 1e-6, max_iter: int = 50) -> float | None:
     """Annualized IRR for irregular cash flows: (date, amount), outflows negative.
 
     Buys are negative, sells positive, and the current portfolio value is the
@@ -57,9 +56,9 @@ def xirr(cashflows: list, tol: float = 1e-6, max_iter: int = 50) -> Optional[flo
     return (lo + hi) / 2.0
 
 
-def portfolio_summary(transactions: List[Transaction], prices: Dict[str, dict], assets: Dict[str, dict], current_fx_rate: Optional[float], usdt_fx_rate: Optional[float] = None) -> dict:
-    by_asset: Dict[str, dict] = {}
-    flows_by_asset: Dict[str, list] = {}
+def portfolio_summary(transactions: list[Transaction], prices: dict[str, dict], assets: dict[str, dict], current_fx_rate: float | None, usdt_fx_rate: float | None = None) -> dict:
+    by_asset: dict[str, dict] = {}
+    flows_by_asset: dict[str, list] = {}
     all_flows: list = []
     for tx in transactions:
         item = by_asset.setdefault(tx.asset, {"asset": tx.asset, "symbol": tx.symbol, "invested_rmb": 0.0, "shares": 0.0, "fees_rmb": 0.0, "tx_fx_rate": tx.fx_rate})
