@@ -178,6 +178,99 @@ def _render_login_page(names, ph):
         )
 
 
+# ---------- require_user() 三阶段拆分（P2-NEW-2）----------
+
+
+def _handle_login_stage(_auth: dict) -> None:
+    """登录阶段：验证账号+PIN，成功则同步云端数据。"""
+    _m = show_auth_mask("正在登录", [("验证账号", "on"), ("同步云端数据", "off")])
+    try:
+        _status, _canon, _fresh = storage.authenticate(_auth["name"], _auth["pin"])
+    except Exception as e:
+        # 这里一律塌缩成"网络异常"，异常对象不留痕就永远分不清凭据过期/配额撞满/网络抖动
+        _log.error("login_error name=%s err=%s", _auth.get("name"), e)
+        _status, _canon, _fresh = "error", None, None
+    if _fresh is not None:
+        st.session_state[K_NAMES] = _fresh  # 顺手刷新会话名单缓存
+    st.session_state.pop(K_AUTH, None)
+    if _status == "ok" and _canon:
+        st.session_state[K_USER] = _canon
+        show_auth_mask("正在登录", [("验证账号", "done"), ("同步云端数据", "on")], ph=_m)
+        try:
+            storage.sync_local(_canon)
+        except Exception as e:  # 同步失败不阻塞进入，侧栏🔄可重同步
+            _log.warning("post_login_sync_failed user=%s err=%s", _canon, e)
+        st.session_state[K_SYNCED] = True
+    elif _status == "pending":
+        st.session_state[K_ACTIVATING] = _canon
+    elif _status == "no_user":
+        st.session_state[K_LOGIN_ERR] = "账号不存在，请联系管理员开通"
+    elif _status == "bad_pin":
+        st.session_state[K_LOGIN_ERR] = "账号或密码不对"
+    elif _status == "locked":
+        st.session_state[K_LOGIN_ERR] = "失败次数过多，账号已锁定，请 15 分钟后重试"
+    else:
+        st.session_state[K_LOGIN_ERR] = "网络异常，请稍后重试"
+    if _status in ("no_user", "bad_pin", "locked"):
+        _log.warning("auth_denied name=%s status=%s", _auth.get("name"), _status)
+    st.rerun()
+
+
+def _handle_activate_stage(_auth: dict) -> None:
+    """激活阶段：首次设置 PIN，成功则同步云端数据。"""
+    _m = show_auth_mask("正在设置 PIN", [("写入云端", "on"), ("同步云端数据", "off")])
+    try:
+        _ok, _msg = storage.set_pin(_auth["who"], _auth["pin"], _auth["pin2"])
+    except Exception as e:
+        _log.error("set_pin_error user=%s err=%s", _auth.get("who"), e)
+        _ok, _msg = False, "网络异常，请稍后重试"
+    st.session_state.pop(K_AUTH, None)
+    if _ok:
+        st.session_state.pop(K_ACTIVATING, None)
+        st.session_state[K_USER] = _auth["who"]
+        show_auth_mask("正在设置 PIN", [("写入云端", "done"), ("同步云端数据", "on")], ph=_m)
+        try:
+            storage.sync_local(_auth["who"])
+        except Exception as e:  # 同步失败不阻塞进入
+            _log.warning("post_setpin_sync_failed user=%s err=%s", _auth.get("who"), e)
+        st.session_state[K_SYNCED] = True
+    else:
+        st.session_state[K_ACT_ERR] = _msg  # activating 保留，回设置 PIN 页报错
+    st.rerun()
+
+
+def _handle_bootstrap_stage(_auth: dict) -> None:
+    """自举阶段：创建首个管理员账号，成功则同步云端数据。"""
+    _m = show_auth_mask("正在创建账号", [("创建管理员账号", "on"), ("同步云端数据", "off")])
+    try:
+        _fresh = storage.list_users_fresh()
+        if _fresh:  # 防呆：自举页是会话缓存名单渲染的，可能已过期
+            st.session_state[K_NAMES] = _fresh
+            _ok, _msg = False, "系统已有账号，请直接登录"
+        else:
+            _ok, _msg = storage.create_user(
+                _auth["name"], _auth["pin"], _auth["pin2"], role="admin"
+            )
+    except Exception as e:
+        _log.error("bootstrap_error name=%s err=%s", _auth.get("name"), e)
+        _ok, _msg = False, "网络异常，请稍后重试"
+    st.session_state.pop(K_AUTH, None)
+    if _ok:
+        st.session_state[K_NAMES] = [_auth["name"]]
+        st.session_state[K_USER] = _auth["name"]
+        show_auth_mask("正在创建账号", [("创建管理员账号", "done"), ("同步云端数据", "on")], ph=_m)
+        try:
+            storage.sync_local(_auth["name"])
+        except Exception as e:  # 同步失败不阻塞进入
+            _log.warning("post_bootstrap_sync_failed user=%s err=%s", _auth.get("name"), e)
+        st.session_state[K_SYNCED] = True
+    elif _msg == "系统已有账号，请直接登录":
+        st.session_state[K_LOGIN_ERR] = _msg  # 名单已刷新，下一趟进登录页报错
+    else:
+        st.session_state[K_BOOT_ERR] = _msg
+    st.rerun()
+
+
 def require_user() -> str:
     """认证门闸：未登录则渲染登录页并 st.stop()；通过则返回用户名（含会话首同步）。
 
@@ -204,135 +297,18 @@ def require_user() -> str:
         st.stop()
     else:  # sheets 就绪 → 名字+PIN 门闸
         if K_USER not in st.session_state:
-            _login_ph = (
-                st.empty()
-            )  # 登录页统一挂载点：每趟运行都在门闸首位创建，保证 delta 路径稳定
+            _login_ph = st.empty()  # 登录页统一挂载点：每趟运行都在门闸首位创建，保证 delta 路径稳定
             _auth = st.session_state.get(K_AUTH)
             if _auth is not None:
                 # —— 第二阶段（点击后的下一趟运行）：先挂整屏「登录中」遮罩，再做一切网络校验/同步。
                 # 点击那一趟零网络请求（用户名单走会话缓存），遮罩因此能在点击后立即出现。——
                 _stage = _auth.get("stage")
                 if _stage == "login":
-                    _m = show_auth_mask(
-                        "正在登录", [("验证账号", "on"), ("同步云端数据", "off")]
-                    )
-                    try:
-                        _status, _canon, _fresh = storage.authenticate(
-                            _auth["name"], _auth["pin"]
-                        )
-                    except Exception as e:
-                        # 这里一律塌缩成"网络异常"，异常对象不留痕就永远分不清凭据过期/配额撞满/网络抖动
-                        _log.error("login_error name=%s err=%s", _auth.get("name"), e)
-                        _status, _canon, _fresh = "error", None, None
-                    if _fresh is not None:
-                        st.session_state[K_NAMES] = _fresh  # 顺手刷新会话名单缓存
-                    st.session_state.pop(K_AUTH, None)
-                    if _status == "ok" and _canon:
-                        st.session_state[K_USER] = _canon
-                        show_auth_mask(
-                            "正在登录",
-                            [("验证账号", "done"), ("同步云端数据", "on")],
-                            ph=_m,
-                        )
-                        try:
-                            storage.sync_local(_canon)
-                        except Exception as e:  # 同步失败不阻塞进入，侧栏🔄可重同步
-                            _log.warning(
-                                "post_login_sync_failed user=%s err=%s", _canon, e
-                            )
-                        st.session_state[K_SYNCED] = True
-                    elif _status == "pending":
-                        st.session_state[K_ACTIVATING] = _canon
-                    elif _status == "no_user":
-                        st.session_state[K_LOGIN_ERR] = "账号不存在，请联系管理员开通"
-                    elif _status == "bad_pin":
-                        st.session_state[K_LOGIN_ERR] = "账号或密码不对"
-                    elif _status == "locked":
-                        st.session_state[K_LOGIN_ERR] = (
-                            "失败次数过多，账号已锁定，请 15 分钟后重试"
-                        )
-                    else:
-                        st.session_state[K_LOGIN_ERR] = "网络异常，请稍后重试"
-                    if _status in ("no_user", "bad_pin", "locked"):
-                        _log.warning(
-                            "auth_denied name=%s status=%s", _auth.get("name"), _status
-                        )
-                    st.rerun()
+                    _handle_login_stage(_auth)
                 elif _stage == "activate":
-                    _m = show_auth_mask(
-                        "正在设置 PIN", [("写入云端", "on"), ("同步云端数据", "off")]
-                    )
-                    try:
-                        _ok, _msg = storage.set_pin(
-                            _auth["who"], _auth["pin"], _auth["pin2"]
-                        )
-                    except Exception as e:
-                        _log.error("set_pin_error user=%s err=%s", _auth.get("who"), e)
-                        _ok, _msg = False, "网络异常，请稍后重试"
-                    st.session_state.pop(K_AUTH, None)
-                    if _ok:
-                        st.session_state.pop(K_ACTIVATING, None)
-                        st.session_state[K_USER] = _auth["who"]
-                        show_auth_mask(
-                            "正在设置 PIN",
-                            [("写入云端", "done"), ("同步云端数据", "on")],
-                            ph=_m,
-                        )
-                        try:
-                            storage.sync_local(_auth["who"])
-                        except Exception as e:  # 同步失败不阻塞进入
-                            _log.warning(
-                                "post_setpin_sync_failed user=%s err=%s",
-                                _auth.get("who"),
-                                e,
-                            )
-                        st.session_state[K_SYNCED] = True
-                    else:
-                        st.session_state[K_ACT_ERR] = (
-                            _msg  # activating 保留，回设置 PIN 页报错
-                        )
-                    st.rerun()
+                    _handle_activate_stage(_auth)
                 elif _stage == "bootstrap":
-                    _m = show_auth_mask(
-                        "正在创建账号", [("创建管理员账号", "on"), ("同步云端数据", "off")]
-                    )
-                    try:
-                        _fresh = storage.list_users_fresh()
-                        if _fresh:  # 防呆：自举页是会话缓存名单渲染的，可能已过期
-                            st.session_state[K_NAMES] = _fresh
-                            _ok, _msg = False, "系统已有账号，请直接登录"
-                        else:
-                            _ok, _msg = storage.create_user(
-                                _auth["name"], _auth["pin"], _auth["pin2"], role="admin"
-                            )
-                    except Exception as e:
-                        _log.error("bootstrap_error name=%s err=%s", _auth.get("name"), e)
-                        _ok, _msg = False, "网络异常，请稍后重试"
-                    st.session_state.pop(K_AUTH, None)
-                    if _ok:
-                        st.session_state[K_NAMES] = [_auth["name"]]
-                        st.session_state[K_USER] = _auth["name"]
-                        show_auth_mask(
-                            "正在创建账号",
-                            [("创建管理员账号", "done"), ("同步云端数据", "on")],
-                            ph=_m,
-                        )
-                        try:
-                            storage.sync_local(_auth["name"])
-                        except Exception as e:  # 同步失败不阻塞进入
-                            _log.warning(
-                                "post_bootstrap_sync_failed user=%s err=%s",
-                                _auth.get("name"),
-                                e,
-                            )
-                        st.session_state[K_SYNCED] = True
-                    elif _msg == "系统已有账号，请直接登录":
-                        st.session_state[K_LOGIN_ERR] = (
-                            _msg  # 名单已刷新，下一趟进登录页报错
-                        )
-                    else:
-                        st.session_state[K_BOOT_ERR] = _msg
-                    st.rerun()
+                    _handle_bootstrap_stage(_auth)
                 else:
                     st.session_state.pop(K_AUTH, None)  # 未知阶段：丢弃，回登录页
                     st.rerun()
